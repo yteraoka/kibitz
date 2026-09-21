@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ type opencodeConfig struct {
 	Model      string               `json:"model,omitempty"`
 	Permission permissions          `json:"permission"`
 	MCP        map[string]MCPServer `json:"mcp,omitempty"`
+	Provider   map[string]any       `json:"provider,omitempty"`
 }
 
 // permissions mirrors OpenCode's permission block. Each value is either an
@@ -65,7 +67,7 @@ func answerPermissions() permissions {
 	}
 }
 
-func (r *Runner) writeConfig(path string, req reviewer.Request) error {
+func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Request) error {
 	model := req.Model
 	if model == "" {
 		model = r.cfg.Model
@@ -79,6 +81,16 @@ func (r *Runner) writeConfig(path string, req reviewer.Request) error {
 	}
 	if req.Mode == reviewer.ModeAnswer {
 		cfg.Permission = answerPermissions()
+	}
+
+	// A model OpenCode's catalog does not know about is declared here, with a
+	// credential minted for this job.
+	if r.cfg.CustomProvider.Serves(model) {
+		block, err := r.cfg.CustomProvider.block(ctx, model)
+		if err != nil {
+			return err
+		}
+		cfg.Provider = block
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")

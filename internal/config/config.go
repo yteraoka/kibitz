@@ -151,11 +151,20 @@ type GitHubApp struct {
 	BaseURL        string // set for GitHub Enterprise Server
 }
 
-// Vertex holds the Google Cloud settings OpenCode needs to reach Claude on
-// Vertex AI. Authentication is ADC (Workload Identity), so there is no key.
+// Vertex holds the Google Cloud settings OpenCode needs to reach Vertex AI.
+// Authentication is ADC (Workload Identity), so there is no key.
 type Vertex struct {
 	ProjectID string
 	Location  string
+	// MaaSProviderID is the provider id kibitz declares for Vertex AI's Model
+	// as a Service partner models that OpenCode's own catalog does not list,
+	// such as GLM. A model named "<id>/publisher/model" is served through
+	// Vertex's OpenAI-compatible endpoint with a token minted from ADC.
+	MaaSProviderID string
+	// MaaSBaseURL overrides the endpoint kibitz derives from the project and
+	// location. It exists because the derived form is the part most likely to
+	// need adjusting, and adjusting configuration beats waiting for a release.
+	MaaSBaseURL string
 }
 
 // OpenCode configures how the worker drives the agent engine.
@@ -305,8 +314,10 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
 			FallbackModel: l.str("KIBITZ_MODEL_FALLBACK", ""),
 			Vertex: Vertex{
-				ProjectID: l.str("GOOGLE_CLOUD_PROJECT", ""),
-				Location:  l.str("VERTEX_LOCATION", "global"),
+				ProjectID:      l.str("GOOGLE_CLOUD_PROJECT", ""),
+				Location:       l.str("VERTEX_LOCATION", "global"),
+				MaaSProviderID: l.str("KIBITZ_VERTEX_MAAS_PROVIDER_ID", "vertex-maas"),
+				MaaSBaseURL:    l.str("KIBITZ_VERTEX_MAAS_BASE_URL", ""),
 			},
 			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),

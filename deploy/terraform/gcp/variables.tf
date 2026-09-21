@@ -40,8 +40,13 @@ variable "model" {
     both Gemini and Claude; Claude there has to be requested first, and its ids
     carry a version suffix (google-vertex/claude-opus-5@default).
 
+    Vertex Model Garden's partner models, GLM among them, are reached with
+    the vertex-maas prefix (vertex-maas/zai-org/glm-5.2-maas). They also
+    authenticate with the service account, so they need no key either;
+    kibitz declares them to the agent because its catalog does not list them.
+
     For a provider that authenticates with an API key, such as GLM through
-    Zhipu (zai/glm-5.3), set model_api_key_env_name as well.
+    Zhipu directly (zai/glm-5.3), set model_api_key_env_name as well.
 
     `opencode models` inside the worker image lists what a given set of
     credentials can reach.
@@ -67,6 +72,16 @@ variable "vertex_location" {
   description = "Vertex AI location. 'global' has the best availability; pin a region only for data residency, and check that the model is served there."
   type        = string
   default     = "global"
+}
+
+variable "vertex_maas_base_url" {
+  description = <<-EOT
+    Overrides the OpenAI-compatible endpoint kibitz derives for Vertex Model
+    Garden partner models. Leave empty unless the derived URL turns out to be
+    wrong; docs/deployment.md has the one-line check.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "allowed_repos" {

@@ -204,6 +204,13 @@ resource "google_cloud_run_v2_service" "worker" {
         name  = "VERTEX_LOCATION"
         value = var.vertex_location
       }
+      dynamic "env" {
+        for_each = var.vertex_maas_base_url != "" ? [var.vertex_maas_base_url] : []
+        content {
+          name  = "KIBITZ_VERTEX_MAAS_BASE_URL"
+          value = env.value
+        }
+      }
       env {
         name  = "KIBITZ_GITHUB_APP_ID"
         value = var.github_app_id

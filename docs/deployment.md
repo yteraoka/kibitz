@@ -34,11 +34,59 @@ docker run --rm --entrypoint opencode \
 | Gemini (Vertex) | `google-vertex/gemini-3.1-pro-preview` | サービスアカウント (ADC) | **既定。申請不要、シークレット不要** |
 | Gemini (Vertex, 安価) | `google-vertex/gemini-3.8-flash` | 同上 | 速くて安い。レビュー品質は落ちる |
 | Claude (Vertex) | `google-vertex/claude-opus-5@default` | 同上 | **Vertex での Anthropic モデル利用申請が必要**。ID に `@default` が付く点に注意 |
-| GLM (Z.AI) | `zai/glm-5.3` | `ZHIPU_API_KEY` | `model_api_key_env_name = "ZHIPU_API_KEY"` を設定する |
+| **GLM (Vertex Model Garden)** | `vertex-maas/zai-org/glm-5.2-maas` | サービスアカウント (ADC) | **シークレット不要**。opencode のカタログには無いので kibitz が自動でプロバイダを宣言する (下記) |
+| GLM (Z.AI 直) | `zai/glm-5.3` | `ZHIPU_API_KEY` | `model_api_key_env_name = "ZHIPU_API_KEY"` を設定する |
 | GLM (Coding Plan) | `zai-coding-plan/glm-5.3` | `ZHIPU_API_KEY` | GLM Coding Plan の契約がある場合 |
 | OpenRouter 経由 | `openrouter/...` | `OPENROUTER_API_KEY` | `model_api_key_env_name = "OPENROUTER_API_KEY"` |
 
 `google-vertex` は **Gemini と Claude の両方**を提供する。Claude 側だけが申請を要する。
+
+### Vertex Model Garden のパートナーモデル (GLM など)
+
+Vertex AI は Model Garden でパートナーのモデルを MaaS として提供している
+(例: [GLM 5.2](https://console.cloud.google.com/agent-platform/publishers/zai-org/model-garden/glm-5.2-maas))。
+これらは **opencode のモデルカタログ (models.dev) には載っていない**ため、
+プロバイダとして宣言してやる必要がある。kibitz はこれを自動で行う。
+
+`KIBITZ_MODEL` が `vertex-maas/` で始まっていると、ワーカーはジョブごとに
+
+1. ADC から OAuth アクセストークンを発行し
+2. Vertex の OpenAI 互換エンドポイントを指すプロバイダ定義を生成して
+3. opencode の設定に書き込む
+
+トークンは 1 時間で失効するが、**設定はジョブごとに生成し直す**ので問題にならない
+(ジョブの上限は 15 分)。API キーは不要で、認証は Gemini と同じサービスアカウントのまま。
+
+```hcl
+model = "vertex-maas/zai-org/glm-5.2-maas"
+# model_api_key_env_name は不要
+```
+
+**先にエンドポイントを 1 回確認することを強く勧める。** kibitz が組み立てる URL の形と
+モデル ID が実際と合っているかは、次の 1 コマンドで分かる。
+
+```bash
+PROJECT=$(gcloud config get-value project)
+LOCATION=global   # または asia-northeast1 など
+HOST=$([ "$LOCATION" = global ] && echo aiplatform.googleapis.com || echo $LOCATION-aiplatform.googleapis.com)
+
+curl -sS -X POST \
+  "https://$HOST/v1beta1/projects/$PROJECT/locations/$LOCATION/endpoints/openapi/chat/completions" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"zai-org/glm-5.2-maas","messages":[{"role":"user","content":"hi"}]}'
+```
+
+応答が返れば `vertex-maas/zai-org/glm-5.2-maas` がそのまま使える。
+URL の形やモデル ID が違った場合は、コードを直さなくても設定で合わせられる。
+
+| 環境変数 / 変数 | 用途 |
+| --- | --- |
+| `KIBITZ_VERTEX_MAAS_BASE_URL` | 組み立てた URL を上書きする (`/chat/completions` は opencode が付けるので、その手前まで) |
+| `KIBITZ_VERTEX_MAAS_PROVIDER_ID` | プロバイダ ID を変える (既定 `vertex-maas`) |
+
+Model Garden 側で対象モデルを**有効化 (Enable) しておく**必要がある点は、
+Anthropic のモデルと同じ。
 
 ### API キーが必要なプロバイダを使う場合
 

@@ -35,6 +35,8 @@ type Config struct {
 	// Env is added to the process environment, for provider credentials such
 	// as GOOGLE_CLOUD_PROJECT.
 	Env []string
+	// CustomProvider declares a provider OpenCode's catalog does not list.
+	CustomProvider *CustomProvider
 }
 
 // MCPServer is one entry of OpenCode's mcp configuration.
@@ -79,7 +81,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	defer func() { _ = os.RemoveAll(jobDir) }()
 
 	configPath := filepath.Join(jobDir, "opencode.json")
-	if err := r.writeConfig(configPath, req); err != nil {
+	if err := r.writeConfig(ctx, configPath, req); err != nil {
 		return nil, err
 	}
 

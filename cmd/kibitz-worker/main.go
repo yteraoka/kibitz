@@ -31,7 +31,12 @@ import (
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
+
+	"golang.org/x/oauth2/google"
 )
+
+// cloudPlatformScope is the OAuth scope Vertex AI requires.
+const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
 // version is set at build time with -ldflags.
 var version = "dev"
@@ -224,11 +229,12 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 	}
 
 	engine := opencode.New(opencode.Config{
-		Bin:         cfg.OpenCode.Bin,
-		Model:       cfg.OpenCode.Model,
-		ReviewAgent: cfg.OpenCode.ReviewAgent,
-		AnswerAgent: cfg.OpenCode.AnswerAgent,
-		Env:         agentEnv(cfg, logger),
+		Bin:            cfg.OpenCode.Bin,
+		Model:          cfg.OpenCode.Model,
+		ReviewAgent:    cfg.OpenCode.ReviewAgent,
+		AnswerAgent:    cfg.OpenCode.AnswerAgent,
+		Env:            agentEnv(cfg, logger),
+		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
 
 	return &worker.ReviewJob{
@@ -251,6 +257,47 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		MaxPostsPerHour: cfg.MaxPostsPerHour,
 		Metrics:         metrics,
 	}, nil
+}
+
+// vertexMaaSProvider declares Vertex AI's Model as a Service partner models,
+// which OpenCode's catalog does not list. GLM is the reason this exists: it is
+// served on Vertex, so it needs no API key -- the credential is an OAuth token
+// minted from the worker's own service account, the same identity Gemini uses.
+//
+// Returns nil when the configured model is not one of them, which leaves the
+// generated config untouched.
+func vertexMaaSProvider(cfg *config.Worker, logger *slog.Logger) *opencode.CustomProvider {
+	v := cfg.OpenCode.Vertex
+	provider := &opencode.CustomProvider{
+		ID:      v.MaaSProviderID,
+		Name:    "Vertex AI Model Garden",
+		BaseURL: v.MaaSBaseURL,
+	}
+	if !provider.Serves(cfg.OpenCode.Model) {
+		return nil
+	}
+	if provider.BaseURL == "" {
+		provider.BaseURL = opencode.VertexMaaSBaseURL(v.ProjectID, v.Location)
+	}
+
+	provider.Token = func(ctx context.Context) (string, error) {
+		source, err := google.DefaultTokenSource(ctx, cloudPlatformScope)
+		if err != nil {
+			return "", fmt.Errorf("finding application default credentials: %w", err)
+		}
+		token, err := source.Token()
+		if err != nil {
+			return "", fmt.Errorf("minting an access token: %w", err)
+		}
+		return token.AccessToken, nil
+	}
+
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "declaring a Vertex AI Model Garden provider",
+		slog.String("provider", provider.ID),
+		slog.String("base_url", provider.BaseURL),
+		slog.String("model", cfg.OpenCode.Model),
+	)
+	return provider
 }
 
 // agentEnv builds the environment the agent runs with: the Vertex AI settings,

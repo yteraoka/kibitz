@@ -28,7 +28,12 @@ alert_notification_channels = []
 #   model = "google-vertex/gemini-3.8-flash"         # 安価・高速
 #   model = "google-vertex/claude-opus-5@default"    # Anthropic の利用申請が必要
 #
-# GLM など API キーで認証するプロバイダを使う場合は、キーを入れる変数名を指定する。
+# Vertex Model Garden のパートナーモデル (GLM など) も同じ認証で使える。
+# opencode のカタログに無いので kibitz がプロバイダを宣言する。シークレット不要。
+#
+#   model = "vertex-maas/zai-org/glm-5.2-maas"
+#
+# Z.AI などに直接つなぐ場合は、キーを入れる変数名を指定する。
 # Secret Manager のシークレットが作られるので、値は gcloud で投入する。
 #
 #   model                  = "zai/glm-5.3"

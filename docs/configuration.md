@@ -54,6 +54,8 @@
 | `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替 |
 | `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
 | `VERTEX_LOCATION` | `global` | Vertex AI のリージョン。データ所在地要件があれば `asia-northeast1` 等を指定 |
+| `KIBITZ_VERTEX_MAAS_PROVIDER_ID` | `vertex-maas` | Vertex Model Garden のパートナーモデル (GLM など) 用に宣言するプロバイダ ID |
+| `KIBITZ_VERTEX_MAAS_BASE_URL` | (プロジェクトとリージョンから生成) | 上記の OpenAI 互換エンドポイントを上書きする |
 | `KIBITZ_MAX_COMMENTS` | `20` | 1 PR あたりの投稿上限 |
 | `KIBITZ_MIN_SEVERITY` | `medium` | これ未満の指摘は投稿しない |
 | `KIBITZ_SKIP_DRAFT` | `true` | draft PR はレビューしない (明示コマンドがあれば実行) |
