@@ -1,0 +1,120 @@
+{
+  "action": "created",
+  "comment": {
+    "id": 666000222,
+    "user": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "created_at": "2026-09-19T11:02:00Z",
+    "html_url": "https://github.com/yteraoka/kibitz/pull/42#discussion_r666000222",
+    "path": "internal/queue/sqs/subscriber.go",
+    "diff_hunk": "@@ -80,6 +80,12 @@ func (s *Subscriber) Receive(",
+    "line": 88,
+    "original_line": 88,
+    "side": "RIGHT",
+    "commit_id": "9f8e7d6000000000000000000000000000000000",
+    "in_reply_to_id": 666000111,
+    "pull_request_review_id": 999000,
+    "body": "@kibitz なぜこの実装だと競合するのですか?"
+  },
+  "pull_request": {
+    "id": 998877,
+    "number": 42,
+    "state": "open",
+    "locked": false,
+    "title": "Add the SQS subscriber",
+    "user": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "body": "Implements the FIFO subscriber with a visibility heartbeat.\n\nRefs #12",
+    "created_at": "2026-09-18T02:04:11Z",
+    "updated_at": "2026-09-19T11:00:00Z",
+    "html_url": "https://github.com/yteraoka/kibitz/pull/42",
+    "draft": false,
+    "merged": false,
+    "merge_commit_sha": null,
+    "changed_files": 12,
+    "additions": 431,
+    "deletions": 17,
+    "head": {
+      "label": "yteraoka:feat/sqs",
+      "ref": "feat/sqs",
+      "sha": "abc1230000000000000000000000000000000000",
+      "user": {
+        "id": 1001,
+        "login": "yteraoka",
+        "type": "User"
+      },
+      "repo": {
+        "id": 5551212,
+        "name": "kibitz",
+        "full_name": "yteraoka/kibitz",
+        "owner": {
+          "id": 1001,
+          "login": "yteraoka",
+          "type": "User"
+        },
+        "private": true,
+        "fork": false,
+        "html_url": "https://github.com/yteraoka/kibitz",
+        "clone_url": "https://github.com/yteraoka/kibitz.git",
+        "git_url": "git://github.com/yteraoka/kibitz.git",
+        "default_branch": "main",
+        "language": "Go"
+      }
+    },
+    "base": {
+      "label": "yteraoka:main",
+      "ref": "main",
+      "sha": "def4560000000000000000000000000000000000",
+      "user": {
+        "id": 1001,
+        "login": "yteraoka",
+        "type": "User"
+      },
+      "repo": {
+        "id": 5551212,
+        "name": "kibitz",
+        "full_name": "yteraoka/kibitz",
+        "owner": {
+          "id": 1001,
+          "login": "yteraoka",
+          "type": "User"
+        },
+        "private": true,
+        "fork": false,
+        "html_url": "https://github.com/yteraoka/kibitz",
+        "clone_url": "https://github.com/yteraoka/kibitz.git",
+        "git_url": "git://github.com/yteraoka/kibitz.git",
+        "default_branch": "main",
+        "language": "Go"
+      }
+    }
+  },
+  "repository": {
+    "id": 5551212,
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "owner": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "private": true,
+    "fork": false,
+    "html_url": "https://github.com/yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "git_url": "git://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "language": "Go"
+  },
+  "sender": {
+    "id": 1001,
+    "login": "yteraoka",
+    "type": "User"
+  }
+}

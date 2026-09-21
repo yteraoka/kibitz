@@ -1,0 +1,34 @@
+{
+  "zen": "Non-blocking is better than blocking.",
+  "hook_id": 12345678,
+  "hook": {
+    "type": "Repository",
+    "id": 12345678,
+    "events": [
+      "pull_request",
+      "issue_comment"
+    ]
+  },
+  "repository": {
+    "id": 5551212,
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "owner": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "private": true,
+    "fork": false,
+    "html_url": "https://github.com/yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "git_url": "git://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "language": "Go"
+  },
+  "sender": {
+    "id": 1001,
+    "login": "yteraoka",
+    "type": "User"
+  }
+}

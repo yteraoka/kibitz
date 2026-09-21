@@ -1,0 +1,51 @@
+{
+  "action": "created",
+  "issue": {
+    "id": 44556677,
+    "number": 42,
+    "title": "Add the SQS subscriber",
+    "user": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "state": "open",
+    "html_url": "https://github.com/yteraoka/kibitz/pull/42",
+    "pull_request": {
+      "html_url": "https://github.com/yteraoka/kibitz/pull/42"
+    }
+  },
+  "comment": {
+    "id": 555000113,
+    "user": {
+      "id": 2002,
+      "login": "kibitz[bot]",
+      "type": "Bot"
+    },
+    "created_at": "2026-09-19T10:25:00Z",
+    "html_url": "https://github.com/yteraoka/kibitz/pull/42#issuecomment-555000113",
+    "body": "<!-- kibitz:summary -->\nこの PR は SQS subscriber を追加します。"
+  },
+  "repository": {
+    "id": 5551212,
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "owner": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "private": true,
+    "fork": false,
+    "html_url": "https://github.com/yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "git_url": "git://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "language": "Go"
+  },
+  "sender": {
+    "id": 2002,
+    "login": "kibitz[bot]",
+    "type": "Bot"
+  }
+}

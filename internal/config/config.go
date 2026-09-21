@@ -126,7 +126,11 @@ type Policy struct {
 	// AllowedRepos are glob patterns matched against "owner/name".
 	AllowedRepos []string
 	Mention      string
-	// MaxEventAge bounds how old a webhook may be, as replay protection.
+	// MaxEventAge bounds how old a webhook may be. It is disabled by default:
+	// the signature already authenticates the payload, duplicate deliveries
+	// are suppressed by delivery id in the worker, and an operator pressing
+	// "Redeliver" on a failed hook hours later must still get a review rather
+	// than a silent no-op.
 	MaxEventAge time.Duration
 }
 
@@ -219,7 +223,7 @@ func LoadServer(env Lookup) (*Server, error) {
 			BotLogins:    l.list("KIBITZ_BOT_LOGINS", nil),
 			AllowedRepos: l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
 			Mention:      l.str("KIBITZ_MENTION", "@kibitz"),
-			MaxEventAge:  l.duration("KIBITZ_MAX_EVENT_AGE", 5*time.Minute),
+			MaxEventAge:  l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
 		},
 	}
 

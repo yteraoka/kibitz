@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "github:7f3cissue_comment.created",
+  "occurred_at": "2026-09-19T10:15:00Z",
+  "source": {
+    "platform": "github",
+    "instance_url": "https://github.com",
+    "delivery_id": "7f3cissue_comment.created",
+    "event_name": "issue_comment.created"
+  },
+  "kind": "comment.created",
+  "repository": {
+    "id": "5551212",
+    "owner": "yteraoka",
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "visibility": "private"
+  },
+  "pull_request": {
+    "number": 42,
+    "title": "Add the SQS subscriber",
+    "description": "Implements the FIFO subscriber with a visibility heartbeat.",
+    "state": "open",
+    "url": "https://github.com/yteraoka/kibitz/pull/42",
+    "author": {
+      "id": "1001",
+      "login": "yteraoka"
+    },
+    "source": {
+      "branch": "",
+      "sha": ""
+    },
+    "target": {
+      "branch": "",
+      "sha": ""
+    }
+  },
+  "comment": {
+    "id": "555000111",
+    "body": "@kibitz review --focus security",
+    "author": {
+      "id": "1001",
+      "login": "yteraoka"
+    },
+    "url": "https://github.com/yteraoka/kibitz/pull/42#issuecomment-555000111"
+  },
+  "actor": {
+    "id": "1001",
+    "login": "yteraoka"
+  }
+}

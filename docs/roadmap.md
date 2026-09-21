@@ -33,7 +33,7 @@ Phase 2 の時点で「GitHub の PR に AI レビューが付く」状態を作
 (`cmd` は配線のみでテストなし)。`make up` と Dockerfile のビルドは
 CI の docker ジョブで初めて実行される。
 
-## Phase 1: Webhook 受信 (GitHub) と正規化 (目安 1 週)
+## Phase 1: Webhook 受信 (GitHub) と正規化 (完了)
 
 - `internal/event` — 正規化イベントのスキーマとバージョニング
 - `internal/webhook` — `Handler` インターフェース
@@ -44,6 +44,14 @@ CI の docker ジョブで初めて実行される。
 
 **完了条件**: 実 payload を流すと正しい `ReviewEvent` が生成され、対象外は 204。
 署名不一致・ボディ改竄・サイズ超過が拒否される。テストカバレッジ 80% 以上。
+
+実装済み。`POST /webhook/github` が稼働し、対象イベントは 202、
+対象外 (ping / ラベル変更 / Issue へのコメント / kibitz 自身の発言) は 204、
+署名不一致は 401 を返す。カバレッジは event 88%、policy 94%、webhook 95%、github 90%。
+
+実装中に 1 点、設計を変えた: `KIBITZ_MAX_EVENT_AGE` による古い配送の破棄を**既定で無効**にした。
+5 分の既定値だと、失敗した配送を GitHub の Redeliver で後から再送する正当な運用が
+黙って 204 になってしまうため。リプレイ対策は Phase 3 の配送 ID 重複排除が主軸。
 
 ## Phase 2: 最初のエンドツーエンド (GitHub + Pub/Sub + OpenCode) (目安 2 週)
 

@@ -1,0 +1,49 @@
+{
+  "action": "created",
+  "issue": {
+    "id": 44556678,
+    "number": 12,
+    "title": "Support Azure DevOps",
+    "user": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "state": "open",
+    "html_url": "https://github.com/yteraoka/kibitz/issues/12",
+    "body": "Service hooks have no HMAC."
+  },
+  "comment": {
+    "id": 555000112,
+    "user": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "created_at": "2026-09-19T10:20:00Z",
+    "html_url": "https://github.com/yteraoka/kibitz/issues/12#issuecomment-555000112",
+    "body": "@kibitz review"
+  },
+  "repository": {
+    "id": 5551212,
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "owner": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "private": true,
+    "fork": false,
+    "html_url": "https://github.com/yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "git_url": "git://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "language": "Go"
+  },
+  "sender": {
+    "id": 1001,
+    "login": "yteraoka",
+    "type": "User"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "github:7f3cpull_request.opened_fork",
+  "occurred_at": "2026-09-18T02:11:04Z",
+  "source": {
+    "platform": "github",
+    "instance_url": "https://github.com",
+    "delivery_id": "7f3cpull_request.opened_fork",
+    "event_name": "pull_request.opened"
+  },
+  "kind": "pr.opened",
+  "repository": {
+    "id": "5551212",
+    "owner": "yteraoka",
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "visibility": "private"
+  },
+  "pull_request": {
+    "id": "998878",
+    "number": 43,
+    "title": "Fix a typo in the README",
+    "description": "Implements the FIFO subscriber with a visibility heartbeat.\n\nRefs #12",
+    "state": "open",
+    "url": "https://github.com/yteraoka/kibitz/pull/43",
+    "author": {
+      "id": "3003",
+      "login": "contributor"
+    },
+    "source": {
+      "branch": "typo",
+      "sha": "cccddd0000000000000000000000000000000000",
+      "repo_full_name": "contributor/kibitz"
+    },
+    "target": {
+      "branch": "main",
+      "sha": "def4560000000000000000000000000000000000",
+      "repo_full_name": "yteraoka/kibitz"
+    },
+    "is_fork": true,
+    "changed_files": 1
+  },
+  "actor": {
+    "id": "3003",
+    "login": "contributor"
+  }
+}

@@ -138,6 +138,25 @@ func (l *loader) duration(key string, def time.Duration) time.Duration {
 	return d
 }
 
+// durationOrZero is like duration but accepts 0 as a meaningful value,
+// for settings where zero means "disabled".
+func (l *loader) durationOrZero(key string, def time.Duration) time.Duration {
+	v, ok := l.raw(key)
+	if !ok {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		l.fail(key, "must be a duration such as 15m, got %q", v)
+		return def
+	}
+	if d < 0 {
+		l.fail(key, "must not be negative, got %q", v)
+		return def
+	}
+	return d
+}
+
 // list splits a comma-separated value, dropping empty entries.
 func (l *loader) list(key string, def []string) []string {
 	v, ok := l.raw(key)

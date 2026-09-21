@@ -93,6 +93,21 @@ curl -s localhost:8080/healthz    # {"status":"ok","version":"dev"}
 curl -s localhost:8081/healthz    # worker
 ```
 
+Webhook を手元で試す (署名付きで送る):
+
+```bash
+BODY=$(cat testdata/webhooks/github/pull_request.opened.json)
+SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac dev | awk '{print $2}')"
+curl -i -X POST localhost:8080/webhook/github \
+  -H "X-GitHub-Event: pull_request" \
+  -H "X-GitHub-Delivery: $(uuidgen)" \
+  -H "X-Hub-Signature-256: $SIG" \
+  --data-binary "$BODY"
+# 202 Accepted   … レビュー対象としてキューに載った
+# 204 No Content … 対象外 (ping、ラベル変更、kibitz 自身の発言など)
+# 401 Unauthorized … 署名不一致
+```
+
 設定が足りない場合は起動時に**不足しているものを全部まとめて**報告して終了する。
 
 ```
@@ -105,7 +120,7 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 
 ## ステータス
 
-**Phase 0 (土台) 完了。** 次は Phase 1 (GitHub Webhook の検証と正規化)。
+**Phase 1 まで完了。** 次は Phase 2 (Pub/Sub + Forge クライアント + OpenCode 実行)。
 進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
 
 | 項目 | 状態 |
@@ -115,5 +130,9 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 | 構造化ログとシークレットのマスク (`internal/telemetry`) | 完了 |
 | HTTP ミドルウェアとヘルスチェック (`internal/httpx`) | 完了 |
 | Dockerfile / docker compose / CI | 完了 |
-| Webhook の受信・正規化 | Phase 1 |
-| キュー、Forge クライアント、OpenCode 実行 | Phase 2 |
+| 正規化イベント (`internal/event`) | 完了 |
+| GitHub Webhook の検証・正規化 (`internal/webhook/github`) | 完了 |
+| トリガ判定とコマンド解析 (`internal/policy`) | 完了 |
+| キュー抽象化とインメモリ実装 (`internal/queue`) | 完了 |
+| Cloud Pub/Sub、Forge クライアント、OpenCode 実行 | Phase 2 |
+| GitLab / Azure DevOps | Phase 4 / 5 |

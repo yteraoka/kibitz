@@ -1,0 +1,102 @@
+{
+  "action": "opened",
+  "number": 43,
+  "pull_request": {
+    "id": 998878,
+    "number": 43,
+    "state": "open",
+    "locked": false,
+    "title": "Fix a typo in the README",
+    "user": {
+      "id": 3003,
+      "login": "contributor",
+      "type": "User"
+    },
+    "body": "Implements the FIFO subscriber with a visibility heartbeat.\n\nRefs #12",
+    "created_at": "2026-09-18T02:04:11Z",
+    "updated_at": "2026-09-18T02:11:04Z",
+    "html_url": "https://github.com/yteraoka/kibitz/pull/43",
+    "draft": false,
+    "merged": false,
+    "merge_commit_sha": null,
+    "changed_files": 1,
+    "additions": 431,
+    "deletions": 17,
+    "head": {
+      "label": "contributor:typo",
+      "ref": "typo",
+      "sha": "cccddd0000000000000000000000000000000000",
+      "user": {
+        "id": 3003,
+        "login": "contributor",
+        "type": "User"
+      },
+      "repo": {
+        "id": 7777,
+        "name": "kibitz",
+        "full_name": "contributor/kibitz",
+        "owner": {
+          "id": 3003,
+          "login": "contributor",
+          "type": "User"
+        },
+        "private": true,
+        "fork": true,
+        "html_url": "https://github.com/contributor/kibitz",
+        "clone_url": "https://github.com/contributor/kibitz.git",
+        "git_url": "git://github.com/yteraoka/kibitz.git",
+        "default_branch": "main",
+        "language": "Go"
+      }
+    },
+    "base": {
+      "label": "yteraoka:main",
+      "ref": "main",
+      "sha": "def4560000000000000000000000000000000000",
+      "user": {
+        "id": 1001,
+        "login": "yteraoka",
+        "type": "User"
+      },
+      "repo": {
+        "id": 5551212,
+        "name": "kibitz",
+        "full_name": "yteraoka/kibitz",
+        "owner": {
+          "id": 1001,
+          "login": "yteraoka",
+          "type": "User"
+        },
+        "private": true,
+        "fork": false,
+        "html_url": "https://github.com/yteraoka/kibitz",
+        "clone_url": "https://github.com/yteraoka/kibitz.git",
+        "git_url": "git://github.com/yteraoka/kibitz.git",
+        "default_branch": "main",
+        "language": "Go"
+      }
+    }
+  },
+  "repository": {
+    "id": 5551212,
+    "name": "kibitz",
+    "full_name": "yteraoka/kibitz",
+    "owner": {
+      "id": 1001,
+      "login": "yteraoka",
+      "type": "User"
+    },
+    "private": true,
+    "fork": false,
+    "html_url": "https://github.com/yteraoka/kibitz",
+    "clone_url": "https://github.com/yteraoka/kibitz.git",
+    "git_url": "git://github.com/yteraoka/kibitz.git",
+    "default_branch": "main",
+    "language": "Go"
+  },
+  "sender": {
+    "id": 3003,
+    "login": "contributor",
+    "type": "User"
+  }
+}

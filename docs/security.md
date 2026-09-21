@@ -19,7 +19,8 @@
   - 可能なら送信元 IP レンジ制限 (Azure DevOps のサービスタグ) を LB 側で設定
   - 受信したイベントの `resource` を鵜呑みにせず、**Azure DevOps API に問い合わせ直して
     PR の実体を確認する** (偽造 payload でレビューを走らせられないようにする)
-- リプレイ対策として配送 ID の重複排除 (7 日) と `occurred_at` の許容ずれ (既定 5 分) を見る。
+- リプレイ対策は配送 ID の重複排除 (7 日) を主軸とする。`occurred_at` による
+  古い配送の破棄は既定で無効 ([event-schema.md](event-schema.md))。
 
 ## 2. 認証情報
 

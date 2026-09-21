@@ -15,8 +15,13 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/config"
 	"github.com/yteraoka/kibitz/internal/httpx"
+	"github.com/yteraoka/kibitz/internal/policy"
+	"github.com/yteraoka/kibitz/internal/queue"
+	"github.com/yteraoka/kibitz/internal/queue/memory"
 	"github.com/yteraoka/kibitz/internal/run"
 	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/webhook"
+	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
 )
 
 // version is set at build time with -ldflags.
@@ -51,17 +56,39 @@ func realMain() error {
 		slog.Bool("webhooks_configured", cfg.Webhook.Configured()),
 	)
 	if !cfg.Webhook.Configured() {
-		// Not fatal yet: the webhook handlers arrive in Phase 1, and a health
-		// check should still come up so the container can be smoke tested.
 		logger.LogAttrs(ctx, slog.LevelWarn, "no webhook credentials configured; inbound webhooks will be rejected")
 	}
+
+	publisher, err := newPublisher(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := publisher.Close(); err != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "closing publisher", slog.String("error", err.Error()))
+		}
+	}()
+
+	triggers := policy.New(policy.Config{
+		BotLogins:    cfg.Policy.BotLogins,
+		AllowedRepos: cfg.Policy.AllowedRepos,
+		Mention:      cfg.Policy.Mention,
+		MaxEventAge:  cfg.Policy.MaxEventAge,
+	})
 
 	health := httpx.NewHealth(version)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
 	mux.HandleFunc("GET /readyz", health.Ready)
-	// Phase 1 registers POST /webhook/{github,gitlab,azuredevops} here.
+	mux.Handle("POST /webhook/github", webhook.NewReceiver(
+		githubhook.New(reveal(cfg.Webhook.GitHubSecrets)),
+		publisher,
+		triggers,
+		logger,
+		webhook.WithMaxBody(cfg.MaxBodyBytes),
+	))
+	// GitLab lands in Phase 4 and Azure DevOps in Phase 5.
 
 	handler := httpx.Chain(mux,
 		httpx.RequestID,
@@ -92,6 +119,28 @@ func realMain() error {
 	}
 	logger.LogAttrs(context.Background(), slog.LevelInfo, "stopped")
 	return nil
+}
+
+// newPublisher builds the queue publisher for the configured backend.
+func newPublisher(cfg *config.Server) (queue.Publisher, error) {
+	switch cfg.Queue.Backend {
+	case config.QueueMemory:
+		return memory.New(), nil
+	default:
+		// Pub/Sub arrives in Phase 2 and SQS in Phase X (docs/roadmap.md).
+		// Failing here is deliberate: a server that accepts webhooks and drops
+		// them would look healthy while losing every review.
+		return nil, fmt.Errorf("queue backend %q is not implemented yet; set KIBITZ_QUEUE_BACKEND=memory for now", cfg.Queue.Backend)
+	}
+}
+
+// reveal unwraps secrets at the point of use.
+func reveal(secrets []config.Secret) []string {
+	out := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		out = append(out, s.Reveal())
+	}
+	return out
 }
 
 // metricsMux serves the metrics listener. Metrics themselves are wired up in

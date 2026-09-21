@@ -227,3 +227,30 @@ func TestSecretNeverRenders(t *testing.T) {
 		t.Errorf("empty Secret rendered as %q, want empty", got)
 	}
 }
+
+// The replay window is off by default so that redelivering a failed webhook
+// hours later still produces a review.
+func TestMaxEventAgeDefaultsToDisabled(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Policy.MaxEventAge != 0 {
+		t.Errorf("MaxEventAge = %v, want it disabled", cfg.Policy.MaxEventAge)
+	}
+
+	env := minimalServerEnv()
+	env["KIBITZ_MAX_EVENT_AGE"] = "10m"
+	cfg, err = config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Policy.MaxEventAge != 10*time.Minute {
+		t.Errorf("MaxEventAge = %v, want 10m", cfg.Policy.MaxEventAge)
+	}
+
+	env["KIBITZ_MAX_EVENT_AGE"] = "-1m"
+	if _, err := config.LoadServer(config.MapEnv(env)); err == nil {
+		t.Error("a negative event age was accepted")
+	}
+}

@@ -22,6 +22,7 @@
 | `KIBITZ_BOT_LOGINS` | - | 自分自身の発言を無視するためのアカウント名 (プラットフォーム別) |
 | `KIBITZ_ALLOWED_REPOS` | `*` | 受け付けるリポジトリのグロブ (カンマ区切り) |
 | `KIBITZ_MENTION` | `@kibitz` | コマンドのメンション名 |
+| `KIBITZ_MAX_EVENT_AGE` | `0` (無効) | これより古い配送を破棄する。0 は無効 (下記) |
 
 ## 2. kibitz-worker (環境変数)
 
