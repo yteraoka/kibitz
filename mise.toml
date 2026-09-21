@@ -1,0 +1,9 @@
+# Tool versions for this repository. Install them with:
+#
+#   mise install
+#
+# Only Terraform is managed here. Go is pinned by go.mod and golangci-lint by
+# the Makefile, and having two mechanisms disagree about a version is worse
+# than having two mechanisms.
+[tools]
+terraform = "1.16.3"

@@ -23,6 +23,13 @@ Each component runs as its own service account: the server may publish and read
 the webhook secret, the worker may consume, write state, call Vertex AI and
 read the App key. Neither can do the other's job.
 
+## Terraform version
+
+The repository pins Terraform with [mise](https://mise.jdx.dev); `mise install`
+at the repository root gives you the version this configuration is developed
+against (`mise.toml`). `versions.tf` keeps a lower bound rather than a pin, so
+the module still works for anyone not using mise.
+
 ## Applying it
 
 The first apply is staged, because images have to be pushed to a registry this

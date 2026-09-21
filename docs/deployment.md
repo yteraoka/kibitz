@@ -8,7 +8,7 @@ Terraform は [deploy/terraform/gcp](../deploy/terraform/gcp) にある。
 | 必要なもの | 備考 |
 | --- | --- |
 | Google Cloud プロジェクト | 課金有効。Firestore のロケーションは後から変更できない |
-| `gcloud` / `terraform` (>= 1.6) / `docker` | |
+| `gcloud` / `terraform` / `docker` | Terraform は [mise](https://mise.jdx.dev) で固定してある。リポジトリのルートで `mise install` を実行すると `mise.toml` に書かれた 1.16.3 が入る |
 | GitHub App を作成できる権限 | 組織の Owner、または App の作成権限 |
 | Vertex AI で Claude が有効 | Model Garden で対象モデルを有効化しておく |
 

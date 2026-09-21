@@ -74,6 +74,13 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 
 ## 開発
 
+ツールのバージョンは [mise](https://mise.jdx.dev) で固定している
+(Go は go.mod、golangci-lint は Makefile が持つので、mise が持つのは Terraform だけ)。
+
+```bash
+mise install       # mise.toml に書かれたバージョンを入れる
+```
+
 ```bash
 make test          # go test -race -cover ./...
 make lint          # golangci-lint (初回は自動でインストール)
