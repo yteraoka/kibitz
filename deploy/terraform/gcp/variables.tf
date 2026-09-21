@@ -26,6 +26,18 @@ variable "server_image" {
   type        = string
 }
 
+variable "server_max_instances" {
+  description = <<-EOT
+    Upper bound on server instances. The server only verifies a signature and
+    publishes, so one instance absorbs a lot of deliveries; the cap is there
+    to bound a delivery storm rather than to size for load.
+
+    Raise it if webhooks start being rejected under burst.
+  EOT
+  type        = number
+  default     = 1
+}
+
 variable "worker_image" {
   description = "Image for kibitz-worker."
   type        = string

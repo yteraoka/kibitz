@@ -33,6 +33,11 @@ mention = "/kibitz"
 #   trigger_keywords = ["/review", "[review]", "レビュー希望"]
 trigger_keywords = []
 
+# server は署名を検証して publish するだけなので、1 台で相当な数の delivery を
+# さばける。この上限は負荷に合わせるためではなく、delivery が殺到したときの
+# 上限を決めるためのもの。burst で webhook が弾かれるようなら上げる。
+server_max_instances = 1
+
 # worker のインスタンス数は Pub/Sub のバックログから決まる。0 は「キューが空なら
 # 何も動かさない」で、これが既定。常時 1 台温めておきたい場合だけ 1 にする。
 worker_min_instances         = 0

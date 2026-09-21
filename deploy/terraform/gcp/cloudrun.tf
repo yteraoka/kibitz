@@ -14,7 +14,7 @@ resource "google_cloud_run_v2_service" "server" {
 
     scaling {
       min_instance_count = 0
-      max_instance_count = 10
+      max_instance_count = var.server_max_instances
     }
 
     containers {
@@ -24,12 +24,19 @@ resource "google_cloud_run_v2_service" "server" {
         container_port = 8080
       }
 
+      # Sized for what the server actually does: verify a signature, publish
+      # one message, return. The boost is what covers the cold start, which
+      # is the only moment the CPU limit is felt -- a webhook that waits for
+      # one risks the forge's timeout.
+      #
+      # 512Mi is the floor, not a measurement: the second generation
+      # execution environment refuses to start below it. Lowering it is a
+      # deploy-time failure rather than a tight fit at runtime.
       resources {
         limits = {
-          cpu    = "1"
+          cpu    = "0.5"
           memory = "512Mi"
         }
-        # A webhook that waits for a cold start risks the forge's timeout.
         startup_cpu_boost = true
       }
 
