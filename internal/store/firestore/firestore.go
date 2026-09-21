@@ -95,7 +95,7 @@ func (s *Store) MarkProcessed(ctx context.Context, key string, ttl time.Duration
 		}
 		first = true
 		return tx.Set(doc, document{
-			Value:     []byte("1"),
+			Value:     []byte(store.MarkerClaim),
 			ExpiresAt: expiry(now, ttl),
 			UpdatedAt: now,
 		})

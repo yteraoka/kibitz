@@ -65,7 +65,7 @@ func (s *Store) MarkProcessed(_ context.Context, key string, ttl time.Duration) 
 	if _, ok := s.lookup(key); ok {
 		return false, nil
 	}
-	s.entries[key] = entry{value: []byte("1"), expires: s.expiry(ttl)}
+	s.entries[key] = entry{value: []byte(store.MarkerClaim), expires: s.expiry(ttl)}
 	return true, nil
 }
 

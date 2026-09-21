@@ -37,9 +37,11 @@ type Lease interface {
 
 // Store is the state a worker keeps between jobs.
 type Store interface {
-	// MarkProcessed records that key has been handled and reports whether
-	// this caller was the first. It is the guard against the queue's
-	// at-least-once delivery turning into a second review.
+	// MarkProcessed records that key has been claimed and reports whether this
+	// caller was the first. It is the guard against the queue's at-least-once
+	// delivery turning into a second review. The value written is
+	// [MarkerClaim]; the caller replaces it with [MarkerDone] when the work
+	// actually finishes.
 	MarkProcessed(ctx context.Context, key string, ttl time.Duration) (first bool, err error)
 
 	// AcquireLock takes a lease, or returns [ErrLocked].
@@ -61,6 +63,16 @@ type Store interface {
 
 	Close() error
 }
+
+// A delivery record is in one of two states, and telling them apart is what
+// stops a worker that died mid-job from having its work dropped: a claim says
+// someone started, a completion says someone finished.
+const (
+	// MarkerClaim is what [Store.MarkProcessed] writes.
+	MarkerClaim = "claim"
+	// MarkerDone replaces it once the job has finished.
+	MarkerDone = "done"
+)
 
 // Key prefixes. They are spelled out here so that every implementation, and
 // anyone reading a dump of the store, sees the same vocabulary.

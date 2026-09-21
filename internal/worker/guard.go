@@ -57,27 +57,47 @@ func (g *Guard) Handle(ctx context.Context, job *Job) error {
 	}
 
 	claimKey := store.DeliveryKey(ev)
-	first, err := g.Store.MarkProcessed(ctx, claimKey, g.claimTTL())
+	claimed, err := g.Store.MarkProcessed(ctx, claimKey, g.claimTTL())
 	if err != nil {
 		return fmt.Errorf("claiming delivery %s: %w", ev.Source.DeliveryID, err)
 	}
-	if !first {
-		g.Logger.LogAttrs(ctx, slog.LevelInfo, "delivery was already handled; skipping",
+	if !claimed {
+		done, err := g.finished(ctx, claimKey)
+		if err != nil {
+			return err
+		}
+		if done {
+			g.Logger.LogAttrs(ctx, slog.LevelInfo, "delivery was already handled; skipping",
+				slog.String("event_id", ev.ID),
+				slog.String("delivery_id", ev.Source.DeliveryID),
+			)
+			return nil
+		}
+		// A claim with no completion behind it. Whoever made it either still
+		// holds the lock, or died without releasing it -- a revision swap
+		// while a review was running looks exactly like this. The lock, not
+		// the claim, decides which it is; treating the claim as a finished
+		// job here is how a review gets silently dropped.
+		g.Logger.LogAttrs(ctx, slog.LevelInfo, "delivery was claimed but not finished; taking it over if the lock is free",
 			slog.String("event_id", ev.ID),
 			slog.String("delivery_id", ev.Source.DeliveryID),
 		)
-		return nil
 	}
 
 	lease, err := g.Store.AcquireLock(ctx, store.LockKey(ev), g.lockTTL())
 	if errors.Is(err, store.ErrLocked) {
-		// Another worker holds this pull request. Give the claim back so the
-		// redelivery can pick the work up rather than skipping it as done.
-		g.release(ctx, claimKey)
+		// Another worker holds this pull request. Give back a claim this call
+		// created, so the redelivery is not mistaken for finished work; a
+		// claim someone else owns is left alone.
+		if claimed {
+			g.release(ctx, claimKey)
+		}
 		return RetryAfter(fmt.Errorf("%s is already being reviewed", ev.Key()), 30*time.Second)
 	}
 	if err != nil {
-		g.release(ctx, claimKey)
+		if claimed {
+			g.release(ctx, claimKey)
+		}
 		return fmt.Errorf("locking %s: %w", ev.Key(), err)
 	}
 
@@ -178,10 +198,26 @@ func (g *Guard) keepalive(ctx context.Context, cancel context.CancelFunc, lease 
 	}
 }
 
+// finished reports whether the delivery record says the job completed, rather
+// than merely that someone started it. A store that cannot be read is treated
+// as unfinished and retried: dropping a review is worse than running one
+// twice, and the lock still prevents the second run from overlapping.
+func (g *Guard) finished(ctx context.Context, key string) (bool, error) {
+	value, err := g.Store.Get(ctx, key)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		// It expired between the claim and this read.
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("reading the delivery record: %w", err)
+	}
+	return string(value) == store.MarkerDone, nil
+}
+
 // remember marks a delivery as finished for the full deduplication window.
 func (g *Guard) remember(ctx context.Context, key string) {
 	ctx = context.WithoutCancel(ctx)
-	if err := g.Store.Put(ctx, key, []byte("done"), g.doneTTL()); err != nil {
+	if err := g.Store.Put(ctx, key, []byte(store.MarkerDone), g.doneTTL()); err != nil {
 		g.Logger.LogAttrs(ctx, slog.LevelWarn, "could not record the delivery as handled",
 			slog.String("key", key),
 			slog.String("error", err.Error()),

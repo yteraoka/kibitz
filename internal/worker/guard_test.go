@@ -331,3 +331,79 @@ func TestErrorClassification(t *testing.T) {
 		t.Error("wrapping nil produced an error")
 	}
 }
+
+// A worker killed mid-review -- which is what a revision swap does -- leaves a
+// claim with no completion behind it. The redelivery has to pick that work up,
+// not mistake it for a job that already finished.
+func TestGuardTakesOverAfterAWorkerDies(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	ev := guardEvent("d1")
+
+	// What the dead worker left behind: a claim, and no lock (its lease
+	// expired) and no completion.
+	if _, err := s.MarkProcessed(ctx, store.DeliveryKey(ev), time.Hour); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+
+	var runs atomic.Int32
+	g := newGuard(t, s, worker.HandlerFunc(func(context.Context, *worker.Job) error {
+		runs.Add(1)
+		return nil
+	}), nil)
+
+	if err := g.Handle(ctx, &worker.Job{Event: ev, Deliveries: 2}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := runs.Load(); got != 1 {
+		t.Errorf("the job ran %d times, want 1: the abandoned work was dropped", got)
+	}
+
+	// And once it really is finished, a further redelivery is a duplicate.
+	if err := g.Handle(ctx, &worker.Job{Event: ev, Deliveries: 3}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := runs.Load(); got != 1 {
+		t.Errorf("the job ran %d times, want 1 after completion", got)
+	}
+}
+
+// A claim whose owner is still working is different: the lock is held, so the
+// redelivery waits instead of running a second copy.
+func TestGuardWaitsWhileTheClaimHolderIsStillWorking(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	ev := guardEvent("d1")
+
+	if _, err := s.MarkProcessed(ctx, store.DeliveryKey(ev), time.Hour); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+	lease, err := s.AcquireLock(ctx, store.LockKey(ev), time.Hour)
+	if err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	defer func() { _ = lease.Release(ctx) }()
+
+	var runs atomic.Int32
+	g := newGuard(t, s, worker.HandlerFunc(func(context.Context, *worker.Job) error {
+		runs.Add(1)
+		return nil
+	}), nil)
+
+	err = g.Handle(ctx, &worker.Job{Event: ev, Deliveries: 2})
+	if err == nil {
+		t.Fatal("Handle succeeded while another worker held the pull request")
+	}
+	if _, ok := worker.RetryDelay(err); !ok {
+		t.Errorf("err = %v, want a retry-after error", err)
+	}
+	if runs.Load() != 0 {
+		t.Error("a second copy of the review ran")
+	}
+
+	// The other worker's claim must survive: deleting it would let the next
+	// redelivery start a duplicate review.
+	if _, err := s.Get(ctx, store.DeliveryKey(ev)); err != nil {
+		t.Errorf("the claim was released by a worker that does not own it: %v", err)
+	}
+}

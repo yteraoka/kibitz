@@ -57,6 +57,17 @@ func testMarkProcessed(t *testing.T, newStore Factory) {
 	if err != nil || !first {
 		t.Errorf("an unrelated key was blocked: first=%v err=%v", first, err)
 	}
+
+	// The record says the work was claimed, not that it finished. A worker
+	// that dies mid-job leaves exactly this, and the difference is what lets
+	// the next delivery pick the work up instead of skipping it.
+	value, err := s.Get(ctx, key(t, "delivery"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if string(value) != store.MarkerClaim {
+		t.Errorf("MarkProcessed wrote %q, want %q", value, store.MarkerClaim)
+	}
 }
 
 func testMarkProcessedExpires(t *testing.T, newStore Factory) {
