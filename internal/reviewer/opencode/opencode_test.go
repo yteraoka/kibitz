@@ -350,3 +350,40 @@ func TestRunRejectsEmptyWorkspace(t *testing.T) {
 		t.Error("Run accepted a request with no workspace")
 	}
 }
+
+// opencode declares --file as an array, so every argument after it is read as
+// another path to attach. With the message last, opencode looked for a file
+// named "指示は添付された …" and every run failed with "File not found".
+// The message goes first, and --file is the final flag.
+func TestPromptFileIsTheLastArgument(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin, Model: "vertex/claude-opus-5"}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.SessionID = "ses_existing"
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	args := h.args(t)
+	if len(args) < 2 {
+		t.Fatalf("arguments = %v", args)
+	}
+
+	prompt := filepath.Join(".kibitz", "prompt.md")
+	if got := args[len(args)-1]; got != prompt {
+		t.Errorf("last argument = %q, want %q", got, prompt)
+	}
+	if got := args[len(args)-2]; got != "--file" {
+		t.Errorf("second to last argument = %q, want --file", got)
+	}
+
+	// And the message is a message, not something --file could swallow.
+	message := args[len(args)-3]
+	if strings.HasPrefix(message, "-") {
+		t.Fatalf("argument before --file = %q, want the message", message)
+	}
+	if !strings.Contains(message, prompt) {
+		t.Errorf("message = %q, want it to point at %s", message, prompt)
+	}
+}

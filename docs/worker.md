@@ -45,7 +45,9 @@ pi でも実装できる粒度に保つ。
 [4] 実行
     プロンプトは <workspace>/.kibitz/prompt.md に書き出してから渡す
     opencode run --format json --agent kibitz-review --dir <workspace> \
-      --session <既存セッションID|なし> --auto --file .kibitz/prompt.md "<指示>"
+      --session <既存セッションID|なし> --auto "<指示>" --file .kibitz/prompt.md
+    - --file は配列オプションなので必ず最後に置く (後続の引数まで
+      添付ファイル名として食われ、"File not found: <指示>" になる)
     - タイムアウト付き context、超過時は SIGTERM → SIGKILL
     - stdout(JSON イベント) は逐次パースしてログ/メトリクスへ
 

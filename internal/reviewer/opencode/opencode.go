@@ -204,9 +204,13 @@ func (r *Runner) args(req reviewer.Request) []string {
 		// earlier finding.
 		args = append(args, "--session", req.SessionID)
 	}
+	// The message comes before --file, and --file goes last. opencode takes
+	// --file as an array, so anything after it is read as another path to
+	// attach: with the two the other way round the message itself was taken
+	// for a file name and every run died with "File not found: 指示は…".
 	args = append(args,
-		"--file", filepath.Join(".kibitz", "prompt.md"),
 		"指示は添付された .kibitz/prompt.md に書かれています。その指示に従ってください。",
+		"--file", filepath.Join(".kibitz", "prompt.md"),
 	)
 	return args
 }
