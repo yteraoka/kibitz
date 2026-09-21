@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -130,7 +131,7 @@ func realMain() error {
 		DoneTTL:       7 * 24 * time.Hour,
 		LockTTL:       cfg.JobTimeout,
 		MaxDeliveries: cfg.MaxDeliveries,
-		BotLogins:     cfg.BotLogins,
+		BotLogins:     botLogins(ctx, cfg, job, logger),
 	}
 	w := worker.New(subscriber, guard, logger, cfg, worker.WithMetrics(metrics))
 
@@ -201,6 +202,50 @@ func newStore(ctx context.Context, cfg *config.Worker) (store.Store, error) {
 
 // newReviewJob assembles the pieces one review needs: a client per platform,
 // the agent engine, and the limits the output is held to.
+// botIdentifier is a forge client that can say what account it posts as.
+type botIdentifier interface {
+	BotLogin(ctx context.Context) (string, error)
+}
+
+// botLogins works out which accounts are kibitz's own, so that the second
+// loop check has something to match on without anybody writing it down.
+//
+// A hand-written value that is wrong is invisible until kibitz starts
+// answering its own comments, so it is asked for instead. Anything configured
+// is kept as well: a deployment that has just been renamed, or that posts as
+// more than one account, still wants its own list honoured.
+//
+// Failing to ask is not fatal. The server drops kibitz's own events before
+// they are ever queued, by app id rather than by name, and this is the belt
+// to that pair of braces.
+func botLogins(ctx context.Context, cfg *config.Worker, job *worker.ReviewJob, logger *slog.Logger) []string {
+	logins := append([]string(nil), cfg.BotLogins...)
+
+	client, ok := job.Forges[event.PlatformGitHub].(botIdentifier)
+	if !ok {
+		return logins
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	login, err := client.BotLogin(ctx)
+	if err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "could not ask GitHub what this app posts as",
+			slog.String("error", err.Error()),
+		)
+		return logins
+	}
+
+	logger.LogAttrs(ctx, slog.LevelInfo, "resolved the bot account", slog.String("login", login))
+	for _, known := range logins {
+		if strings.EqualFold(known, login) {
+			return logins
+		}
+	}
+	return append(logins, login)
+}
+
 func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics) (*worker.ReviewJob, error) {
 	forges := make(map[event.Platform]forge.Client)
 

@@ -139,3 +139,46 @@ func (a *appAuth) installationToken(ctx context.Context) (string, error) {
 	a.token, a.expires = body.Token, body.ExpiresAt
 	return a.token, nil
 }
+
+// appSlug asks GitHub which app this key belongs to. It is authenticated with
+// the app JWT rather than an installation token: GET /app describes the app
+// itself, which no installation is entitled to ask about.
+//
+// The slug is what the app's account is called, as "<slug>[bot]". Deriving it
+// beats configuring it, because a wrong value is invisible until kibitz starts
+// answering its own comments.
+func (a *appAuth) appSlug(ctx context.Context) (string, error) {
+	appToken, err := a.jwt()
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/app", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+appToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", apiVersion)
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("reading the app: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("reading the app: %w", errorFromResponse(resp))
+	}
+
+	var body struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("decoding the app: %w", err)
+	}
+	if body.Slug == "" {
+		return "", fmt.Errorf("the app has no slug")
+	}
+	return body.Slug, nil
+}

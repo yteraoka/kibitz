@@ -496,3 +496,69 @@ func TestRefOf(t *testing.T) {
 		t.Errorf("String() = %q", got.String())
 	}
 }
+
+// BotLogin asks GitHub what the app is called rather than being told, so that
+// a hand-written account name cannot be quietly wrong.
+func TestBotLogin(t *testing.T) {
+	var path, auth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, auth = r.URL.Path, r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 123, "slug": "kibitz", "name": "kibitz"})
+	}))
+	defer server.Close()
+
+	c, err := ghforge.New(ghforge.Config{
+		AppID: 123, InstallationID: 456, PrivateKey: testKey(t), BaseURL: server.URL,
+	}, ghforge.WithHTTPClient(server.Client()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	login, err := c.BotLogin(context.Background())
+	if err != nil {
+		t.Fatalf("BotLogin: %v", err)
+	}
+	if login != "kibitz[bot]" {
+		t.Errorf("login = %q, want kibitz[bot]", login)
+	}
+	if path != "/app" {
+		t.Errorf("path = %q, want /app", path)
+	}
+	// The app describes itself; no installation is entitled to ask, so this
+	// one call authenticates with the app JWT rather than a token.
+	if !strings.HasPrefix(auth, "Bearer ey") {
+		t.Errorf("Authorization = %q, want the app JWT", auth)
+	}
+}
+
+func TestBotLoginFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   any
+	}{
+		{name: "not found", status: http.StatusNotFound, body: map[string]any{"message": "Not Found"}},
+		{name: "no slug", status: http.StatusOK, body: map[string]any{"id": 123}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(tc.body)
+			}))
+			defer server.Close()
+
+			c, err := ghforge.New(ghforge.Config{
+				AppID: 123, InstallationID: 456, PrivateKey: testKey(t), BaseURL: server.URL,
+			}, ghforge.WithHTTPClient(server.Client()))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			if _, err := c.BotLogin(context.Background()); err == nil {
+				t.Error("BotLogin succeeded, want an error")
+			}
+		})
+	}
+}

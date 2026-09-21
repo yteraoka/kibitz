@@ -344,3 +344,40 @@ func TestFingerprintIsStableAndShort(t *testing.T) {
 		t.Errorf("Fingerprint of nothing = %q, want empty", got)
 	}
 }
+
+// GitHub names the app that wrote an issue comment. It is the only part of a
+// delivery that identifies kibitz without kibitz being told what it is called,
+// so it has to survive normalization.
+func TestNormalizeCarriesTheAppThatWroteTheComment(t *testing.T) {
+	body := fixture(t, "issue_comment.created_by_bot.json")
+
+	ev, err := newHandler().Normalize(request("issue_comment", "d1", body), body)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if ev == nil || ev.Comment == nil {
+		t.Fatalf("event = %+v", ev)
+	}
+	if got := ev.Comment.Author.AppID; got != "123456" {
+		t.Errorf("app id = %q, want 123456", got)
+	}
+	if got := ev.Comment.Author.AppSlug; got != "kibitz" {
+		t.Errorf("app slug = %q, want kibitz", got)
+	}
+}
+
+// A person's comment has no app, and must not be given one.
+func TestNormalizeLeavesHumanCommentsUnattributed(t *testing.T) {
+	body := fixture(t, "issue_comment.created.json")
+
+	ev, err := newHandler().Normalize(request("issue_comment", "d1", body), body)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if ev == nil || ev.Comment == nil {
+		t.Fatalf("event = %+v", ev)
+	}
+	if ev.Comment.Author.AppID != "" {
+		t.Errorf("app id = %q, want none", ev.Comment.Author.AppID)
+	}
+}

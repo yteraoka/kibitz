@@ -23,7 +23,8 @@
 | `KIBITZ_GITHUB_WEBHOOK_SECRETS` | - | カンマ区切り (ローテーション用) |
 | `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | 同上 |
 | `KIBITZ_AZDO_BASIC_USER` / `_PASSWORDS` | - | Azure DevOps Service Hooks の Basic 認証 |
-| `KIBITZ_BOT_LOGINS` | - | 自分自身の発言を無視するためのアカウント名 (プラットフォーム別) |
+| `KIBITZ_GITHUB_APP_ID` | - | 自分の発言を判別するための GitHub App id。**秘密情報ではない** (App の設定 URL に含まれる数字)。GitHub がコメントに付ける `performed_via_github_app.id` と突き合わせる |
+| `KIBITZ_BOT_LOGINS` | - | 追加で無視したいアカウント名 (カンマ区切り)。通常は不要 — App id での判別が効かないイベント (レビューコメントなど) の保険 |
 | `KIBITZ_ALLOWED_REPOS` | `*` | 受け付けるリポジトリのグロブ (カンマ区切り) |
 | `KIBITZ_MENTION` | `/kibitz` | コメントで kibitz に話しかけるときのトークン。**`@` 付きにすると同名の GitHub アカウントへ通知が飛ぶ**ため既定は `/` ([security.md](security.md#31-メンション名と通知)) |
 | `KIBITZ_TRIGGER_KEYWORDS` | - | レビュー依頼のキーワード (カンマ区切り)。設定すると PR 系イベントはタイトルか本文にこれらかメンションを含むときだけ publish する。コメントは常に対象 ([event-schema.md](event-schema.md#31-キーワードによる-publish-の絞り込み)) |
@@ -78,7 +79,8 @@
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
 起動時 + 定期リフレッシュで取得する (`KIBITZ_*_SECRET_REF` に参照名を置く形も用意する)。
 
-ワーカーの `KIBITZ_BOT_LOGINS` はサーバーと同じ値を設定する。
+ワーカーは起動時に `GET /app` で自分の `<slug>[bot]` を解決するので、
+`KIBITZ_BOT_LOGINS` は通常設定しなくてよい (設定した値は解決結果に加算される)。
 サーバー側のフィルタをすり抜けた場合の二重チェックに使う。
 
 Vertex AI の認証はサービスアカウント鍵ファイルを配置せず、

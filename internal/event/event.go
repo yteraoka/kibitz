@@ -72,6 +72,16 @@ type Actor struct {
 	ID    string `json:"id,omitempty"`
 	Login string `json:"login"`
 	IsBot bool   `json:"is_bot,omitempty"`
+	// AppID identifies the forge app that acted, when the payload says so.
+	// It is how kibitz recognizes its own writing without being told what it
+	// is called: an app id cannot be renamed, and the account name is derived
+	// from a slug that can.
+	AppID string `json:"app_id,omitempty"`
+	// AppSlug is that app's short name, which is where the "<slug>[bot]"
+	// account name comes from. It is carried so the worker's own check has
+	// something to match on, and so the name can be logged once instead of
+	// configured.
+	AppSlug string `json:"app_slug,omitempty"`
 }
 
 // Repository identifies the repository the event concerns.

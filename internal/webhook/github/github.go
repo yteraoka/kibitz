@@ -158,7 +158,7 @@ func (h *Handler) normalizeIssueComment(name, delivery string, body []byte) (*ev
 	ev.Comment = &event.Comment{
 		ID:     strconv.FormatInt(p.Comment.ID, 10),
 		Body:   p.Comment.Body,
-		Author: p.Comment.User.normalize(),
+		Author: p.Comment.actor(),
 		URL:    p.Comment.HTMLURL,
 	}
 	ev.OccurredAt = firstNonZero(p.Comment.CreatedAt, h.now())
@@ -179,7 +179,7 @@ func (h *Handler) normalizeReviewComment(name, delivery string, body []byte) (*e
 	ev.Comment = &event.Comment{
 		ID:     strconv.FormatInt(p.Comment.ID, 10),
 		Body:   p.Comment.Body,
-		Author: p.Comment.User.normalize(),
+		Author: p.Comment.actor(),
 		Path:   p.Comment.Path,
 		Line:   firstNonZeroInt(p.Comment.Line, p.Comment.OriginalLine),
 		URL:    p.Comment.HTMLURL,

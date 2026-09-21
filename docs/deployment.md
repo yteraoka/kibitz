@@ -161,12 +161,18 @@ openssl rand -hex 32   # この値を控える
 ```bash
 cd deploy/terraform/gcp
 cp terraform.tfvars.example terraform.tfvars
-$EDITOR terraform.tfvars   # project_id, github_app_id, github_installation_id, bot_logins など
+$EDITOR terraform.tfvars   # project_id, github_app_id, github_installation_id など
 ```
 
-`bot_logins` は App が投稿するアカウント名。GitHub App の場合は
-`<app-slug>[bot]` になる (例: App の slug が `kibitz` なら `kibitz[bot]`)。
-**ここを間違えると kibitz が自分のコメントに反応し続ける**ので、手順 6 で必ず確認する。
+**`bot_logins` は通常は空のままでよい。** kibitz は自分の発言を自動で判別する:
+
+- **サーバー**は、GitHub がコメントに付ける **App の id** (`performed_via_github_app.id`)
+  と `github_app_id` を突き合わせる。名前ではないのでリネームしても壊れない
+- **ワーカー**は起動時に GitHub へ問い合わせ (`GET /app`)、`<slug>[bot]` を得る。
+  ログに `msg="resolved the bot account" login=...` が出る
+
+App をリネームした後に旧アカウント名も無視したい、といった場合にだけ `bot_logins`
+に足す。設定した値は自動判別の結果に**加算**される。
 
 `server_image` / `worker_image` / `scaler_image` は次の手順で作るので、
 いったん仮の値で構わない。
@@ -604,7 +610,7 @@ printf '%s' "$(cat body.json)" | \
 | Webhook が 401 | Webhook secret が不一致 | 手順 7 の「401 の切り分け」。**値が正しく見えても、動いているコンテナが持っている値は別**のことがある |
 | Webhook が 500 | サーバーに Webhook secret が渡っていない | `gcloud secrets versions list` で版があるか確認 |
 | Webhook が 503 | Pub/Sub へ publish できない | サーバーの SA に `pubsub.publisher` があるか |
-| コメントが二重に付く | `bot_logins` が実際のアカウント名と違う | 投稿されたコメントの作者名を見て tfvars を修正 |
+| コメントが二重に付く (自分に反応している) | サーバーに `KIBITZ_GITHUB_APP_ID` が渡っていない | サーバーの環境変数を確認する。ワーカー側は起動ログの `resolved the bot account` を見る |
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
 | レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカーサービスの `roles/run.developer` があるか |
 | PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。**コメントの先頭に** `/kibitz review` と書けば実行される |

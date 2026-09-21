@@ -24,7 +24,12 @@
     },
     "created_at": "2026-09-19T10:25:00Z",
     "html_url": "https://github.com/yteraoka/kibitz/pull/42#issuecomment-555000113",
-    "body": "<!-- kibitz:summary -->\nこの PR は SQS subscriber を追加します。"
+    "body": "<!-- kibitz:summary -->\nこの PR は SQS subscriber を追加します。",
+    "performed_via_github_app": {
+      "id": 123456,
+      "slug": "kibitz",
+      "name": "kibitz"
+    }
   },
   "repository": {
     "id": 5551212,

@@ -10,9 +10,11 @@ scaler_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-scaler:v
 github_app_id          = "123456"
 github_installation_id = "7890123"
 
-# The account the App posts as. Events it authors are dropped, which is what
-# stops kibitz answering itself.
-bot_logins = ["kibitz[bot]"]
+# kibitz が自分の発言を無視するためのアカウント名。通常は空でよい。
+# サーバーは GitHub が付ける App の id で、ワーカーは GitHub に問い合わせた
+# slug で自分を判別するため、手で書く必要は無い。
+# App をリネームした後も旧アカウント名を無視したい、といった場合にだけ設定する。
+bot_logins = []
 
 # Repositories kibitz will accept webhooks for.
 allowed_repos = ["my-org/*"]
