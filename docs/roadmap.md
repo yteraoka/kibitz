@@ -162,7 +162,23 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 詳細は [worker.md](worker.md#9-実装モード-phase-8既定は無効) と
 [security.md](security.md#6-実装モードの追加対策-phase-8)。
 
-## Phase 9: 運用 (目安 1〜2 週)
+## Phase 9: 運用 (一部前倒しで実施)
+
+実機検証を先に行うため、Terraform とデプロイ手順をこの段階で作成した
+([deployment.md](deployment.md))。残りは Phase 4〜8 の後に行う。
+
+| 項目 | 状態 |
+| --- | --- |
+| Terraform (GCP): Cloud Run / Pub/Sub / Firestore / Secret Manager / IAM | 完了 |
+| アラート (DLQ・バックログ滞留・サーバー 5xx) | 完了 |
+| イメージのビルドと push (`make push`) | 完了 |
+| デプロイ手順と初回検証チェックリスト | 完了 |
+| ダッシュボード | 未 |
+| 予算管理と上限到達時の挙動 | 未 |
+| シークレットローテーション手順・Runbook | 未 |
+| GitLab / Azure DevOps の Webhook 設定手順 | Phase 4 / 5 と同時 |
+
+## Phase 9 の残り (目安 1 週)
 
 - Terraform モジュール (GCP) と Helm chart の整備
 - ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ)
@@ -227,9 +243,8 @@ Phase 8 以降は「Issue 本文に書かれた指示で許可外のファイル
    Azure DevOps Server。ベース URL の可変化だけで済む部分が多いので、
    必要になった時点で対応すればよい (設計としては最初から可変にしておく)。
 
-### Phase 0 で確認すること
+### 実機で確認すること
 
-- OpenCode における Vertex AI のプロバイダ ID (`google-vertex-anthropic` か `google-vertex` か)
-- 使用するリージョンで `claude-opus-5` が提供されているか (Model Garden で確認)
-- Vertex AI の割り当て (1 分あたりのリクエスト数・トークン数) と、
-  ワーカーの同時実行数 `KIBITZ_CONCURRENCY` の整合
+初回デプロイのチェックリストは [deployment.md](deployment.md#6-5-phase-23-で実機未検証だった点の確認) にある。
+確認対象は OpenCode の Vertex プロバイダ ID、JSON イベント形式、`--file` と `--agent` の解決、
+GitHub App のトークン発行、`refs/pull/N/head` の fetch、Firestore 実装の 6 点。

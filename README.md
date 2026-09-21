@@ -57,6 +57,7 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | [docs/agent-engine.md](docs/agent-engine.md) | エージェントエンジンの選定 (OpenCode / pi の比較と決定) |
 | [docs/security.md](docs/security.md) | 署名検証、シークレット管理、プロンプトインジェクション、fork PR の扱い |
 | [docs/configuration.md](docs/configuration.md) | サーバー / ワーカーの環境変数、リポジトリ設定 `.kibitz.yaml` |
+| [docs/deployment.md](docs/deployment.md) | GCP へのデプロイ手順、初回の動作確認、運用とトラブルシュート |
 | [docs/roadmap.md](docs/roadmap.md) | フェーズ別実装計画、受け入れ条件、テスト戦略、未決事項 |
 
 ## 前提
@@ -121,8 +122,8 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 
 ## ステータス
 
-**Phase 3 まで実装完了** (実機検証は未了)。次は Phase 4 (GitLab 対応)。
-進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
+**Phase 3 まで実装完了。デプロイ一式あり、実機検証はこれから。**
+手順は [docs/deployment.md](docs/deployment.md)、進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
 
 | 項目 | 状態 |
 | --- | --- |
@@ -143,5 +144,6 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 | 状態ストア (`internal/store`: memory / Firestore) | 完了 |
 | 冪等性・PR ロック・再試行上限・失敗通知 (`internal/worker.Guard`) | 完了 |
 | メトリクス (Prometheus) とトレース (OpenTelemetry) | 完了 |
-| 実機での疎通確認 | 未了 |
+| Terraform (GCP) とデプロイ手順 | 完了 |
+| 実機での疎通確認 | 未了 ([手順](docs/deployment.md#6-初回の動作確認)) |
 | GitLab / Azure DevOps | Phase 4 / 5 |

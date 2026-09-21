@@ -5,7 +5,7 @@
 | 変数 | 既定 | 説明 |
 | --- | --- | --- |
 | `KIBITZ_LISTEN_ADDR` | `:8080` | HTTP リッスンアドレス |
-| `KIBITZ_METRICS_ADDR` | `:9090` | メトリクス用 (別リスナー) |
+| `KIBITZ_METRICS_ADDR` | `:9090` | メトリクス用 (別リスナー)。`off` またはリッスンアドレスと同値にすると、メインのリスナーで `/metrics` を提供する (Cloud Run のように公開ポートが 1 つの環境向け) |
 | `KIBITZ_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error` |
 | `KIBITZ_LOG_FORMAT` | `json` | `json` / `text` |
 | `KIBITZ_OTEL_ENDPOINT` | - | OTLP (gRPC) のコレクタ。未設定ならトレースは無効 |

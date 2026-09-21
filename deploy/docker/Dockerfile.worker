@@ -1,8 +1,9 @@
 # kibitz-worker: consumes events and runs the agent engine.
 #
 # Unlike the server this image needs a userland: git to fetch pull requests,
-# ripgrep for the agent's search tool, and (from Phase 2) the opencode binary
-# plus a Node.js runtime for MCP servers started as local processes.
+# ripgrep for the agent's search tool, the opencode binary, and a Node.js
+# runtime for MCP servers started as local processes. The base is therefore
+# node rather than distroless.
 FROM golang:1.25 AS build
 
 WORKDIR /src
@@ -15,7 +16,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/kibitz-worker ./cmd/kibitz-worker
 
-FROM debian:stable-slim
+FROM node:22-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -24,9 +25,11 @@ RUN apt-get update \
         ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-# Phase 2 adds the opencode binary here, pinned to an exact version:
-#   ARG OPENCODE_VERSION
-#   RUN curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" sh
+# Pinned rather than "latest": the agent's behaviour is part of kibitz's
+# output, so it changes when kibitz is released, not when upstream publishes.
+ARG OPENCODE_VERSION=1.18.31
+RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
+    && opencode --version
 
 COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
 
@@ -43,4 +46,5 @@ RUN useradd --create-home --uid 10001 kibitz \
 
 EXPOSE 8081
 USER kibitz
+ENV HOME=/home/kibitz
 ENTRYPOINT ["/usr/local/bin/kibitz-worker"]

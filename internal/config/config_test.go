@@ -305,3 +305,18 @@ func TestWorkerReliabilityDefaults(t *testing.T) {
 		t.Errorf("MinSeverity = %q, want medium", cfg.Limits.MinSeverity)
 	}
 }
+
+// Cloud Run exposes a single port, so the metrics listener can be folded into
+// the main one.
+func TestMetricsOnTheMainListener(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_METRICS_ADDR"] = "off"
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.MetricsAddr != cfg.ListenAddr {
+		t.Errorf("MetricsAddr = %q, want it folded into %q", cfg.MetricsAddr, cfg.ListenAddr)
+	}
+}

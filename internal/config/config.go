@@ -184,7 +184,11 @@ type Limits struct {
 
 // Server is the kibitz-server configuration.
 type Server struct {
-	ListenAddr        string
+	ListenAddr string
+	// MetricsAddr is a second listener for /metrics, kept off the public
+	// network. Setting it to the same value as ListenAddr, or to "off",
+	// serves /metrics on the main listener instead, which is what a platform
+	// that exposes only one port (Cloud Run) needs.
 	MetricsAddr       string
 	Log               Log
 	Trace             Trace
@@ -256,6 +260,9 @@ func LoadServer(env Lookup) (*Server, error) {
 		},
 	}
 
+	if cfg.MetricsAddr == "off" {
+		cfg.MetricsAddr = cfg.ListenAddr
+	}
 	if cfg.MaxBodyBytes <= 0 {
 		l.fail("KIBITZ_MAX_BODY_BYTES", "must be greater than 0, got %d", cfg.MaxBodyBytes)
 	}

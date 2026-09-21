@@ -2,6 +2,8 @@ GO                     ?= go
 GOBIN                  ?= $(shell $(GO) env GOPATH)/bin
 GOLANGCI_LINT_VERSION  ?= v2.5.0
 VERSION                ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+TAG                    ?= $(VERSION)
+IMAGE_REPO             ?=
 LDFLAGS                := -s -w -X main.version=$(VERSION)
 
 .PHONY: all
@@ -105,6 +107,21 @@ down:
 docker-build:
 	docker build -f deploy/docker/Dockerfile.server -t kibitz-server:$(VERSION) .
 	docker build -f deploy/docker/Dockerfile.worker -t kibitz-worker:$(VERSION) .
+
+# Builds and pushes both images. IMAGE_REPO is the Artifact Registry
+# repository, which `terraform output image_repository` prints.
+#
+#   make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/my-project/kibitz TAG=v0.1.0
+.PHONY: push
+push:
+	@test -n "$(IMAGE_REPO)" || { echo "IMAGE_REPO is required, e.g. make push IMAGE_REPO=REGION-docker.pkg.dev/PROJECT/kibitz"; exit 1; }
+	docker build -f deploy/docker/Dockerfile.server --build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-server:$(TAG) .
+	docker build -f deploy/docker/Dockerfile.worker --build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-worker:$(TAG) .
+	docker push $(IMAGE_REPO)/kibitz-server:$(TAG)
+	docker push $(IMAGE_REPO)/kibitz-worker:$(TAG)
+	@echo
+	@echo "server_image = \"$(IMAGE_REPO)/kibitz-server:$(TAG)\""
+	@echo "worker_image = \"$(IMAGE_REPO)/kibitz-worker:$(TAG)\""
 
 .PHONY: clean
 clean:

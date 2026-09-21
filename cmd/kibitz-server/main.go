@@ -101,6 +101,12 @@ func realMain() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
 	mux.HandleFunc("GET /readyz", health.Ready)
+	// Where only one port is available, metrics ride on the main listener.
+	// The counters carry no repository or user names, so this exposes
+	// aggregate numbers and nothing else.
+	if cfg.MetricsAddr == cfg.ListenAddr {
+		mux.Handle("GET /metrics", metrics.Handler())
+	}
 	mux.Handle("POST /webhook/github", webhook.NewReceiver(
 		githubhook.New(reveal(cfg.Webhook.GitHubSecrets)),
 		publisher,
@@ -126,14 +132,16 @@ func realMain() error {
 		}
 		return httpx.Serve(ctx, logger, "http", srv, cfg.ShutdownTimeout)
 	})
-	g.Add(func(ctx context.Context) error {
-		srv := &http.Server{
-			Addr:              cfg.MetricsAddr,
-			Handler:           metricsMux(health, metrics),
-			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-		}
-		return httpx.Serve(ctx, logger, "metrics", srv, cfg.ShutdownTimeout)
-	})
+	if cfg.MetricsAddr != cfg.ListenAddr {
+		g.Add(func(ctx context.Context) error {
+			srv := &http.Server{
+				Addr:              cfg.MetricsAddr,
+				Handler:           metricsMux(health, metrics),
+				ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+			}
+			return httpx.Serve(ctx, logger, "metrics", srv, cfg.ShutdownTimeout)
+		})
+	}
 
 	if err := g.Run(ctx); err != nil {
 		return err

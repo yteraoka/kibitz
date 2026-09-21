@@ -1,0 +1,22 @@
+project_id = "my-project"
+region     = "asia-northeast1"
+
+# Images built from this repository. See docs/deployment.md.
+server_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-server:v0.1.0"
+worker_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-worker:v0.1.0"
+
+# From the GitHub App's settings page.
+github_app_id          = "123456"
+github_installation_id = "7890123"
+
+# The account the App posts as. Events it authors are dropped, which is what
+# stops kibitz answering itself.
+bot_logins = ["kibitz[bot]"]
+
+# Repositories kibitz will accept webhooks for.
+allowed_repos = ["my-org/*"]
+
+# Create a notification channel first, or nobody is told when an alert fires:
+#   gcloud alpha monitoring channels create --display-name=... --type=email \
+#     --channel-labels=email_address=team@example.com
+alert_notification_channels = []
