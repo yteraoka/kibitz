@@ -118,14 +118,59 @@ func TestSecretsRotationList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServer: %v", err)
 	}
-	if len(cfg.Webhook.GitHubSecrets) != 2 {
-		t.Fatalf("got %d secrets, want 2", len(cfg.Webhook.GitHubSecrets))
+	// Two rotated secrets, plus the whole value: a secret is allowed to
+	// contain the separator, and splitting one in half would break it for
+	// good with no way to tell from the outside.
+	if len(cfg.Webhook.GitHubSecrets) != 3 {
+		t.Fatalf("got %d secrets, want 3", len(cfg.Webhook.GitHubSecrets))
 	}
 	if got := cfg.Webhook.GitHubSecrets[0].Reveal(); got != "old" {
 		t.Errorf("first secret = %q, want old", got)
 	}
 	if got := cfg.Webhook.GitHubSecrets[1].Reveal(); got != "new" {
 		t.Errorf("second secret = %q, want new", got)
+	}
+	if got := cfg.Webhook.GitHubSecrets[2].Reveal(); got != "old , new ," {
+		t.Errorf("third secret = %q, want the whole value", got)
+	}
+}
+
+// A secret that contains a comma verifies as itself, rather than as two
+// halves of itself.
+func TestSecretMayContainTheSeparator(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_GITHUB_WEBHOOK_SECRETS"] = "a,b,c"
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+
+	var found bool
+	for _, s := range cfg.Webhook.GitHubSecrets {
+		if s.Reveal() == "a,b,c" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("secrets = %v, want the whole value among them", cfg.Webhook.GitHubSecrets)
+	}
+}
+
+// One secret is one secret: there is nothing to reassemble.
+func TestSingleSecretIsNotDuplicated(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_GITHUB_WEBHOOK_SECRETS"] = " s3cret "
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if len(cfg.Webhook.GitHubSecrets) != 1 {
+		t.Fatalf("got %d secrets, want 1", len(cfg.Webhook.GitHubSecrets))
+	}
+	if got := cfg.Webhook.GitHubSecrets[0].Reveal(); got != "s3cret" {
+		t.Errorf("secret = %q, want it trimmed", got)
 	}
 }
 

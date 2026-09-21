@@ -480,11 +480,76 @@ gcloud run services update kibitz-worker --region asia-northeast1 --min-instance
 gcloud scheduler jobs resume kibitz-scaler --location asia-northeast1
 ```
 
+### 401 の切り分け
+
+`signature does not match` は「攻撃」ではなくほぼ必ず**値の不一致**で、
+しかも GitHub も kibitz もシークレットの中身を表示しないので、
+そのままでは「どちらが違うのか」が分からない。そのためログに
+**フィンガープリント** (SHA-256 の先頭 12 文字) を出している。
+
+```
+msg="github webhook secrets loaded" count=1 fingerprints=1dac8899aa71
+msg="webhook rejected" error="webhook: signature does not match (kibitz holds 1 secret(s), fingerprint 1dac8899aa71; ...)"
+```
+
+この値を、GitHub App の設定に入れたはずの文字列から手元で計算して比べる。
+
+```bash
+# 1. 動いているコンテナが持っている値 (ログから)
+gcloud run services logs read kibitz-server --region asia-northeast1 --limit 100 | \
+  grep -E 'secrets loaded|signature does not match'
+
+# 2. 手元の「正しいはずの値」
+printf '%s' 'YOUR_WEBHOOK_SECRET' | sha256sum | cut -c1-12
+
+# 3. Secret Manager に入っている値
+gcloud secrets versions access latest --secret=kibitz-github-webhook-secrets | \
+  sha256sum | cut -c1-12
+```
+
+結果の読み方:
+
+| 1 (コンテナ) | 3 (Secret Manager) | 原因 |
+| --- | --- | --- |
+| 2 と一致しない | 2 と一致する | **コンテナが古い値のまま**。`version = "latest"` はインスタンス起動時に解決されるので、シークレットを更新したら新しいリビジョンをデプロイする (下記) |
+| 2 と一致しない | 2 と一致しない | Secret Manager の値が違う。新しいバージョンを追加する |
+| 2 と一致する | 2 と一致する | kibitz 側は正しい。**GitHub App 側の値**が違う (よくあるのは、App の設定画面でシークレットを入れ直したつもりで保存されていない、別の App / 別の Webhook を見ている、組織の Webhook と App の Webhook を取り違えている) |
+
+シークレットを更新したあとコンテナに反映させる:
+
+```bash
+printf '%s' 'YOUR_WEBHOOK_SECRET' | \
+  gcloud secrets versions add kibitz-github-webhook-secrets --data-file=-
+
+# 新しいインスタンスに読み直させる
+gcloud run services update kibitz-server --region asia-northeast1 --no-traffic --tag=tmp \
+  && gcloud run services update-traffic kibitz-server --region asia-northeast1 --to-latest
+```
+
+その他、値そのものが原因になりやすいもの:
+
+- **末尾の改行** — `echo` ではなく `printf '%s'` を使う (kibitz は前後の空白を落とすので、
+  実際には両方通る。GitHub App 側に改行付きで貼っている場合は GitHub 側が違う値になる)
+- **カンマを含むシークレット** — `KIBITZ_GITHUB_WEBHOOK_SECRETS` はローテーション用に
+  カンマ区切りのリストとして読む。カンマを含む値も 1 つの値として受け付けるようにしてあるが、
+  避けたほうが分かりやすい
+- **App の Webhook と リポジトリ / Organization の Webhook の取り違え** — 別々の設定で、
+  それぞれ別のシークレットを持つ
+
+payload そのものから検証したい場合は、GitHub App の **Advanced** タブで配送の
+Request body と `X-Hub-Signature-256` を取り、手元で HMAC を計算して比べる。
+
+```bash
+printf '%s' "$(cat body.json)" | \
+  openssl dgst -sha256 -hmac 'YOUR_WEBHOOK_SECRET' -r | cut -d' ' -f1
+# 配送ログの X-Hub-Signature-256 の sha256= 以降と一致すれば GitHub 側は正しい
+```
+
 ## 8. よくある失敗
 
 | 症状 | 原因 | 対処 |
 | --- | --- | --- |
-| Webhook が 401 | Webhook secret が不一致 | シークレットの最新バージョンと GitHub App の設定を揃え、Cloud Run を再デプロイ |
+| Webhook が 401 | Webhook secret が不一致 | 手順 7 の「401 の切り分け」。**値が正しく見えても、動いているコンテナが持っている値は別**のことがある |
 | Webhook が 500 | サーバーに Webhook secret が渡っていない | `gcloud secrets versions list` で版があるか確認 |
 | Webhook が 503 | Pub/Sub へ publish できない | サーバーの SA に `pubsub.publisher` があるか |
 | コメントが二重に付く | `bot_logins` が実際のアカウント名と違う | 投稿されたコメントの作者名を見て tfvars を修正 |

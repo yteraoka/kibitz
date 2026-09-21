@@ -31,7 +31,12 @@ const signaturePrefix = "sha256="
 // Handler implements [webhook.Handler] for GitHub.
 type Handler struct {
 	secrets []string
-	now     func() time.Time
+	// fingerprints identify the configured secrets in error messages. A
+	// mismatch is nearly always the wrong value rather than an attack, and
+	// without this there is no way to tell which side is wrong: the forge
+	// will not show the secret it holds, and neither will kibitz.
+	fingerprints []string
+	now          func() time.Time
 }
 
 // Option customizes a handler.
@@ -52,6 +57,7 @@ func New(secrets []string, opts ...Option) *Handler {
 			h.secrets = append(h.secrets, s)
 		}
 	}
+	h.fingerprints = webhook.Fingerprints(h.secrets)
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -86,8 +92,13 @@ func (h *Handler) Verify(r *http.Request, body []byte) error {
 			return nil
 		}
 	}
-	return webhook.ErrInvalidSignature
+	return fmt.Errorf("%w (kibitz holds %d secret(s), fingerprint %s; see docs/deployment.md)",
+		webhook.ErrInvalidSignature, len(h.secrets), strings.Join(h.fingerprints, " "))
 }
+
+// Fingerprints identifies the secrets this handler will accept, for the
+// startup log. It reveals nothing that a delivery's own signature does not.
+func (h *Handler) Fingerprints() []string { return h.fingerprints }
 
 // Normalize implements [webhook.Handler].
 func (h *Handler) Normalize(r *http.Request, body []byte) (*event.ReviewEvent, error) {

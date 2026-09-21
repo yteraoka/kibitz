@@ -4,6 +4,8 @@
 package webhook
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,4 +49,32 @@ type Handler interface {
 	// (nil, nil) for deliveries that are well formed but not interesting,
 	// such as a ping or a label being added.
 	Normalize(r *http.Request, body []byte) (*event.ReviewEvent, error)
+}
+
+// Fingerprint identifies a secret without revealing it, so that "is the value
+// in the running container the one I pasted into the forge" can be answered
+// from a log line. It is the first bytes of the SHA-256 of the secret, which
+// the operator can reproduce anywhere:
+//
+//	printf '%s' 'YOUR_SECRET' | sha256sum | cut -c1-12
+//
+// An empty secret has no fingerprint; a secret weak enough to be guessed from
+// one was already weak enough to be guessed from a delivery's signature.
+func Fingerprint(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// Fingerprints identifies a set of secrets.
+func Fingerprints(secrets []string) []string {
+	out := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		if fp := Fingerprint(s); fp != "" {
+			out = append(out, fp)
+		}
+	}
+	return out
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/yteraoka/kibitz/internal/config"
@@ -79,6 +80,17 @@ func realMain() error {
 		logger.LogAttrs(ctx, slog.LevelWarn, "no webhook credentials configured; inbound webhooks will be rejected")
 	}
 
+	// The fingerprints are what make "the secret is correct" checkable: the
+	// same digest can be taken of the value in the forge's settings, and the
+	// two either match or they do not. See docs/deployment.md.
+	githubHook := githubhook.New(reveal(cfg.Webhook.GitHubSecrets))
+	if fps := githubHook.Fingerprints(); len(fps) > 0 {
+		logger.LogAttrs(ctx, slog.LevelInfo, "github webhook secrets loaded",
+			slog.Int("count", len(fps)),
+			slog.String("fingerprints", strings.Join(fps, " ")),
+		)
+	}
+
 	publisher, err := newPublisher(ctx, cfg)
 	if err != nil {
 		return err
@@ -128,7 +140,7 @@ func realMain() error {
 		receiverOpts = append(receiverOpts, webhook.WithWaker(waker))
 	}
 	mux.Handle("POST /webhook/github", webhook.NewReceiver(
-		githubhook.New(reveal(cfg.Webhook.GitHubSecrets)),
+		githubHook,
 		publisher,
 		triggers,
 		logger,

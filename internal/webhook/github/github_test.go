@@ -309,3 +309,38 @@ func TestNormalizeDetailsWorthCallingOut(t *testing.T) {
 		}
 	})
 }
+
+// A mismatch is nearly always the wrong value rather than an attack, and
+// neither GitHub nor kibitz will show the secret it holds. The fingerprint in
+// the error is what lets an operator compare the two.
+func TestVerifyReportsWhichSecretItHolds(t *testing.T) {
+	body := fixture(t, "pull_request.opened.json")
+	r := request("pull_request", "d1", body)
+
+	err := githubhook.New([]string{"not-the-secret"}).Verify(r, body)
+	if !errors.Is(err, webhook.ErrInvalidSignature) {
+		t.Fatalf("err = %v, want ErrInvalidSignature", err)
+	}
+
+	fingerprint := webhook.Fingerprint("not-the-secret")
+	if fingerprint == "" {
+		t.Fatal("Fingerprint returned nothing")
+	}
+	if !strings.Contains(err.Error(), fingerprint) {
+		t.Errorf("error = %q, want it to name the fingerprint %s", err, fingerprint)
+	}
+	if strings.Contains(err.Error(), "not-the-secret") {
+		t.Errorf("error = %q, want it to keep the secret to itself", err)
+	}
+}
+
+func TestFingerprintIsStableAndShort(t *testing.T) {
+	// The value an operator reproduces with:
+	//   printf '%s' 'kibitz' | sha256sum | cut -c1-12
+	if got, want := webhook.Fingerprint("kibitz"), "1dac8899aa71"; got != want {
+		t.Errorf("Fingerprint = %q, want %q", got, want)
+	}
+	if got := webhook.Fingerprint(""); got != "" {
+		t.Errorf("Fingerprint of nothing = %q, want empty", got)
+	}
+}

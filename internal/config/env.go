@@ -193,11 +193,25 @@ func (l *loader) list(key string, def []string) []string {
 // secrets reads a comma-separated list. Several values are allowed so that a
 // secret can be rotated without downtime: every one of them is accepted while
 // the old value is being retired.
+//
+// A secret is allowed to contain a comma, which the separator would otherwise
+// cut in half and break for good. So when the value splits, the whole string
+// is kept as a candidate too: one extra comparison against a value only the
+// operator could have set, in exchange for never failing to verify a correct
+// secret that happens to contain the separator.
 func (l *loader) secrets(key string) []Secret {
 	values := l.list(key, nil)
-	out := make([]Secret, 0, len(values))
+	out := make([]Secret, 0, len(values)+1)
 	for _, v := range values {
 		out = append(out, Secret(v))
+	}
+
+	if len(values) > 1 {
+		if whole, ok := l.raw(key); ok {
+			if whole = strings.TrimSpace(whole); whole != "" {
+				out = append(out, Secret(whole))
+			}
+		}
 	}
 	return out
 }
