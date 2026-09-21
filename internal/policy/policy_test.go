@@ -354,3 +354,48 @@ func TestEvaluateWithoutKeywordsEverythingIsWanted(t *testing.T) {
 		t.Errorf("decision = %+v, want every pull request published", d)
 	}
 }
+
+// The mention is kibitz's own marker, not something GitHub interprets: a
+// GitHub App cannot be @-mentioned at all, while "@name" does notify whoever
+// owns that account. So a deployment is free to address kibitz with a token
+// that is not a username, and everything has to keep working when it does.
+func TestMentionNeedNotLookLikeAnAccount(t *testing.T) {
+	e := policy.New(policy.Config{
+		AllowedRepos: []string{"*"},
+		Mention:      "/kibitz",
+	})
+
+	t.Run("a command", func(t *testing.T) {
+		ev := commentEvent("/kibitz review --focus security")
+
+		if d := e.Evaluate(ev, now); !d.Publish {
+			t.Fatalf("decision = %+v, want accepted", d)
+		}
+		if ev.Kind != event.KindCommand {
+			t.Errorf("kind = %s, want %s", ev.Kind, event.KindCommand)
+		}
+		if ev.Command == nil || ev.Command.Name != policy.CommandReview {
+			t.Fatalf("command = %+v, want review", ev.Command)
+		}
+		if len(ev.Command.Args) != 2 {
+			t.Errorf("args = %v, want the two arguments", ev.Command.Args)
+		}
+	})
+
+	t.Run("a question", func(t *testing.T) {
+		ev := commentEvent("/kibitz なぜこの実装だと競合するのですか?")
+
+		if d := e.Evaluate(ev, now); !d.Publish {
+			t.Errorf("decision = %+v, want accepted", d)
+		}
+	})
+
+	// A path is not an address.
+	t.Run("a path that contains the token", func(t *testing.T) {
+		ev := commentEvent("internal/kibitz/foo.go を見てください")
+
+		if d := e.Evaluate(ev, now); d.Publish {
+			t.Errorf("decision = %+v, want it dropped", d)
+		}
+	})
+}

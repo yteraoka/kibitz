@@ -17,6 +17,14 @@ bot_logins = ["kibitz[bot]"]
 # Repositories kibitz will accept webhooks for.
 allowed_repos = ["my-org/*"]
 
+# コメントで kibitz に話しかけるときの書き方。GitHub 側では単なる文字列で、
+# GitHub App は @ メンションできないので、この値を GitHub が解釈することはない。
+# ただし **同名のアカウントが実在すればその人に通知が飛ぶ** (public リポジトリの場合)。
+# ユーザー名になり得ない形にしておけば通知は発生しない。
+#
+#   mention = "/kibitz"
+mention = "@kibitz"
+
 # レビューを依頼するキーワード。空にすると全 PR をレビューする。
 # 設定すると、タイトルか本文にこれらか @kibitz を含む PR だけが publish される
 # (コメントでの依頼は常に有効)。無駄なメッセージが減り、worker が 0 インスタンス

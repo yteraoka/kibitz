@@ -58,6 +58,10 @@ resource "google_cloud_run_v2_service" "server" {
         value = join(",", var.bot_logins)
       }
       env {
+        name  = "KIBITZ_MENTION"
+        value = var.mention
+      }
+      env {
         name  = "KIBITZ_TRIGGER_KEYWORDS"
         value = join(",", var.trigger_keywords)
       }

@@ -95,6 +95,22 @@ variable "allowed_repos" {
   default     = ["*"]
 }
 
+variable "mention" {
+  description = <<-EOT
+    The token that addresses kibitz in a comment.
+
+    GitHub gives it no special meaning: it is matched by kibitz itself, and a
+    GitHub App cannot be @-mentioned at all. What GitHub does do is notify the
+    **account of that name if one exists**, so "@kibitz" in a public
+    repository sends mail to whoever owns github.com/kibitz.
+
+    A token that is not a username avoids that entirely. "/kibitz" works the
+    same way, commands and arguments included, and notifies nobody.
+  EOT
+  type        = string
+  default     = "@kibitz"
+}
+
 variable "trigger_keywords" {
   description = <<-EOT
     Keywords that ask for a review. When this is empty every pull request is
