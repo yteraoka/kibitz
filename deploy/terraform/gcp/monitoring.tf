@@ -117,3 +117,49 @@ resource "google_monitoring_alert_policy" "server_errors" {
     ])
   }
 }
+
+# The scaler failing is not visible in the reviews until much later: the worker
+# simply stays wherever it was left, either burning money at one instance or
+# missing the work that piles up behind it. One failed run is nothing, since
+# the next is a minute away; a run of them is worth knowing about.
+resource "google_monitoring_alert_policy" "scaler_failures" {
+  display_name = "${var.name_prefix}: the worker autoscaler is failing"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "scaler job executions are failing"
+
+    condition_threshold {
+      filter = join(" AND ", [
+        "resource.type = \"cloud_run_job\"",
+        "resource.labels.job_name = \"${google_cloud_run_v2_job.scaler.name}\"",
+        "metric.type = \"run.googleapis.com/job/completed_execution_count\"",
+        "metric.labels.result = \"failed\"",
+      ])
+      comparison      = "COMPARISON_GT"
+      threshold_value = 3
+      duration        = "0s"
+
+      aggregations {
+        alignment_period   = "1800s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  notification_channels = var.alert_notification_channels
+
+  documentation {
+    content = join("\n", [
+      "kibitz-scaler could not size the worker. Until it runs again the",
+      "instance count stays where it is, which means either an idle instance",
+      "nobody is paying attention to or a queue nobody is draining.",
+      "",
+      "  gcloud run jobs executions list --job ${var.name_prefix}-scaler --region ${var.region}",
+      "",
+      "The usual causes are a missing role (it needs roles/monitoring.viewer",
+      "and roles/run.developer on the worker service) and a subscription name",
+      "that does not match the one it is watching.",
+    ])
+  }
+}

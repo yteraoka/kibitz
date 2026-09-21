@@ -9,6 +9,7 @@ resource "google_project_service" "required" {
     "aiplatform.googleapis.com",
     "artifactregistry.googleapis.com",
     "monitoring.googleapis.com",
+    "cloudscheduler.googleapis.com",
   ])
 
   service            = each.value

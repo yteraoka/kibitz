@@ -168,7 +168,12 @@ $EDITOR terraform.tfvars   # project_id, github_app_id, github_installation_id, 
 `<app-slug>[bot]` になる (例: App の slug が `kibitz` なら `kibitz[bot]`)。
 **ここを間違えると kibitz が自分のコメントに反応し続ける**ので、手順 6 で必ず確認する。
 
-`server_image` と `worker_image` は次の手順で作るので、いったん仮の値で構わない。
+`server_image` / `worker_image` / `scaler_image` は次の手順で作るので、
+いったん仮の値で構わない。
+
+レビューを依頼された PR だけをレビューしたい場合は `trigger_keywords` も
+設定する。キューが空の時間が伸びるぶん、ワーカーが 0 インスタンスでいられる
+時間も伸びる ([event-schema.md](event-schema.md#31-キーワードによる-publish-の絞り込み))。
 
 ## 3. イメージ置き場とシークレットの箱を先に作る
 
@@ -208,7 +213,8 @@ gcloud auth configure-docker asia-northeast1-docker.pkg.dev
 make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/YOUR_PROJECT/kibitz TAG=v0.1.0
 ```
 
-最後に表示される 2 行を `terraform.tfvars` の `server_image` / `worker_image` に書く。
+最後に表示される 3 行を `terraform.tfvars` の
+`server_image` / `worker_image` / `scaler_image` に書く。
 
 ### イメージの中身とビルド引数
 
@@ -216,6 +222,7 @@ make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/YOUR_PROJECT/kibitz TAG=v0.1
 | --- | --- | --- |
 | `kibitz-server` | distroless | Go バイナリのみ。リポジトリを触らずエージェントも動かさないため |
 | `kibitz-worker` | `node:22-slim` | Go バイナリ + `git` + `ripgrep` + `opencode` (バージョン固定) + エージェント定義。MCP サーバーをローカルプロセスとして起動するため Node ランタイムが要る |
+| `kibitz-scaler` | distroless | Go バイナリのみ。Cloud Monitoring を読んで Cloud Run のインスタンス数を書くだけ |
 
 | ビルド引数 | 既定値 | 用途 |
 | --- | --- | --- |
@@ -274,7 +281,17 @@ GitHub App の設定ページ **Advanced** タブに配送履歴がある。
 
 ### 6-3. ワーカーが起動している
 
+既定ではワーカーは**キューが空なら 0 インスタンス**なので、apply 直後は何も
+動いていないのが正常。PR を 1 つ作る (あるいは手で 1 台上げる) と起動する。
+
 ```bash
+# いま何台か
+gcloud run services describe kibitz-worker --region asia-northeast1 \
+  --format='value(scaling.minInstanceCount)'
+
+# 手で 1 台上げる (scaler が次の判定で戻す)
+gcloud run services update kibitz-worker --region asia-northeast1 --min-instances=1
+
 gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 50
 ```
 
@@ -355,13 +372,67 @@ gcloud alpha monitoring channels create \
 # 出力の name (projects/.../notificationChannels/123) を tfvars に入れる
 ```
 
-設定されるアラートは 3 つ ([queue.md](queue.md) の分類に対応):
+設定されるアラートは 4 つ ([queue.md](queue.md) の分類に対応):
 
 | アラート | 意味 |
 | --- | --- |
 | dead letter topic にメッセージ | デコードできないメッセージ、または ack されなかったメッセージ。レビューが 1 件失われている |
 | バックログが滞留 | ワーカーが追いついていない、または落ちている |
 | サーバーが 5xx | publish に失敗して配送を拒否している。**GitHub は自動再送しない**ので、直したあと手動で Redeliver する |
+| オートスケーラが失敗し続けている | インスタンス数が放置される。1 台上がりっぱなしで課金され続けるか、キューが処理されない |
+
+### ワーカーのオートスケール
+
+ワーカーは Pub/Sub の pull サブスクライバなので、**Cloud Run から見ると
+リクエストが 1 件も来ない**。放っておくと「常時 1 台」か「永久に 0 台」の
+どちらかにしかならないので、kibitz が両側から数を決める。
+
+```
+PR 作成 ──> kibitz-server ──publish──> Pub/Sub
+                  │
+                  └─ min instances を 1 に引き上げ (即時)
+                                          │
+                                          ↓
+Cloud Scheduler ──毎分──> kibitz-scaler ──> バックログを読む
+                                          └─ 溜まっていれば増やす
+                                             15 分空なら 0 に戻す
+```
+
+- **起動はサーバーが行う。** メトリクスは数分遅れるので、それを待つと
+  レビュー開始が遅れる。publish したサーバー自身が知っているので直接伝える
+  (`KIBITZ_SCALE_*`、30 秒のクールダウンで API 呼び出しをまとめる)。
+- **増減は kibitz-scaler が行う。** `num_undelivered_messages` を読み、
+  `ceil(未処理数 / worker_messages_per_instance)` を
+  `[1, worker_max_instances]` に収めた数にする。
+- **0 に戻すのは「一定時間ずっと空」のときだけ。** このメトリクスは
+  *ack されていない配送済みメッセージも含む*ので、レビュー実行中の
+  ワーカーはメッセージを掴んだままになり、作業中に消されることはない。
+  それでもメトリクス自体が遅れるため、既定では 15 分 (`worker_idle_after`)
+  空が続いてから下げる。
+- **メトリクスが読めないときは下げない。** Monitoring 障害で
+  「空に見える」ことがあるので、読めなければ 1 台維持する。
+
+変更するのは**サービスレベルの** instance count で、リビジョンテンプレート側
+ではない。テンプレートを触ると新しいリビジョンが作られ、実行中のレビューが
+中断されるため。Terraform は初期値だけ設定して以降は
+`lifecycle { ignore_changes = [scaling] }` で手を出さない。
+
+```bash
+# いまの台数と、scaler が何を見て決めたか
+gcloud run services describe kibitz-worker --region asia-northeast1 \
+  --format='value(scaling.minInstanceCount)'
+gcloud run jobs executions list --job kibitz-scaler --region asia-northeast1 --limit 5
+gcloud logging read \
+  'resource.type=cloud_run_job AND resource.labels.job_name=kibitz-scaler' \
+  --limit 20 --format='value(jsonPayload.msg,jsonPayload.reason,jsonPayload.backlog)'
+```
+
+常時 1 台温めておきたい場合は `worker_min_instances = 1` にする。
+オートスケール自体は動いたまま、下限だけが 1 になる。
+
+**無駄なメッセージを減らす**のも同じ話の一部で、`trigger_keywords` を設定すると
+レビューを依頼された PR しか publish されないため、キューが空の時間が伸びて
+ワーカーが 0 のままでいられる ([event-schema.md](event-schema.md#31-キーワードによる-publish-の絞り込み))。
 
 ### コスト
 
@@ -381,7 +452,7 @@ curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_agent_tokens
 
 ```bash
 make push IMAGE_REPO=... TAG=v0.2.0
-# tfvars の server_image / worker_image を更新して
+# tfvars の server_image / worker_image / scaler_image を更新して
 terraform apply
 ```
 
@@ -401,8 +472,12 @@ Cloud Run のリビジョンは残るので、tfvars を戻して `terraform app
 # 受信だけ止める (キューに残った分は処理される)
 # GitHub App の Webhook を Active から外す
 
-# ワーカーを止める
+# ワーカーを止める。scaler が次の実行で戻すので、先に止める
+gcloud scheduler jobs pause kibitz-scaler --location asia-northeast1
 gcloud run services update kibitz-worker --region asia-northeast1 --min-instances=0
+
+# 再開
+gcloud scheduler jobs resume kibitz-scaler --location asia-northeast1
 ```
 
 ## 8. よくある失敗
@@ -414,6 +489,9 @@ gcloud run services update kibitz-worker --region asia-northeast1 --min-instance
 | Webhook が 503 | Pub/Sub へ publish できない | サーバーの SA に `pubsub.publisher` があるか |
 | コメントが二重に付く | `bot_logins` が実際のアカウント名と違う | 投稿されたコメントの作者名を見て tfvars を修正 |
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
-| レビューが来ない・ログも無い | ワーカーが 0 インスタンス | `cpu_idle = false` と `min_instance_count = 1` が効いているか確認 |
+| レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカーサービスの `roles/run.developer` があるか |
+| PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。コメントで `@kibitz review` と書けば実行される |
+| ワーカーが 1 台上がりっぱなし | scaler が失敗している、またはメトリクスが読めていない | `gcloud run jobs executions list --job kibitz-scaler`。SA に `roles/monitoring.viewer` があるか |
+| レビュー中にワーカーが落ちる | `worker_idle_after` を短くしすぎている | メトリクスの遅延より長くする (既定 15 分)。ジョブは再配送されるのでレビューは失われない |
 | `git fetch` が失敗する | App のインストール先にリポジトリが含まれていない | GitHub App の Install 設定でリポジトリを追加 |
 | worker のビルドが `opencode-ai's postinstall script was not run` で失敗 | `--ignore-scripts` で opencode の postinstall が動いていない | `npm rebuild -g opencode-ai` を後続で実行する (修正済み。古い Dockerfile を使っている場合は更新する) |

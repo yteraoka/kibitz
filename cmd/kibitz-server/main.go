@@ -20,6 +20,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/queue/memory"
 	"github.com/yteraoka/kibitz/internal/queue/pubsub"
 	"github.com/yteraoka/kibitz/internal/run"
+	"github.com/yteraoka/kibitz/internal/scale"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/webhook"
 	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
@@ -92,11 +93,21 @@ func realMain() error {
 		BotLogins:    cfg.Policy.BotLogins,
 		AllowedRepos: cfg.Policy.AllowedRepos,
 		Mention:      cfg.Policy.Mention,
+		Keywords:     cfg.Policy.Keywords,
 		MaxEventAge:  cfg.Policy.MaxEventAge,
 	})
 
 	metrics := telemetry.NewMetrics()
 	health := httpx.NewHealth(version)
+
+	// With the worker allowed to scale to zero, publishing is not enough on
+	// its own: something has to tell the platform to start it. Doing it here
+	// costs one API call per burst of deliveries and saves the review from
+	// waiting for the next backlog sample.
+	waker, err := newWaker(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
@@ -107,13 +118,21 @@ func realMain() error {
 	if cfg.MetricsAddr == cfg.ListenAddr {
 		mux.Handle("GET /metrics", metrics.Handler())
 	}
+	receiverOpts := []webhook.ReceiverOption{
+		webhook.WithMaxBody(cfg.MaxBodyBytes),
+		webhook.WithMetrics(metrics),
+	}
+	if waker != nil {
+		// Added conditionally: a nil *scale.Waker passed as the interface
+		// would not be a nil interface, and the receiver would call it.
+		receiverOpts = append(receiverOpts, webhook.WithWaker(waker))
+	}
 	mux.Handle("POST /webhook/github", webhook.NewReceiver(
 		githubhook.New(reveal(cfg.Webhook.GitHubSecrets)),
 		publisher,
 		triggers,
 		logger,
-		webhook.WithMaxBody(cfg.MaxBodyBytes),
-		webhook.WithMetrics(metrics),
+		receiverOpts...,
 	))
 	// GitLab lands in Phase 4 and Azure DevOps in Phase 5.
 
@@ -124,6 +143,9 @@ func realMain() error {
 	)
 
 	var g run.Group
+	if waker != nil {
+		g.Add(waker.Run)
+	}
 	g.Add(func(ctx context.Context) error {
 		srv := &http.Server{
 			Addr:              cfg.ListenAddr,
@@ -148,6 +170,23 @@ func realMain() error {
 	}
 	logger.LogAttrs(context.Background(), slog.LevelInfo, "stopped")
 	return nil
+}
+
+// newWaker builds the thing that starts the worker when work is queued, or
+// returns nil when no instance count is under kibitz's control.
+func newWaker(ctx context.Context, cfg *config.Server, logger *slog.Logger) (*scale.Waker, error) {
+	if !cfg.Scale.Enabled() {
+		return nil, nil
+	}
+
+	service, err := scale.NewCloudRunService(ctx, cfg.Scale.ProjectID, cfg.Scale.Region, cfg.Scale.Service)
+	if err != nil {
+		return nil, fmt.Errorf("worker autoscaling: %w", err)
+	}
+	logger.LogAttrs(ctx, slog.LevelInfo, "worker wake-up is enabled",
+		slog.String("service", service.String()),
+	)
+	return scale.NewWaker(service, 1, cfg.Scale.WakeCooldown, logger), nil
 }
 
 // newPublisher builds the queue publisher for the configured backend.

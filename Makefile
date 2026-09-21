@@ -17,13 +17,16 @@ LDFLAGS                := -s -w -X main.version=$(VERSION)
 all: fmt vet test build
 
 .PHONY: build
-build: bin/kibitz-server bin/kibitz-worker
+build: bin/kibitz-server bin/kibitz-worker bin/kibitz-scaler
 
 bin/kibitz-server: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-server
 
 bin/kibitz-worker: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-worker
+
+bin/kibitz-scaler: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-scaler
 
 .PHONY: test
 test:
@@ -110,14 +113,15 @@ test-integration:
 down:
 	docker compose --profile pubsub -f docker-compose.yml -f docker-compose.pubsub.yml down -v
 
-# Builds both images for the local machine's architecture. For images that
+# Builds the images for the local machine's architecture. For images that
 # will run on Cloud Run, use `make push`, which builds for linux/amd64.
 .PHONY: docker-build
 docker-build:
 	docker build -f deploy/docker/Dockerfile.server --build-arg VERSION=$(VERSION) -t kibitz-server:$(VERSION) .
 	docker build -f deploy/docker/Dockerfile.worker --build-arg VERSION=$(VERSION) $(WORKER_BUILD_ARGS) -t kibitz-worker:$(VERSION) .
+	docker build -f deploy/docker/Dockerfile.scaler --build-arg VERSION=$(VERSION) -t kibitz-scaler:$(VERSION) .
 
-# Builds both images for the deployment platform and pushes them. IMAGE_REPO
+# Builds the images for the deployment platform and pushes them. IMAGE_REPO
 # is the Artifact Registry repository, which `terraform output
 # image_repository` prints.
 #
@@ -132,9 +136,12 @@ push:
 		--build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-server:$(TAG) --push .
 	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.worker \
 		--build-arg VERSION=$(TAG) $(WORKER_BUILD_ARGS) -t $(IMAGE_REPO)/kibitz-worker:$(TAG) --push .
+	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.scaler \
+		--build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-scaler:$(TAG) --push .
 	@echo
 	@echo "server_image = \"$(IMAGE_REPO)/kibitz-server:$(TAG)\""
 	@echo "worker_image = \"$(IMAGE_REPO)/kibitz-worker:$(TAG)\""
+	@echo "scaler_image = \"$(IMAGE_REPO)/kibitz-scaler:$(TAG)\""
 
 .PHONY: clean
 clean:

@@ -265,3 +265,92 @@ func TestMatchAnyEmptyListMatchesNothing(t *testing.T) {
 		t.Error("MatchAny(nil, ...) = true, want false")
 	}
 }
+
+// keywordEngine gates pull requests on an opt-in keyword, which is how a busy
+// repository keeps the queue (and the worker) idle unless a review was asked
+// for.
+func keywordEngine() *policy.Engine {
+	return policy.New(policy.Config{
+		BotLogins:    []string{"kibitz[bot]"},
+		AllowedRepos: []string{"yteraoka/*"},
+		Mention:      "@kibitz",
+		Keywords:     []string{"/review", "[review]"},
+		MaxEventAge:  5 * time.Minute,
+	})
+}
+
+func TestEvaluateKeywordGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		title       string
+		description string
+		want        bool
+	}{
+		{name: "keyword in the title", title: "[review] add the retry loop", want: true},
+		{name: "keyword in the description", description: "見てほしいです\n/review\n", want: true},
+		{name: "different case", title: "[REVIEW] add the retry loop", want: true},
+		{name: "mention in the description", description: "@kibitz お願いします", want: true},
+		{name: "no keyword", title: "add the retry loop", description: "内部だけの変更です", want: false},
+		{name: "keyword of another bot", title: "/reviewers please", want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := prEvent(event.KindPROpened)
+			ev.PullRequest.Title = tc.title
+			ev.PullRequest.Description = tc.description
+
+			d := keywordEngine().Evaluate(ev, now)
+			if d.Publish != tc.want {
+				t.Errorf("decision = %+v, want publish = %t", d, tc.want)
+			}
+			if !tc.want && d.Reason != policy.ReasonNoKeyword {
+				t.Errorf("reason = %q, want %q", d.Reason, policy.ReasonNoKeyword)
+			}
+		})
+	}
+}
+
+// Comments are their own opt-in: addressing kibitz is the request, so a
+// keyword in the pull request is not also required.
+func TestEvaluateKeywordDoesNotGateComments(t *testing.T) {
+	ev := commentEvent("@kibitz レビューをお願いします")
+	ev.PullRequest.Title = "add the retry loop"
+
+	if d := keywordEngine().Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want the mention to be published", d)
+	}
+
+	cmd := commentEvent("@kibitz review")
+	cmd.PullRequest.Title = "add the retry loop"
+
+	if d := keywordEngine().Evaluate(cmd, now); !d.Publish {
+		t.Errorf("decision = %+v, want the command to be published", d)
+	}
+	if cmd.Kind != event.KindCommand {
+		t.Fatalf("kind = %s, want %s", cmd.Kind, event.KindCommand)
+	}
+}
+
+// A command that arrives already parsed (a replayed message, or a platform
+// that carries commands natively) is an explicit request too.
+func TestEvaluateKeywordDoesNotGateCommands(t *testing.T) {
+	ev := prEvent(event.KindCommand)
+	ev.PullRequest.Title = "add the retry loop"
+	ev.Command = &event.Command{Name: policy.CommandReview}
+
+	if d := keywordEngine().Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want the command to be published", d)
+	}
+}
+
+// Without keywords kibitz reviews every pull request, which is the behaviour
+// the gate opts out of.
+func TestEvaluateWithoutKeywordsEverythingIsWanted(t *testing.T) {
+	ev := prEvent(event.KindPROpened)
+	ev.PullRequest.Title = "add the retry loop"
+
+	if d := engine().Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want every pull request published", d)
+	}
+}

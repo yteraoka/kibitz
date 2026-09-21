@@ -171,7 +171,9 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 | 項目 | 状態 |
 | --- | --- |
 | Terraform (GCP): Cloud Run / Pub/Sub / Firestore / Secret Manager / IAM | 完了 |
-| アラート (DLQ・バックログ滞留・サーバー 5xx) | 完了 |
+| アラート (DLQ・バックログ滞留・サーバー 5xx・scaler 失敗) | 完了 |
+| キーワードによる publish の絞り込み (`trigger_keywords`) | 完了 |
+| ワーカーのオートスケール (バックログから 0〜N。`kibitz-scaler` + publish 時の起動) | 完了 |
 | イメージのビルドと push (`make push`) | 完了 |
 | デプロイ手順と初回検証チェックリスト | 完了 |
 | ダッシュボード | 未 |
@@ -182,7 +184,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 ## Phase 9 の残り (目安 1 週)
 
 - Terraform モジュール (GCP) と Helm chart の整備
-- ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ)
+- ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ、ワーカー台数)
 - リポジトリ別の予算管理と上限到達時の挙動
 - シークレットローテーション手順、障害時の Runbook
 - 導入ドキュメント (3 プラットフォームそれぞれの Webhook 設定手順)

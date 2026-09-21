@@ -1,0 +1,21 @@
+# kibitz-scaler: sizes the worker from the queue backlog.
+# It reads Cloud Monitoring and writes a Cloud Run instance count, nothing
+# else, so it ships on distroless like the server.
+FROM golang:1.25 AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/kibitz-scaler ./cmd/kibitz-scaler
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/kibitz-scaler /usr/local/bin/kibitz-scaler
+
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/kibitz-scaler"]

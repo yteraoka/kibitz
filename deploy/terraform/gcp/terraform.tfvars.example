@@ -4,6 +4,7 @@ region     = "asia-northeast1"
 # Images built from this repository. See docs/deployment.md.
 server_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-server:v0.1.0"
 worker_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-worker:v0.1.0"
+scaler_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-scaler:v0.1.0"
 
 # From the GitHub App's settings page.
 github_app_id          = "123456"
@@ -15,6 +16,21 @@ bot_logins = ["kibitz[bot]"]
 
 # Repositories kibitz will accept webhooks for.
 allowed_repos = ["my-org/*"]
+
+# レビューを依頼するキーワード。空にすると全 PR をレビューする。
+# 設定すると、タイトルか本文にこれらか @kibitz を含む PR だけが publish される
+# (コメントでの依頼は常に有効)。無駄なメッセージが減り、worker が 0 インスタンス
+# に落ちやすくなる。
+#
+#   trigger_keywords = ["/review", "[review]", "レビュー希望"]
+trigger_keywords = []
+
+# worker のインスタンス数は Pub/Sub のバックログから決まる。0 は「キューが空なら
+# 何も動かさない」で、これが既定。常時 1 台温めておきたい場合だけ 1 にする。
+worker_min_instances         = 0
+worker_max_instances         = 3
+worker_messages_per_instance = 2
+worker_idle_after            = "15m"
 
 # Create a notification channel first, or nobody is told when an alert fires:
 #   gcloud alpha monitoring channels create --display-name=... --type=email \

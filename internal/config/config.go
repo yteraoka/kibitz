@@ -52,6 +52,12 @@ const (
 	BlobNone = "none"
 )
 
+// Autoscaler backends. See docs/deployment.md.
+const (
+	ScaleCloudRun = "cloudrun"
+	ScaleNone     = "none"
+)
+
 // OpenCode execution modes. See docs/worker.md.
 const (
 	OpenCodeModeRun    = "run"
@@ -110,6 +116,39 @@ type State struct {
 	AWSRegion         string
 }
 
+// Scale configures the worker autoscaler. A pull subscriber has no inbound
+// traffic for the platform to scale on, so kibitz sizes it from the queue
+// itself: see docs/deployment.md.
+type Scale struct {
+	// Backend is "cloudrun", or "none" to leave the instance count alone.
+	Backend string
+	// ProjectID, Region and Service address the worker service.
+	ProjectID string
+	Region    string
+	Service   string
+	// MinInstances is where an idle queue lands. Zero is the point; set 1 to
+	// keep the worker warm and still have it scale out under load.
+	MinInstances int
+	// MaxInstances caps the fan-out.
+	MaxInstances int
+	// MessagesPerInstance is how many queued messages one instance is
+	// expected to absorb before another is added. It normally matches
+	// KIBITZ_CONCURRENCY.
+	MessagesPerInstance int
+	// IdleAfter is how long the queue must be empty before the worker is
+	// scaled away. It has to outlast Cloud Monitoring's own delay, which is
+	// why the default is generous.
+	IdleAfter time.Duration
+	// Interval is how often the scaler reconciles.
+	Interval time.Duration
+	// WakeCooldown bounds how often the server asks the platform to start
+	// the worker. It is not a delay on the first wake-up.
+	WakeCooldown time.Duration
+}
+
+// Enabled reports whether an instance count is managed at all.
+func (s Scale) Enabled() bool { return s.Backend == ScaleCloudRun }
+
 // Webhook holds the credentials used to verify inbound webhooks. Each platform
 // accepts a list so secrets can be rotated without downtime.
 type Webhook struct {
@@ -134,6 +173,11 @@ type Policy struct {
 	// AllowedRepos are glob patterns matched against "owner/name".
 	AllowedRepos []string
 	Mention      string
+	// Keywords gate pull request events. Empty means every pull request is
+	// reviewed; setting it makes a repository opt in per pull request, which
+	// is also what keeps the queue empty enough for the worker to scale to
+	// zero.
+	Keywords []string
 	// MaxEventAge bounds how old a webhook may be. It is disabled by default:
 	// the signature already authenticates the payload, duplicate deliveries
 	// are suppressed by delivery id in the worker, and an operator pressing
@@ -214,6 +258,9 @@ type Server struct {
 	Blob              Blob
 	Webhook           Webhook
 	Policy            Policy
+	// Scale lets the server start the worker the moment it publishes,
+	// instead of leaving it to wait for the next metrics sample.
+	Scale Scale
 }
 
 // Worker is the kibitz-worker configuration.
@@ -271,8 +318,10 @@ func LoadServer(env Lookup) (*Server, error) {
 			BotLogins:    l.list("KIBITZ_BOT_LOGINS", nil),
 			AllowedRepos: l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
 			Mention:      l.str("KIBITZ_MENTION", "@kibitz"),
+			Keywords:     l.list("KIBITZ_TRIGGER_KEYWORDS", nil),
 			MaxEventAge:  l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
 		},
+		Scale: loadScale(l),
 	}
 
 	if cfg.MetricsAddr == "off" {
@@ -357,6 +406,41 @@ func LoadWorker(env Lookup) (*Worker, error) {
 	return cfg, nil
 }
 
+// Scaler is the kibitz-scaler configuration. It is a small tool with a small
+// configuration: which queue to watch, and which service to size from it.
+type Scaler struct {
+	Log   Log
+	Trace Trace
+	Queue Queue
+	Scale Scale
+}
+
+// LoadScaler reads the kibitz-scaler configuration.
+func LoadScaler(env Lookup) (*Scaler, error) {
+	l := newLoader(env)
+
+	cfg := &Scaler{
+		Log:   loadLog(l),
+		Trace: loadTrace(l),
+		Queue: loadQueue(l),
+		Scale: loadScale(l),
+	}
+
+	// The scaler has nothing else to do, so an unset backend is a mistake
+	// rather than a choice not to scale.
+	if cfg.Scale.Backend == ScaleNone {
+		l.fail("KIBITZ_SCALE_BACKEND", "must be %q for kibitz-scaler", ScaleCloudRun)
+	}
+	if cfg.Queue.Backend != QueuePubSub {
+		l.fail("KIBITZ_QUEUE_BACKEND", "must be %q for kibitz-scaler, got %q", QueuePubSub, cfg.Queue.Backend)
+	}
+
+	if err := errors.Join(l.errs...); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 func loadLog(l *loader) Log {
 	return Log{
 		Level:  l.logLevel("KIBITZ_LOG_LEVEL", slog.LevelInfo),
@@ -364,9 +448,6 @@ func loadLog(l *loader) Log {
 	}
 }
 
-// loadQueue reads the queue settings. Only values without a default are
-// validated here: the others cannot be empty by construction, since an empty
-// environment variable falls back to the default.
 func loadTrace(l *loader) Trace {
 	return Trace{
 		Endpoint:    l.str("KIBITZ_OTEL_ENDPOINT", ""),
@@ -375,6 +456,9 @@ func loadTrace(l *loader) Trace {
 	}
 }
 
+// loadQueue reads the queue settings. Only values without a default are
+// validated here: the others cannot be empty by construction, since an empty
+// environment variable falls back to the default.
 func loadQueue(l *loader) Queue {
 	q := Queue{
 		Backend: l.enum("KIBITZ_QUEUE_BACKEND", QueuePubSub, QueuePubSub, QueueSQS, QueueMemory),
@@ -397,6 +481,35 @@ func loadQueue(l *loader) Queue {
 		l.requireIf(true, "KIBITZ_AWS_REGION", q.SQS.Region, "when KIBITZ_QUEUE_BACKEND is sqs")
 	}
 	return q
+}
+
+func loadScale(l *loader) Scale {
+	s := Scale{
+		Backend:             l.enum("KIBITZ_SCALE_BACKEND", ScaleNone, ScaleNone, ScaleCloudRun),
+		ProjectID:           l.str("KIBITZ_SCALE_PROJECT_ID", l.str("KIBITZ_PUBSUB_PROJECT_ID", "")),
+		Region:              l.str("KIBITZ_SCALE_REGION", ""),
+		Service:             l.str("KIBITZ_SCALE_WORKER_SERVICE", ""),
+		MinInstances:        l.int("KIBITZ_SCALE_MIN_INSTANCES", 0),
+		MaxInstances:        l.positiveInt("KIBITZ_SCALE_MAX_INSTANCES", 3),
+		MessagesPerInstance: l.positiveInt("KIBITZ_SCALE_MESSAGES_PER_INSTANCE", 2),
+		IdleAfter:           l.duration("KIBITZ_SCALE_IDLE_AFTER", 15*time.Minute),
+		Interval:            l.duration("KIBITZ_SCALE_INTERVAL", time.Minute),
+		WakeCooldown:        l.duration("KIBITZ_SCALE_WAKE_COOLDOWN", 30*time.Second),
+	}
+
+	if s.Backend == ScaleCloudRun {
+		l.requireIf(true, "KIBITZ_SCALE_REGION", s.Region, "when KIBITZ_SCALE_BACKEND is cloudrun")
+		l.requireIf(true, "KIBITZ_SCALE_WORKER_SERVICE", s.Service, "when KIBITZ_SCALE_BACKEND is cloudrun")
+		l.requireIf(true, "KIBITZ_SCALE_PROJECT_ID", s.ProjectID, "when KIBITZ_SCALE_BACKEND is cloudrun")
+	}
+	if s.MinInstances < 0 {
+		l.fail("KIBITZ_SCALE_MIN_INSTANCES", "must not be negative, got %d", s.MinInstances)
+	}
+	if s.MinInstances > s.MaxInstances {
+		l.fail("KIBITZ_SCALE_MAX_INSTANCES", "must be at least KIBITZ_SCALE_MIN_INSTANCES (%d), got %d",
+			s.MinInstances, s.MaxInstances)
+	}
+	return s
 }
 
 func loadState(l *loader) State {

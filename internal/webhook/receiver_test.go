@@ -403,3 +403,43 @@ func TestReceiverInjectsItsOwnTraceContext(t *testing.T) {
 		t.Fatal("timed out")
 	}
 }
+
+// countingWaker records that the receiver announced queued work.
+type countingWaker struct{ n atomic.Int64 }
+
+func (w *countingWaker) Wake() { w.n.Add(1) }
+
+func TestReceiverWakesTheWorker(t *testing.T) {
+	waker := &countingWaker{}
+	q := memory.New()
+	rc := newReceiver(t, q, webhook.WithWaker(waker))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "pull_request.opened.json"), "pull_request"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+	if got := waker.n.Load(); got != 1 {
+		t.Errorf("wake-ups = %d, want 1", got)
+	}
+}
+
+// Nothing was queued, so there is nothing to start: waking on a skipped
+// delivery would keep the worker alive on exactly the traffic the trigger
+// rules exist to ignore.
+func TestReceiverDoesNotWakeOnSkippedDeliveries(t *testing.T) {
+	waker := &countingWaker{}
+	q := memory.New()
+	rc := newReceiver(t, q, webhook.WithWaker(waker))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "pull_request.labeled.json"), "pull_request"))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body)
+	}
+	if got := waker.n.Load(); got != 0 {
+		t.Errorf("wake-ups = %d, want none", got)
+	}
+}

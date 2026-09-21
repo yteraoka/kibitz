@@ -13,15 +13,31 @@ covers what the configuration itself does.
 | Resource | Why |
 | --- | --- |
 | `google_cloud_run_v2_service.server` | Public: GitHub has to reach it. Scales to zero; the signature check is what protects it |
-| `google_cloud_run_v2_service.worker` | Internal, always one instance with the CPU always allocated, because a pull subscriber has no requests to scale on |
+| `google_cloud_run_v2_service.worker` | Internal, with the CPU always allocated because a pull subscriber has no requests to scale on. Its instance count is written at runtime, not by Terraform |
+| `google_cloud_run_v2_job.scaler` + `google_cloud_scheduler_job.scaler` | Sizes the worker from the Pub/Sub backlog once a minute, and returns it to `worker_min_instances` (zero by default) once the queue has been empty for `worker_idle_after` |
 | `google_pubsub_subscription.worker` | Ordered per pull request, with a dead letter policy |
 | `google_firestore_database.state` | Idempotency records and locks. `deletion_policy = ABANDON`: losing it means reviewing everything again |
 | `google_secret_manager_secret.*` | The webhook secret and the App key. Values are added with gcloud, so they never enter the Terraform state |
-| `google_monitoring_alert_policy.*` | Dead letters, a backlog that will not drain, and a server refusing deliveries |
+| `google_monitoring_alert_policy.*` | Dead letters, a backlog that will not drain, a server refusing deliveries, and an autoscaler that keeps failing |
 
 Each component runs as its own service account: the server may publish and read
 the webhook secret, the worker may consume, write state, call Vertex AI and
-read the App key. Neither can do the other's job.
+read the App key, and the scaler may read Monitoring. None can do another's
+job. The server and the scaler also hold `roles/run.developer` **on the worker
+service alone**, which is what lets them change its instance count and nothing
+else.
+
+## Who owns the worker's instance count
+
+Terraform writes `scaling.min_instance_count` once and then ignores it
+(`lifecycle { ignore_changes = [scaling] }`). From then on it belongs to
+kibitz: the server raises it to one when it publishes, and the scaler moves it
+up and back down from the backlog. Without the ignore rule the next
+`terraform apply` would undo whatever the scaler had decided.
+
+The revision template's own `min_instance_count` stays at zero and is not the
+knob: changing the template rolls a new revision, which would interrupt a
+review in progress.
 
 ## Terraform version
 

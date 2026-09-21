@@ -351,3 +351,112 @@ func TestProviderEnvIsNamesOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestTriggerKeywordsAreOptional(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if len(cfg.Policy.Keywords) != 0 {
+		t.Errorf("Keywords = %v, want none by default", cfg.Policy.Keywords)
+	}
+
+	env := minimalServerEnv()
+	env["KIBITZ_TRIGGER_KEYWORDS"] = "/review, [review]"
+
+	cfg, err = config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if got := cfg.Policy.Keywords; len(got) != 2 || got[0] != "/review" || got[1] != "[review]" {
+		t.Errorf("Keywords = %v, want the two configured keywords", got)
+	}
+}
+
+func TestScalingIsOffByDefault(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Scale.Enabled() {
+		t.Errorf("Scale = %+v, want it off unless asked for", cfg.Scale)
+	}
+}
+
+func TestScalingNeedsTheServiceItScales(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
+
+	_, err := config.LoadServer(config.MapEnv(env))
+	if err == nil {
+		t.Fatal("LoadServer succeeded, want the missing service reported")
+	}
+	for _, want := range []string{"KIBITZ_SCALE_REGION", "KIBITZ_SCALE_WORKER_SERVICE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %s", err, want)
+		}
+	}
+}
+
+// The project defaults to the one the queue lives in, which is where the
+// worker is in every deployment kibitz ships.
+func TestScalingInheritsTheProject(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
+	env["KIBITZ_SCALE_REGION"] = "asia-northeast1"
+	env["KIBITZ_SCALE_WORKER_SERVICE"] = "kibitz-worker"
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Scale.ProjectID != "kibitz-dev" {
+		t.Errorf("Scale.ProjectID = %q, want the queue's project", cfg.Scale.ProjectID)
+	}
+	if cfg.Scale.MinInstances != 0 {
+		t.Errorf("Scale.MinInstances = %d, want 0", cfg.Scale.MinInstances)
+	}
+	if cfg.Scale.IdleAfter != 15*time.Minute {
+		t.Errorf("Scale.IdleAfter = %s, want 15m", cfg.Scale.IdleAfter)
+	}
+}
+
+func TestScalingRejectsAFloorAboveTheCap(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
+	env["KIBITZ_SCALE_REGION"] = "asia-northeast1"
+	env["KIBITZ_SCALE_WORKER_SERVICE"] = "kibitz-worker"
+	env["KIBITZ_SCALE_MIN_INSTANCES"] = "5"
+	env["KIBITZ_SCALE_MAX_INSTANCES"] = "2"
+
+	_, err := config.LoadServer(config.MapEnv(env))
+	if err == nil || !strings.Contains(err.Error(), "KIBITZ_SCALE_MAX_INSTANCES") {
+		t.Fatalf("error = %v, want the cap reported", err)
+	}
+}
+
+func TestLoadScaler(t *testing.T) {
+	env := map[string]string{
+		"KIBITZ_PUBSUB_PROJECT_ID":    "kibitz-dev",
+		"KIBITZ_SCALE_BACKEND":        "cloudrun",
+		"KIBITZ_SCALE_REGION":         "asia-northeast1",
+		"KIBITZ_SCALE_WORKER_SERVICE": "kibitz-worker",
+	}
+
+	cfg, err := config.LoadScaler(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadScaler: %v", err)
+	}
+	if cfg.Queue.PubSub.Subscription != "kibitz-worker" {
+		t.Errorf("Subscription = %q, want the default", cfg.Queue.PubSub.Subscription)
+	}
+	if cfg.Scale.Interval != time.Minute {
+		t.Errorf("Interval = %s, want 1m", cfg.Scale.Interval)
+	}
+
+	// A scaler with nothing to scale is a misconfiguration, not a no-op.
+	delete(env, "KIBITZ_SCALE_BACKEND")
+	if _, err := config.LoadScaler(config.MapEnv(env)); err == nil {
+		t.Error("LoadScaler succeeded without a backend, want it rejected")
+	}
+}

@@ -31,6 +31,11 @@ variable "worker_image" {
   type        = string
 }
 
+variable "scaler_image" {
+  description = "Image for kibitz-scaler, which sizes the worker from the queue backlog."
+  type        = string
+}
+
 variable "model" {
   description = <<-EOT
     Model the agent runs, as provider/model.
@@ -90,6 +95,21 @@ variable "allowed_repos" {
   default     = ["*"]
 }
 
+variable "trigger_keywords" {
+  description = <<-EOT
+    Keywords that ask for a review. When this is empty every pull request is
+    reviewed; setting it means only pull requests whose title or description
+    contain one of these (or a mention of the bot) are published at all.
+
+    Comments are never gated: addressing the bot is already a request.
+
+    It is also what keeps the queue empty enough for the worker to sit at
+    zero instances, so a busy repository wants it set.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "bot_logins" {
   description = "Accounts kibitz posts as. Events they author are dropped so the bot never answers itself."
   type        = list(string)
@@ -115,6 +135,39 @@ variable "worker_max_instances" {
   description = "Upper bound on worker instances. This is the real cap on model spend."
   type        = number
   default     = 3
+}
+
+variable "worker_min_instances" {
+  description = <<-EOT
+    Worker instances kept running when the queue is empty. Zero is the point
+    of the autoscaler: between reviews nothing runs and nothing is billed.
+    Set 1 to keep the worker warm and still have it scale out under load.
+  EOT
+  type        = number
+  default     = 0
+}
+
+variable "worker_idle_after" {
+  description = <<-EOT
+    How long the queue must be empty before the worker is scaled away. It has
+    to outlast Cloud Monitoring's own delay in reporting the backlog, which is
+    why the default is generous; shortening it risks removing an instance that
+    is still working.
+  EOT
+  type        = string
+  default     = "15m"
+}
+
+variable "worker_messages_per_instance" {
+  description = "Queued messages one worker instance is expected to absorb before another is added. It normally matches worker_concurrency."
+  type        = number
+  default     = 2
+}
+
+variable "scaler_schedule" {
+  description = "How often the scaler reconciles, as a cron expression. Every minute is the finest Cloud Scheduler allows; the server wakes the worker directly, so this only decides how quickly it scales out and back down."
+  type        = string
+  default     = "* * * * *"
 }
 
 variable "job_timeout" {

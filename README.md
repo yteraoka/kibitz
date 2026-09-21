@@ -20,6 +20,7 @@ AI による **コードレビュー** と **問い合わせへの回答** を�
         │  - 署名 / トークン検証       │
         │  - 正規化イベントへ変換      │
         │  - トリガ判定・フィルタ      │
+        │  - worker を起こす           │
         │  - 即座に 202 を返す         │
         └──────────────┬───────────────┘
                        │ publish
@@ -31,8 +32,8 @@ AI による **コードレビュー** と **問い合わせへの回答** を�
                        │ subscribe / receive
                        ▼
         ┌──────────────────────────────┐
-        │  kibitz-worker (Go)          │
-        │  - 冪等性チェック / ロック   │
+        │  kibitz-worker (Go)          │◀── kibitz-scaler
+        │  - 冪等性チェック / ロック   │    (バックログから台数を決める)
         │  - リポジトリ取得 (shallow)  │
         │  - OpenCode 実行 (agent)     │──▶ 外部サービス / MCP サーバー
         │  - 結果を Forge API へ投稿   │
@@ -44,8 +45,9 @@ AI による **コードレビュー** と **問い合わせへの回答** を�
 
 - **kibitz-server**: Webhook 受信専用。ステートレスで、検証・正規化・publish だけを行い高速に応答する。
 - **kibitz-worker**: キューを subscribe し、[OpenCode](https://opencode.ai) をヘッドレス実行してレビュー本文を生成、各プラットフォームの API に投稿する。MCP サーバー経由で外部サービス (Issue トラッカー、ドキュメント検索、Sentry など) を参照できる。
+- **kibitz-scaler**: キューの滞留数からワーカーの台数を決める。**レビューが無い間は 0 インスタンス**で、溜まれば増える。pull 購読にはスケールの根拠になるリクエストが無いため、これを別に用意している ([deployment.md](docs/deployment.md#ワーカーのオートスケール))。
 
-両者とも Go で実装し、キュー・ストレージ・Forge API はすべてインターフェースで抽象化して
+いずれも Go で実装し、キュー・ストレージ・Forge API はすべてインターフェースで抽象化して
 GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれでも同じコードパスで動かす。
 
 ## ドキュメント
@@ -87,7 +89,7 @@ mise install       # mise.toml に書かれたバージョンを入れる
 make test          # go test -race -cover ./...
 make lint          # golangci-lint (初回は自動でインストール)
 make ci            # vet + lint + test + govulncheck + build
-make build         # bin/kibitz-server, bin/kibitz-worker
+make build         # bin/kibitz-server, bin/kibitz-worker, bin/kibitz-scaler
 make docker-build  # イメージをホストのアーキテクチャでビルドする
 make up            # docker compose で両方を起動し /healthz を待つ
 make up-pubsub     # Pub/Sub と Firestore のエミュレータも起動する

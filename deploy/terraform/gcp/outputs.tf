@@ -33,6 +33,19 @@ output "service_accounts" {
   value = {
     server = google_service_account.server.email
     worker = google_service_account.worker.email
+    scaler = google_service_account.scaler.email
+  }
+}
+
+output "worker_scaling" {
+  description = "How the worker's instance count is decided. Terraform sets the starting point; kibitz-server and kibitz-scaler own it from then on."
+  value = {
+    service       = google_cloud_run_v2_service.worker.name
+    scaler_job    = google_cloud_run_v2_job.scaler.name
+    schedule      = google_cloud_scheduler_job.scaler.schedule
+    min_instances = var.worker_min_instances
+    max_instances = var.worker_max_instances
+    idle_after    = var.worker_idle_after
   }
 }
 

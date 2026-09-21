@@ -34,6 +34,17 @@ type Receiver struct {
 	publishBackoff  time.Duration
 	now             func() time.Time
 	metrics         *telemetry.Metrics
+	waker           Waker
+}
+
+// Waker is told that something was queued. On a platform where the worker has
+// no inbound traffic to scale on, that notice is what starts it: the backlog
+// metric the autoscaler otherwise runs on is minutes behind, and a review
+// should not wait for it.
+//
+// Wake is called on the webhook's own goroutine, so it must not block.
+type Waker interface {
+	Wake()
 }
 
 // ReceiverOption customizes a receiver.
@@ -69,6 +80,12 @@ func WithPublishRetry(attempts int, backoff, timeout time.Duration) ReceiverOpti
 // WithMetrics records webhook outcomes.
 func WithMetrics(m *telemetry.Metrics) ReceiverOption {
 	return func(r *Receiver) { r.metrics = m }
+}
+
+// WithWaker makes the receiver announce published work, so the worker can be
+// started before the queue metrics notice it.
+func WithWaker(w Waker) ReceiverOption {
+	return func(r *Receiver) { r.waker = w }
 }
 
 // WithReceiverClock replaces the clock used for staleness checks.
@@ -176,6 +193,9 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		platform := string(ev.Source.Platform)
 		rc.metrics.WebhooksReceived.WithLabelValues(platform, "published", "").Inc()
 		rc.metrics.EventsPublished.WithLabelValues(platform, string(ev.Kind)).Inc()
+	}
+	if rc.waker != nil {
+		rc.waker.Wake()
 	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event published",
 		slog.String("platform", string(ev.Source.Platform)),

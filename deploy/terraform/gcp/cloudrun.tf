@@ -57,6 +57,26 @@ resource "google_cloud_run_v2_service" "server" {
         name  = "KIBITZ_BOT_LOGINS"
         value = join(",", var.bot_logins)
       }
+      env {
+        name  = "KIBITZ_TRIGGER_KEYWORDS"
+        value = join(",", var.trigger_keywords)
+      }
+      # The worker is allowed to sit at zero instances, so publishing is not
+      # enough on its own: the server starts it as soon as it queues
+      # something, rather than leaving the review to wait for the next
+      # backlog sample. The scaler handles the way back down.
+      env {
+        name  = "KIBITZ_SCALE_BACKEND"
+        value = "cloudrun"
+      }
+      env {
+        name  = "KIBITZ_SCALE_REGION"
+        value = var.region
+      }
+      env {
+        name  = "KIBITZ_SCALE_WORKER_SERVICE"
+        value = "${var.name_prefix}-worker"
+      }
       # Cloud Run exposes a single port, so /metrics rides on the main
       # listener. The counters carry no repository or user names.
       env {
@@ -93,6 +113,8 @@ resource "google_cloud_run_v2_service" "server" {
   depends_on = [
     google_secret_manager_secret_iam_member.server_webhook,
     google_pubsub_topic_iam_member.server_publish,
+    google_cloud_run_v2_service_iam_member.worker_scaling,
+    google_service_account_iam_member.worker_act_as,
   ]
 }
 
@@ -105,8 +127,11 @@ resource "google_cloud_run_v2_service_iam_member" "server_public" {
   member   = "allUsers"
 }
 
-# The worker pulls from the subscription, so it has no inbound traffic to scale
-# on: it needs an instance that is always running with the CPU always granted.
+# The worker pulls from the subscription, so it has no inbound traffic for
+# Cloud Run to scale on. kibitz supplies the missing signal itself: the server
+# starts it when it publishes, and kibitz-scaler sizes it from the backlog and
+# returns it to zero once the queue has been empty for a while. See
+# autoscale.tf and docs/deployment.md.
 resource "google_cloud_run_v2_service" "worker" {
   name     = "${var.name_prefix}-worker"
   location = var.region
@@ -122,8 +147,11 @@ resource "google_cloud_run_v2_service" "worker" {
     # not be frozen between requests.
     max_instance_request_concurrency = 1
 
+    # The revision template's floor stays at zero. The count that actually
+    # applies is the service-level one below, which is the only one that can
+    # be changed without rolling a new revision (and interrupting a review).
     scaling {
-      min_instance_count = 1
+      min_instance_count = 0
       max_instance_count = var.worker_max_instances
     }
 
@@ -281,6 +309,17 @@ resource "google_cloud_run_v2_service" "worker" {
         size_limit = "2Gi"
       }
     }
+  }
+
+  # Service-level scaling is what the server and the scaler write at runtime.
+  # Terraform sets the starting point and then leaves it alone: the two would
+  # otherwise undo each other on every apply.
+  scaling {
+    min_instance_count = var.worker_min_instances
+  }
+
+  lifecycle {
+    ignore_changes = [scaling]
   }
 
   depends_on = [

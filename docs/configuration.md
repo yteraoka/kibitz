@@ -26,7 +26,13 @@
 | `KIBITZ_BOT_LOGINS` | - | 自分自身の発言を無視するためのアカウント名 (プラットフォーム別) |
 | `KIBITZ_ALLOWED_REPOS` | `*` | 受け付けるリポジトリのグロブ (カンマ区切り) |
 | `KIBITZ_MENTION` | `@kibitz` | コマンドのメンション名 |
+| `KIBITZ_TRIGGER_KEYWORDS` | - | レビュー依頼のキーワード (カンマ区切り)。設定すると PR 系イベントはタイトルか本文にこれらかメンションを含むときだけ publish する。コメントは常に対象 ([event-schema.md](event-schema.md#31-キーワードによる-publish-の絞り込み)) |
 | `KIBITZ_MAX_EVENT_AGE` | `0` (無効) | これより古い配送を破棄する。0 は無効 (下記) |
+| `KIBITZ_SCALE_BACKEND` | `none` | `cloudrun` にすると publish 直後にワーカーのインスタンス数を 1 に引き上げる |
+| `KIBITZ_SCALE_PROJECT_ID` | `KIBITZ_PUBSUB_PROJECT_ID` | ワーカーがいるプロジェクト |
+| `KIBITZ_SCALE_REGION` | - | ワーカーのリージョン (backend=cloudrun で必須) |
+| `KIBITZ_SCALE_WORKER_SERVICE` | - | ワーカーの Cloud Run サービス名 (同上) |
+| `KIBITZ_SCALE_WAKE_COOLDOWN` | `30s` | 起動要求をまとめる間隔。初回は待たない |
 
 ## 2. kibitz-worker (環境変数)
 
@@ -84,6 +90,29 @@ Vertex AI の認証はサービスアカウント鍵ファイルを配置せず�
 > GLM は `zai/glm-5.3` で、`ZHIPU_API_KEY` を見る。
 > 一覧はワーカーのイメージ内で `opencode models <provider>` で引ける
 > ([deployment.md](deployment.md#モデルの選び方))。
+
+## 2.1 kibitz-scaler (環境変数)
+
+Pub/Sub のバックログからワーカーのインスタンス数を決める小さなジョブ。
+Cloud Run ジョブとして Cloud Scheduler から毎分起動する
+([deployment.md](deployment.md#ワーカーのオートスケール))。
+
+| 変数 | 既定 | 説明 |
+| --- | --- | --- |
+| `KIBITZ_PUBSUB_PROJECT_ID` | - | 監視するサブスクリプションのプロジェクト (必須) |
+| `KIBITZ_PUBSUB_SUBSCRIPTION` | `kibitz-worker` | 監視するサブスクリプション |
+| `KIBITZ_SCALE_BACKEND` | - | `cloudrun` (必須) |
+| `KIBITZ_SCALE_REGION` / `_WORKER_SERVICE` | - | 対象のワーカーサービス (必須) |
+| `KIBITZ_SCALE_MIN_INSTANCES` | `0` | キューが空のときのインスタンス数 |
+| `KIBITZ_SCALE_MAX_INSTANCES` | `3` | 上限 |
+| `KIBITZ_SCALE_MESSAGES_PER_INSTANCE` | `2` | 1 インスタンスが引き受けるメッセージ数。通常は `KIBITZ_CONCURRENCY` と同じ |
+| `KIBITZ_SCALE_IDLE_AFTER` | `15m` | この時間ずっとキューが空なら最小まで下げる |
+| `KIBITZ_SCALE_INTERVAL` | `1m` | `-loop` で常駐させたときの間隔 (ジョブ実行では未使用) |
+
+`-loop` を付けなければ 1 回調整して終了する (Cloud Run ジョブ向け)。
+
+必要な権限は `roles/monitoring.viewer` と、**ワーカーサービスに対する**
+`roles/run.developer`。プロジェクト全体の権限は要らない。
 
 ## 3. リポジトリ設定 `.kibitz.yaml`
 

@@ -119,6 +119,8 @@ publish する条件 (サーバー):
   - actor が自分自身 (bot) ではない
   - 全体設定の allow/deny リスト (org / repo) に合致する
   - comment.created の場合はメンションかコマンドを含む
+  - PR 系イベントの場合、KIBITZ_TRIGGER_KEYWORDS が設定されているなら
+    タイトルか本文にそのいずれか (またはメンション) を含む
 
 実行する条件 (ワーカー、.kibitz.yaml 読み込み後):
   - review.enabled / answer.enabled
@@ -147,6 +149,34 @@ PR コメント中の 1 行として解釈する。プラットフォーム共�
 ```
 
 メンション名は設定で変更可能にする (GitLab / ADO ではボットアカウント名が異なるため)。
+
+### 3.1 キーワードによる publish の絞り込み
+
+`KIBITZ_TRIGGER_KEYWORDS` (Terraform では `trigger_keywords`) を設定すると、
+**PR 系イベントは「レビューを依頼された PR」だけが publish される**。
+
+```
+KIBITZ_TRIGGER_KEYWORDS=/review,[review],レビュー希望
+```
+
+| イベント | キーワード未設定 | キーワード設定あり |
+| --- | --- | --- |
+| `pr.opened` / `pr.updated` / `pr.ready_for_review` / `pr.review_requested` | publish | タイトルか本文に含むときだけ publish |
+| `pr.closed` / `pr.merged` | publish | 同上 |
+| `comment.created` (メンションあり) | publish | publish (キーワード不要) |
+| `command` | publish | publish (キーワード不要) |
+
+- 判定対象は PR の**タイトルと本文**。大文字小文字は区別しない。
+- メンション (`@kibitz`) 自体もキーワードとして扱う。本文に `@kibitz お願いします`
+  と書けばレビューされる。
+- コメントは対象外。ボットに話しかけること自体が依頼なので、PR 側のキーワードは要らない。
+- 途中からレビューさせたくなったら、PR の説明を編集するのではなくコメントで
+  `@kibitz review` と書くのが確実 (`edited` は元々 publish していない)。
+
+publish されなかったイベントは HTTP 204 とメトリクス
+`kibitz_webhooks_received_total{outcome="skipped",reason="no_keyword"}` になる。
+キューにメッセージが載らないので、ワーカーも起きない ([deployment.md](deployment.md) の
+オートスケール)。
 
 ## 5. テスト方針
 

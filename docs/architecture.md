@@ -60,9 +60,12 @@ Webhook を受け取り、検証して正規化イベントを publish するだ
    - 自分自身 (bot) の発言 → 無視 (無限ループ防止)
    - draft PR / 除外パスのみの変更 / 対象外イベント種別 → 無視
    - コメントはコマンド (例: "@kibitz review") かどうか判定
+   - キーワードを設定している場合、PR 系イベントはタイトル/本文に
+     キーワードかメンションを含むものだけ
 5. 必要なら生 payload を blobstore に退避し、参照だけをイベントに載せる (Claim Check)
 6. queue.Publisher.Publish() — 短いタイムアウト + 数回のリトライ
-7. 202 Accepted (publish 失敗時のみ 5xx を返し、Forge 側の再送に委ねる)
+7. ワーカーの起動要求 (0 インスタンスから立ち上げる。2.3 を参照)
+8. 202 Accepted (publish 失敗時のみ 5xx を返し、Forge 側の再送に委ねる)
 ```
 
 標準ライブラリの `net/http` + Go 1.22 の `http.ServeMux` を使い、Web フレームワークは入れない。
@@ -70,7 +73,8 @@ Webhook を受け取り、検証して正規化イベントを publish するだ
 
 ### 2.2 kibitz-worker
 
-キューを購読し、1 メッセージ = 1 ジョブとして処理する常駐プロセス。
+キューを購読し、1 メッセージ = 1 ジョブとして処理するプロセス。
+仕事がある間だけ動いていればよく、台数は 2.3 の scaler が決める。
 
 ```
 1. メッセージ受信 → event.ReviewEvent にデコード (schema_version を確認)
@@ -89,7 +93,30 @@ Webhook を受け取り、検証して正規化イベントを publish するだ
 長時間処理のため、処理中は ack 期限 (Pub/Sub) / 可視性タイムアウト (SQS) を延長し続ける。
 OpenCode の同時実行数はセマフォで制限する (メモリとトークン消費が大きいため)。
 
-### 2.3 Forge クライアント
+### 2.3 kibitz-scaler
+
+ワーカーは pull 購読なので Cloud Run から見ると**リクエストが来ない**。
+プラットフォーム側にスケールの根拠が無いので、キューの滞留数をその根拠にする
+小さなジョブを別に置く。
+
+```
+Cloud Scheduler ──毎分──> kibitz-scaler
+                              ├─ Cloud Monitoring から num_undelivered_messages を読む
+                              ├─ 溜まっていれば ceil(件数 / N) 台 (上限あり)
+                              ├─ 一定時間ずっと空なら最小 (既定 0) 台
+                              └─ 読めなければ 1 台のまま (下げない)
+```
+
+- 立ち上げ自体はサーバーが publish 直後に行う。メトリクスは数分遅れるため、
+  それを待つとレビューの開始が遅れる。scaler は増減と 0 への回収を担当する。
+- 滞留数には **ack されていない配送済みメッセージも含まれる**ので、レビュー実行中の
+  ワーカーが「空」と判定されて消されることはない。
+- 書き換えるのはサービスレベルのインスタンス数だけで、リビジョンテンプレートには
+  触らない (新リビジョンが作られると実行中のレビューが中断されるため)。
+
+詳細は [deployment.md](deployment.md#ワーカーのオートスケール)。
+
+### 2.4 Forge クライアント
 
 プラットフォームごとの読み書きを 1 つのインターフェースに閉じ込める。
 
@@ -136,7 +163,7 @@ type Writer interface {
 レートリミットは各クライアント内で処理する (`Retry-After` / `X-RateLimit-Remaining` を見た待機、
 指数バックオフ + ジッタ、`golang.org/x/time/rate` による送信レート制御)。
 
-### 2.4 状態ストア
+### 2.5 状態ストア
 
 ```go
 // internal/store
@@ -179,7 +206,8 @@ type StateStore interface {
 .
 ├── cmd/
 │   ├── kibitz-server/main.go
-│   └── kibitz-worker/main.go
+│   ├── kibitz-worker/main.go
+│   └── kibitz-scaler/main.go
 ├── internal/
 │   ├── config/            # 環境変数・設定ファイルの読み込みと検証
 │   ├── httpx/             # ミドルウェア、ヘルスチェック、graceful shutdown
@@ -204,9 +232,10 @@ type StateStore interface {
 │   │   ├── prompt/        #   テンプレートと diff 整形
 │   │   └── result.go      #   構造化出力のスキーマと検証
 │   ├── policy/            # トリガ判定、フィルタ、予算・件数制限
+│   ├── scale/             # バックログからワーカーの台数を決める
 │   └── telemetry/         # slog, OpenTelemetry, メトリクス
 ├── deploy/
-│   ├── docker/            # server / worker の Dockerfile
+│   ├── docker/            # server / worker / scaler の Dockerfile
 │   ├── terraform/         # gcp / aws モジュール
 │   └── helm/              # Kubernetes 用 (任意)
 ├── testdata/              # 実 Webhook payload のフィクスチャ
@@ -270,7 +299,8 @@ type Result struct {
 | --- | --- | --- |
 | server | Cloud Run (HTTP) | ECS Fargate + ALB、または Lambda + API Gateway |
 | queue | Cloud Pub/Sub | SQS FIFO (+ DLQ) |
-| worker | GKE / Cloud Run worker pool (pull 購読) | ECS Fargate (常駐) |
+| worker | Cloud Run (pull 購読、台数は kibitz-scaler が決める) | ECS Fargate (常駐) |
+| scaler | Cloud Run ジョブ + Cloud Scheduler | (SQS + Application Auto Scaling) |
 | blob | Cloud Storage | S3 |
 | state | Firestore | DynamoDB |
 | secret | Secret Manager | Secrets Manager / SSM Parameter Store |
