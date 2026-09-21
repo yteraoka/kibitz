@@ -67,6 +67,9 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 - **当面はコメント投稿のみ。** 将来的に Issue からの指示でコードを実装し、
   ブランチと PR を作るモードを追加する ([docs/roadmap.md](docs/roadmap.md) Phase 8)。
 - エージェントエンジンは **OpenCode** を採用 ([docs/agent-engine.md](docs/agent-engine.md))。
+- GitHub は **GitHub App** で認証する (PAT は使わない)。
+- モデルは **Vertex AI 経由の Claude** (既定 `claude-opus-5`)。認証は Workload Identity。
+- レビューと回答の**出力は日本語**。
 
 ## ステータス
 

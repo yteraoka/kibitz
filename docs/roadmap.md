@@ -12,6 +12,9 @@ Phase 2 の時点で「GitHub の PR に AI レビューが付く」状態を作
 | テナント | **単一組織** | 設定モデルにテナント ID を持たせない。キー設計は将来足せる形にしておく |
 | ワーカーの権限 | **当面はコメント投稿のみ**。将来 Issue 起点の実装まで | 実装モードを Phase 8 として独立させ、既定は無効。レビュー側の「読み取りのみ」保証は崩さない |
 | エージェントエンジン | **OpenCode** ([agent-engine.md](agent-engine.md)) | MCP がビルトインである点が決め手。`reviewer.Engine` で抽象化し pi も差し替え可能に保つ |
+| GitHub の認証 | **GitHub App** | インストールトークンが 1 時間で失効し権限も細かい。PAT 経路は実装しない |
+| モデル | **Vertex AI 経由の Claude** (既定 `claude-opus-5`) | GCP メインと揃う。ADC で認証でき、モデル API キーという長期シークレットを持たずに済む |
+| 出力言語 | **日本語** | `review.language` で切り替え可能にはするが、既定は日本語 |
 
 ## Phase 0: 土台 (目安 2〜3 日)
 
@@ -39,9 +42,11 @@ Phase 2 の時点で「GitHub の PR に AI レビューが付く」状態を作
 ## Phase 2: 最初のエンドツーエンド (GitHub + Pub/Sub + OpenCode) (目安 2 週)
 
 - `internal/queue/pubsub` — Publisher / Subscriber (ordering key、ack 延長、DLQ)
-- `internal/forge` — `Client` インターフェースと GitHub 実装 (App 認証、diff 取得、レビュー投稿)
+- `internal/forge` — `Client` インターフェースと GitHub 実装
+  (**GitHub App 認証**: JWT → installation token、期限管理とキャッシュ、diff 取得、レビュー投稿)
 - `internal/workspace` — shallow clone、PR ref fetch、後片付け、サイズ上限
 - `internal/reviewer/opencode` — `opencode run --format json` の駆動、タイムアウト、JSON イベント解析
+  (**Vertex AI 経由**。Workload Identity による ADC で認証し、鍵ファイルは置かない)
 - `internal/reviewer/prompt` — プロンプトテンプレートと diff 整形
 - `internal/reviewer/result.go` — 構造化出力のスキーマ検証、件数制限、行番号の妥当性検査
 - エージェント定義 `kibitz-review` と生成する `opencode.json` (権限は読み取りのみで決め切る)
@@ -183,12 +188,15 @@ Phase 8 以降は「Issue 本文に書かれた指示で許可外のファイル
 
 ## 残る未決事項
 
-1. **GitHub の認証方式**: GitHub App と PAT のどちらにするか。
-   GitHub Enterprise Server / self-managed GitLab / Azure DevOps Server (オンプレ) の対応は必要か。
-   → 推奨は GitHub App (権限が細かく、トークンが 1 時間で失効する)。
-2. **モデルとプロバイダ**: GCP メインなら Vertex AI 経由が素直だが、
-   Anthropic 直の API と比べてモデルの提供時期やリージョン、データ保持ポリシーに差がある。
-   どちらを既定にするか (`KIBITZ_MODEL` で切り替え可能にはする)。
-3. **レビューの出力言語**: 日本語固定を既定とするか (リポジトリ設定で切り替え可能にはする)。
-4. **レビュー時のビルド・テスト実行**: Phase 8 でサンドボックスを作るので技術的には可能になる。
+1. **レビュー時のビルド・テスト実行**: Phase 8 でサンドボックスを作るので技術的には可能になる。
    レビュー精度は上がるがコストと時間が増える。レビューでも実行するかは Phase 8 後に判断する。
+2. **オンプレ / self-managed 対応の要否**: GitHub Enterprise Server、self-managed GitLab、
+   Azure DevOps Server。ベース URL の可変化だけで済む部分が多いので、
+   必要になった時点で対応すればよい (設計としては最初から可変にしておく)。
+
+### Phase 0 で確認すること
+
+- OpenCode における Vertex AI のプロバイダ ID (`google-vertex-anthropic` か `google-vertex` か)
+- 使用するリージョンで `claude-opus-5` が提供されているか (Model Garden で確認)
+- Vertex AI の割り当て (1 分あたりのリクエスト数・トークン数) と、
+  ワーカーの同時実行数 `KIBITZ_CONCURRENCY` の整合

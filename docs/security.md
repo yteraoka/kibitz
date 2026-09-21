@@ -23,12 +23,12 @@
 
 ## 2. 認証情報
 
-| 用途 | 推奨 | 備考 |
+| 用途 | 採用 | 備考 |
 | --- | --- | --- |
-| GitHub | GitHub App (installation token, 1 時間) | PAT より権限が細かく、失効も早い。秘密鍵は Secret Manager |
+| GitHub | **GitHub App** (installation token, 1 時間) | PAT 経路は実装しない。App の秘密鍵は Secret Manager に置き、メモリ上でのみ復号する |
 | GitLab | Project / Group Access Token | 期限付き。必要スコープは `api` (read+write of notes) |
 | Azure DevOps | Microsoft Entra ID のサービスプリンシパル (推奨) / PAT | PAT は期限が長くなりがちなので Entra ID を優先 |
-| モデル API | Secret Manager / Secrets Manager | ワーカーのみが参照。サーバーには渡さない |
+| モデル API | **Vertex AI + Workload Identity (ADC)** | API キーを持たない。ワーカーの SA に `roles/aiplatform.user` のみ付与。サーバーには付けない |
 | MCP 用の外部サービス | Secret Manager | ジョブ実行時にだけ環境変数として注入 |
 
 - トークンはメモリ上のみで扱い、ログ・エラーメッセージ・OpenCode のプロンプトに入れない。
@@ -78,8 +78,11 @@ PR のタイトル・本文・差分・コメントはすべて**外部の第三
 - `.env`、鍵ファイル、`*.pem`、`credentials.*` などは既定で読み取り対象から除外する
   (差分に含まれていた場合は「シークレットがコミットされている可能性」として指摘だけ行い、内容は引用しない)。
 - 生 payload とワークスペースは処理後に削除し、blob は 7 日のライフサイクルで消す。
-- モデルプロバイダの学習利用がオフになっている契約 / エンドポイントを使う
-  (Bedrock / Vertex AI / 各社のゼロデータ保持オプション)。
+- **Vertex AI 経由**で利用する。顧客データがモデルの学習に使われないこと、
+  および保持ポリシーは Google Cloud の規約に従う。
+  データ所在地の要件がある場合は `VERTEX_LOCATION` を `global` から特定リージョン
+  (例: `asia-northeast1`) に変更する。ただしリージョンによって使えるモデルが異なるため、
+  要件とモデルの可用性を突き合わせて決める。
 - 監査ログ: どの PR に対し、どのモデルで、どのツールを呼び、何を投稿したかを記録する。
 
 ## 6. 実装モードの追加対策 (Phase 8)

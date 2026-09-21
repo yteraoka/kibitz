@@ -39,17 +39,29 @@
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
-| `KIBITZ_MODEL` | `anthropic/claude-sonnet-4-5` | `provider/model` 形式 |
+| `KIBITZ_MODEL` | `google-vertex-anthropic/claude-opus-5` | `provider/model` 形式。Vertex AI 経由 |
+| `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
 | `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替 |
+| `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
+| `VERTEX_LOCATION` | `global` | Vertex AI のリージョン。データ所在地要件があれば `asia-northeast1` 等を指定 |
 | `KIBITZ_MAX_COMMENTS` | `20` | 1 PR あたりの投稿上限 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | 超過時は triage モード |
 | `KIBITZ_MCP_ALLOWLIST` | - | 有効化を許す MCP 名 (カンマ区切り) |
-| `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 |
+| `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
 | `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | GitLab 認証 |
 | `KIBITZ_AZDO_ORG_URL` / `_TOKEN` | - | Azure DevOps 認証 |
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
 起動時 + 定期リフレッシュで取得する (`KIBITZ_*_SECRET_REF` に参照名を置く形も用意する)。
+
+Vertex AI の認証はサービスアカウント鍵ファイルを配置せず、
+**GKE の Workload Identity (または Cloud Run のサービスアカウント) による ADC** を使う。
+ワーカーのサービスアカウントに必要なのは `roles/aiplatform.user` のみ。
+
+> **要確認 (Phase 0)**: OpenCode における Vertex AI のプロバイダ ID は models.dev 由来で、
+> `google-vertex-anthropic` か `google-vertex` かを実機で確認して確定する
+> (`opencode models` などで一覧を出す)。モデル ID 側は Vertex でも接頭辞なしの
+> `claude-opus-5` 形式で、日付スナップショットを使う場合のみ `@` 区切りになる。
 
 ## 3. リポジトリ設定 `.kibitz.yaml`
 
@@ -72,14 +84,14 @@ review:
     - "**/*_generated.go"
   # 観点
   focus: [correctness, security, performance]
-  # 出力言語
+  # 出力言語 (既定は ja)
   language: ja
   # 投稿する最小 severity
   min_severity: medium
   max_comments: 15
   # 承認 / 変更要求を出すか (既定 false)
   allow_verdict: false
-  model: anthropic/claude-sonnet-4-5
+  model: google-vertex-anthropic/claude-opus-5
 
 answer:
   enabled: true
