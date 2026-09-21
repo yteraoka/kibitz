@@ -1,0 +1,23 @@
+# Overrides that point both binaries at the Pub/Sub emulator.
+#
+#   make up-pubsub
+#
+# The emulator's topic and subscription are created by that target; the
+# emulator itself starts empty on every run.
+services:
+  server:
+    environment:
+      KIBITZ_QUEUE_BACKEND: pubsub
+      KIBITZ_PUBSUB_PROJECT_ID: kibitz-dev
+      KIBITZ_PUBSUB_TOPIC: kibitz-events
+    depends_on:
+      - pubsub
+
+  worker:
+    environment:
+      KIBITZ_QUEUE_BACKEND: pubsub
+      KIBITZ_PUBSUB_PROJECT_ID: kibitz-dev
+      KIBITZ_PUBSUB_TOPIC: kibitz-events
+      KIBITZ_PUBSUB_SUBSCRIPTION: kibitz-worker
+    depends_on:
+      - pubsub

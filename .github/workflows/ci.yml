@@ -50,6 +50,34 @@ jobs:
       - name: Lint
         run: golangci-lint run
 
+  # The Pub/Sub tests run against an in-process fake in the `test` job. This
+  # job repeats them against the real emulator, which is the only thing that
+  # implements message ordering faithfully.
+  emulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start the Pub/Sub emulator
+        run: |
+          docker run -d --name pubsub -p 8085:8085 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators pubsub start --project=kibitz-test --host-port=0.0.0.0:8085
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8085/v1/projects/kibitz-test/topics >/dev/null 2>&1; then
+              echo "emulator is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "emulator did not start"; docker logs pubsub; exit 1
+      - name: Run the Pub/Sub tests against the emulator
+        env:
+          PUBSUB_EMULATOR_HOST: localhost:8085
+        run: go test -race -count=1 ./internal/queue/pubsub/...
+
   vuln:
     runs-on: ubuntu-latest
     steps:

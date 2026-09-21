@@ -68,13 +68,37 @@ up:
 	done; \
 	echo "kibitz-server did not become healthy in time"; docker compose logs; exit 1
 
+# Brings the stack up against the Pub/Sub emulator, creating the topic and the
+# ordered subscription the worker expects.
 .PHONY: up-pubsub
 up-pubsub:
-	docker compose --profile pubsub up --build -d
+	docker compose --profile pubsub -f docker-compose.yml -f docker-compose.pubsub.yml up --build -d
+	@echo "waiting for the pubsub emulator ..."
+	@for i in $$(seq 1 30); do \
+		if curl -fsS http://localhost:8085/v1/projects/kibitz-dev/topics >/dev/null 2>&1; then break; fi; \
+		sleep 1; \
+	done
+	@$(MAKE) --no-print-directory pubsub-init
+
+# Creates the emulator's topic and subscription. Safe to re-run.
+.PHONY: pubsub-init
+pubsub-init:
+	@curl -fsS -X PUT http://localhost:8085/v1/projects/kibitz-dev/topics/kibitz-events >/dev/null \
+		|| echo "topic already exists"
+	@curl -fsS -X PUT http://localhost:8085/v1/projects/kibitz-dev/subscriptions/kibitz-worker \
+		-H 'Content-Type: application/json' \
+		-d '{"topic":"projects/kibitz-dev/topics/kibitz-events","enableMessageOrdering":true,"ackDeadlineSeconds":60}' >/dev/null \
+		|| echo "subscription already exists"
+	@echo "pubsub emulator is ready"
+
+# Runs the tests that need the Pub/Sub emulator (skipped by `make test`).
+.PHONY: test-integration
+test-integration:
+	PUBSUB_EMULATOR_HOST=localhost:8085 $(GO) test -race -count=1 ./internal/queue/pubsub/...
 
 .PHONY: down
 down:
-	docker compose --profile pubsub down -v
+	docker compose --profile pubsub -f docker-compose.yml -f docker-compose.pubsub.yml down -v
 
 .PHONY: docker-build
 docker-build:

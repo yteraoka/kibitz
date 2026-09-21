@@ -18,6 +18,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue"
 	"github.com/yteraoka/kibitz/internal/queue/memory"
+	"github.com/yteraoka/kibitz/internal/queue/pubsub"
 	"github.com/yteraoka/kibitz/internal/run"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/webhook"
@@ -59,7 +60,7 @@ func realMain() error {
 		logger.LogAttrs(ctx, slog.LevelWarn, "no webhook credentials configured; inbound webhooks will be rejected")
 	}
 
-	publisher, err := newPublisher(cfg)
+	publisher, err := newPublisher(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -122,15 +123,21 @@ func realMain() error {
 }
 
 // newPublisher builds the queue publisher for the configured backend.
-func newPublisher(cfg *config.Server) (queue.Publisher, error) {
+func newPublisher(ctx context.Context, cfg *config.Server) (queue.Publisher, error) {
 	switch cfg.Queue.Backend {
+	case config.QueuePubSub:
+		return pubsub.NewPublisher(ctx, pubsub.Config{
+			ProjectID: cfg.Queue.PubSub.ProjectID,
+			Topic:     cfg.Queue.PubSub.Topic,
+		})
 	case config.QueueMemory:
+		// Development only: events go nowhere a worker can reach them.
 		return memory.New(), nil
 	default:
-		// Pub/Sub arrives in Phase 2 and SQS in Phase X (docs/roadmap.md).
-		// Failing here is deliberate: a server that accepts webhooks and drops
-		// them would look healthy while losing every review.
-		return nil, fmt.Errorf("queue backend %q is not implemented yet; set KIBITZ_QUEUE_BACKEND=memory for now", cfg.Queue.Backend)
+		// SQS arrives in Phase X (docs/roadmap.md). Failing here is
+		// deliberate: a server that accepts webhooks and drops them would look
+		// healthy while losing every review.
+		return nil, fmt.Errorf("queue backend %q is not implemented yet", cfg.Queue.Backend)
 	}
 }
 

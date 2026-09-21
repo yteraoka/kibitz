@@ -15,9 +15,14 @@ import (
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/config"
+	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/httpx"
+	"github.com/yteraoka/kibitz/internal/queue"
+	"github.com/yteraoka/kibitz/internal/queue/memory"
+	"github.com/yteraoka/kibitz/internal/queue/pubsub"
 	"github.com/yteraoka/kibitz/internal/run"
 	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/worker"
 )
 
 // version is set at build time with -ldflags.
@@ -56,6 +61,18 @@ func realMain() error {
 		slog.Bool("implement_enabled", cfg.ImplementEnabled),
 	)
 
+	subscriber, err := newSubscriber(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := subscriber.Close(); err != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "closing subscriber", slog.String("error", err.Error()))
+		}
+	}()
+
+	w := worker.New(subscriber, worker.HandlerFunc(review), logger, cfg)
+
 	health := httpx.NewHealth(version)
 
 	mux := http.NewServeMux()
@@ -71,7 +88,7 @@ func realMain() error {
 		}
 		return httpx.Serve(ctx, logger, "health", srv, cfg.ShutdownTimeout)
 	})
-	g.Add(func(ctx context.Context) error { return consume(ctx, logger, cfg) })
+	g.Add(w.Run)
 
 	if err := g.Run(ctx); err != nil {
 		return err
@@ -80,14 +97,35 @@ func realMain() error {
 	return nil
 }
 
-// consume will subscribe to the queue and run review jobs. The subscriber and
-// the review engine arrive in Phase 2 (see docs/roadmap.md); until then the
-// worker starts, reports its configuration and waits for a signal, which is
-// what the compose smoke test exercises.
-func consume(ctx context.Context, logger *slog.Logger, cfg *config.Worker) error {
-	logger.LogAttrs(ctx, slog.LevelWarn, "queue subscriber is not implemented yet; idling",
-		slog.String("queue_backend", cfg.Queue.Backend),
+// newSubscriber builds the queue subscriber for the configured backend.
+func newSubscriber(ctx context.Context, cfg *config.Worker, logger *slog.Logger) (queue.Subscriber, error) {
+	switch cfg.Queue.Backend {
+	case config.QueuePubSub:
+		return pubsub.NewSubscriber(ctx, pubsub.Config{
+			ProjectID:    cfg.Queue.PubSub.ProjectID,
+			Topic:        cfg.Queue.PubSub.Topic,
+			Subscription: cfg.Queue.PubSub.Subscription,
+			// Leasing more messages than the worker can start would mean the
+			// deadline extension, rather than the queue, holds the backlog.
+			MaxOutstanding: cfg.Concurrency,
+			// The lease has to outlive the longest job, or a review still in
+			// progress is handed to a second worker.
+			MaxExtension: cfg.JobTimeout + time.Minute,
+		}, logger)
+	case config.QueueMemory:
+		// Development only: nothing publishes into this worker's queue.
+		return memory.New(), nil
+	default:
+		return nil, fmt.Errorf("queue backend %q is not implemented yet", cfg.Queue.Backend)
+	}
+}
+
+// review runs one review. Cloning, the agent run and posting the results land
+// in the rest of Phase 2; for now the job is observable but does no work.
+func review(ctx context.Context, ev *event.ReviewEvent) error {
+	slog.LogAttrs(ctx, slog.LevelWarn, "the review engine is not implemented yet; acknowledging",
+		slog.String("event_id", ev.ID),
+		slog.String("kind", string(ev.Kind)),
 	)
-	<-ctx.Done()
 	return nil
 }
