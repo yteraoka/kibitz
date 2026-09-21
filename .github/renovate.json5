@@ -1,0 +1,99 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+
+  extends: [
+    'config:recommended',
+    // Any action added later without a SHA gets pinned to one, so the pinning
+    // in .github/workflows does not decay as the workflows grow.
+    'helpers:pinGitHubActionDigests',
+    // The repository writes conventional commits; Renovate should too.
+    ':semanticCommits',
+  ],
+
+  timezone: 'Asia/Tokyo',
+
+  // One batch a week. Dependency updates are not urgent often enough to be
+  // worth a pull request arriving on a weekday afternoon, and the dependency
+  // dashboard issue is always there for the times they are.
+  schedule: ['before 9am on monday'],
+
+  // A release that has been public for a few days has had time to be noticed
+  // if it was published from a compromised account. Security updates are
+  // exempt, below: those are worth taking immediately.
+  minimumReleaseAge: '3 days',
+
+  // go.sum and the indirect requirements are generated, not authored, so let
+  // Renovate regenerate them rather than hand-editing go.mod.
+  postUpdateOptions: ['gomodTidy'],
+
+  packageRules: [
+    {
+      // go.mod's `go` directive and the golang image the Dockerfiles build
+      // with are one decision written down in four places. A pull request
+      // that moves only some of them leaves the build and CI disagreeing
+      // about the language version.
+      groupName: 'Go toolchain',
+      matchManagers: ['gomod', 'dockerfile'],
+      matchDepNames: ['go', 'golang'],
+    },
+    {
+      // The otel modules ship as one release train: the API, the SDK and the
+      // exporters are all at a single version and do not promise to compile
+      // against each other across it. They move together or not at all.
+      groupName: 'OpenTelemetry',
+      matchManagers: ['gomod'],
+      matchPackageNames: ['go.opentelemetry.io/**'],
+    },
+    {
+      // Likewise for the Google client libraries, which share generated
+      // protobuf types through google.golang.org/genproto.
+      groupName: 'Google Cloud SDK',
+      matchManagers: ['gomod'],
+      matchPackageNames: [
+        'cloud.google.com/go**',
+        'github.com/googleapis/**',
+        'google.golang.org/api',
+        'google.golang.org/genproto**',
+        'google.golang.org/grpc',
+        'google.golang.org/protobuf',
+      ],
+    },
+    {
+      groupName: 'golang.org/x',
+      matchManagers: ['gomod'],
+      matchPackageNames: ['golang.org/x/**'],
+    },
+  ],
+
+  // A fix for a known vulnerability is the one update worth interrupting for,
+  // so it skips both the weekly window and the quarantine period above.
+  vulnerabilityAlerts: {
+    schedule: ['at any time'],
+    minimumReleaseAge: null,
+  },
+
+  customManagers: [
+    {
+      // golangci-lint is pinned twice, by the Makefile for local runs and by
+      // CI for the linting job, and the two have to agree. Giving both the
+      // same dependency name puts both edits in one pull request.
+      customType: 'regex',
+      description: 'golangci-lint, pinned identically in the Makefile and in CI',
+      managerFilePatterns: ['Makefile', '.github/workflows/ci.yml'],
+      matchStrings: ['GOLANGCI_LINT_VERSION\\s*\\??[:=]\\s*(?<currentValue>v\\S+)'],
+      depNameTemplate: 'golangci/golangci-lint',
+      datasourceTemplate: 'github-releases',
+    },
+    {
+      // Dockerfile.worker explains why opencode is pinned rather than taken
+      // as "latest": the agent's behaviour is part of kibitz's output, so it
+      // should change in a reviewed commit. That is exactly what this is.
+      customType: 'regex',
+      description: 'the opencode build the worker image ships',
+      managerFilePatterns: ['deploy/docker/Dockerfile.worker'],
+      matchStrings: ['ARG OPENCODE_VERSION=(?<currentValue>\\S+)'],
+      depNameTemplate: 'opencode-ai',
+      datasourceTemplate: 'npm',
+    },
+  ],
+}
