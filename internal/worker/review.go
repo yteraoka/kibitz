@@ -40,6 +40,10 @@ type ReviewJob struct {
 	Language   string
 	Guidelines string
 	Model      string
+	// Mention is how a comment addresses kibitz. It is only used to write the
+	// help text, which would otherwise tell people to use a token this
+	// deployment does not answer to.
+	Mention string
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
 	// Store remembers which commits have already been reviewed and how much
@@ -100,7 +104,7 @@ func (j *ReviewJob) command(ctx context.Context, client forge.Client, ref forge.
 	case policy.CommandAnswer, policy.CommandExplain:
 		return j.answer(ctx, client, ref, ev)
 	case policy.CommandHelp:
-		return client.UpsertSummary(ctx, ref, HelpMarker, helpText())
+		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention()))
 	case policy.CommandIgnore, policy.CommandImplement, policy.CommandPlan:
 		// Ignore needs the state store (Phase 3); implement is Phase 8.
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "command is not implemented yet",
@@ -554,13 +558,24 @@ func shortSHA(sha string) string {
 	return sha
 }
 
-func helpText() string {
+// mention falls back to the same default the server uses, so a worker that
+// was not told still prints something true for a default deployment.
+func (j *ReviewJob) mention() string {
+	if j.Mention == "" {
+		return policy.DefaultMention
+	}
+	return j.Mention
+}
+
+func helpText(mention string) string {
 	return strings.Join([]string{
 		"### kibitz の使い方",
 		"",
-		"- `@kibitz review` — 差分をレビューします (`--focus security` などで観点を指定できます)",
-		"- `@kibitz explain <対象>` — 実装の説明を返します",
-		"- `@kibitz <質問>` — 質問に回答します",
+		fmt.Sprintf("- `%s review` — 差分をレビューします (`--focus security` などで観点を指定できます)", mention),
+		fmt.Sprintf("- `%s explain <対象>` — 実装の説明を返します", mention),
+		fmt.Sprintf("- `%s <質問>` — 質問に回答します", mention),
+		"",
+		fmt.Sprintf("コマンドは**コメントの先頭**に書いてください。`%s` が途中にある場合は質問として扱います。", mention),
 		"",
 		"指摘への返信で追加の質問もできます。",
 	}, "\n")

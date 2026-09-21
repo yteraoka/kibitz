@@ -130,26 +130,6 @@ publish する条件 (サーバー):
   - リポジトリの月次トークン予算を超えていないか
 ```
 
-## 4. コマンド構文
-
-PR コメント中の 1 行として解釈する。プラットフォーム共通。
-
-```
-@kibitz review                     # 全体を再レビュー
-@kibitz review --focus security    # 観点を指定
-@kibitz review --full              # 増分ではなく全体
-@kibitz explain internal/queue/sqs/subscriber.go:88
-@kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
-@kibitz ignore                     # この PR では以降レビューしない
-@kibitz help
-
-# Phase 8 (Issue 上で使用、既定は無効)
-@kibitz implement                  # この Issue の内容を実装してブランチと PR を作る
-@kibitz plan                       # 実装方針だけを提示する (コードは書かない)
-```
-
-メンション名は設定で変更可能にする (GitLab / ADO ではボットアカウント名が異なるため)。
-
 ### 3.1 キーワードによる publish の絞り込み
 
 `KIBITZ_TRIGGER_KEYWORDS` (Terraform では `trigger_keywords`) を設定すると、
@@ -179,6 +159,49 @@ publish されなかったイベントは HTTP 204、メトリクス
 ([deployment.md](deployment.md#配送のログ))。
 キューにメッセージが載らないので、ワーカーも起きない ([deployment.md](deployment.md) の
 オートスケール)。
+
+## 4. コマンド構文
+
+**コメントの先頭**にメンションを置いた場合だけコマンドとして扱う。
+プラットフォーム共通。
+
+```
+@kibitz review                     # 全体を再レビュー
+@kibitz review --focus security    # 観点を指定
+@kibitz review --full              # 増分ではなく全体
+@kibitz explain internal/queue/sqs/subscriber.go:88
+@kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
+@kibitz ignore                     # この PR では以降レビューしない
+@kibitz help
+
+# Phase 8 (Issue 上で使用、既定は無効)
+@kibitz implement                  # この Issue の内容を実装してブランチと PR を作る
+@kibitz plan                       # 実装方針だけを提示する (コードは書かない)
+```
+
+メンション名は設定で変更可能 (`KIBITZ_MENTION`)。`@` である必要はなく、
+`/kibitz` のように**実在のアカウント名になり得ない形**にしておくと、
+同名の GitHub ユーザーへ通知が飛ぶのを避けられる
+([security.md](security.md#31-メンション名と通知))。
+
+### 4.1 コマンドは「コメントの先頭」だけ
+
+コメント本文の**先頭**がメンションで、その次の語がコマンドのときだけ実行する。
+途中に同じ文字列があっても実行しない。
+
+| コメント | 結果 |
+| --- | --- |
+| `@kibitz review` | ✅ コマンド (レビュー実行) |
+| `@kibitz review --focus security`<br>`よろしく` | ✅ コマンド (2 行目以降は自由に書ける) |
+| `ありがとうございます。`<br>`@kibitz review` | 質問として扱う (実行しない) |
+| `> @kibitz review` (引用) | 質問として扱う (実行しない) |
+| 使い方: `` `@kibitz review` `` と書いてください | 質問として扱う (実行しない) |
+| `@kibitz なぜ競合しますか?` | 質問 (コマンド名が無いため) |
+
+引用返信、使い方の説明、コマンドについての質問には、どれも同じ文字列が現れる。
+**同僚が「こう書けばレビューされます」と説明しただけでレビューが走る**のは、
+ボットが嫌われて止められる典型的な理由なので、実行はコメントの先頭に限定している。
+先頭以外のメンションも kibitz には届くが、**回答が 1 件増えるだけで、何も実行しない**。
 
 ## 5. テスト方針
 

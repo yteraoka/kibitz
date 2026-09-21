@@ -66,6 +66,7 @@
 | `KIBITZ_MIN_SEVERITY` | `medium` | これ未満の指摘は投稿しない |
 | `KIBITZ_SKIP_DRAFT` | `true` | draft PR はレビューしない (明示コマンドがあれば実行) |
 | `KIBITZ_LANGUAGE` | `日本語` | レビューと回答の出力言語 |
+| `KIBITZ_MENTION` | `@kibitz` | ヘルプ本文に出す呼びかた。サーバーと同じ値にする (判定はサーバー側で行う) |
 | `KIBITZ_OPENCODE_REVIEW_AGENT` | `kibitz-review` | レビュー用エージェント定義名 |
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | 超過時は triage モード |

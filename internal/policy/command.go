@@ -6,6 +6,11 @@ import (
 	"github.com/yteraoka/kibitz/internal/event"
 )
 
+// DefaultMention is how a comment addresses kibitz unless configured
+// otherwise. It is shared so that the server's rules and the worker's help
+// text cannot drift apart.
+const DefaultMention = "@kibitz"
+
 // Command names kibitz understands in a comment.
 const (
 	CommandReview    = "review"
@@ -72,38 +77,38 @@ func isBoundary(c byte) bool {
 	}
 }
 
-// ParseCommand looks for an explicit command addressed to kibitz. It reads one
-// line at a time, because a mention buried in a paragraph is a conversation,
-// not an instruction.
+// ParseCommand looks for an explicit command addressed to kibitz. The comment
+// has to *open* with it: the first thing in the body is the mention, and the
+// word after it is the command.
 //
-// It returns nil when the comment mentions kibitz without naming a command:
-// that is a question, handled by the answer path.
+// Anywhere else it is not an instruction. The same words appear when someone
+// quotes an earlier comment, explains how to use the bot, or asks about a
+// command, and running a review because a colleague wrote down how to ask for
+// one is the kind of surprise that gets a bot turned off. Addressing kibitz
+// further down the comment still reaches it — as a question, which costs a
+// reply rather than an action.
+//
+// It returns nil when the comment opens with the mention but names no
+// command: that is a question too.
 func ParseCommand(body, mention string) *event.Command {
 	if mention == "" {
 		return nil
 	}
-	lowerMention := strings.ToLower(mention)
 
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), ">"))
-		if line == "" {
-			continue
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 2 || strings.ToLower(fields[0]) != lowerMention {
-			continue
-		}
-
-		name := strings.ToLower(fields[1])
-		if !knownCommands[name] {
-			continue
-		}
-		cmd := &event.Command{Name: name}
-		if len(fields) > 2 {
-			cmd.Args = fields[2:]
-		}
-		return cmd
+	// Only the first line can carry it, and only as its first word.
+	first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
+	fields := strings.Fields(first)
+	if len(fields) < 2 || !strings.EqualFold(fields[0], mention) {
+		return nil
 	}
-	return nil
+
+	name := strings.ToLower(fields[1])
+	if !knownCommands[name] {
+		return nil
+	}
+	cmd := &event.Command{Name: name}
+	if len(fields) > 2 {
+		cmd.Args = fields[2:]
+	}
+	return cmd
 }

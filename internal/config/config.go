@@ -7,6 +7,8 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/yteraoka/kibitz/internal/policy"
 )
 
 // Redacted is what a [Secret] renders as in logs and error messages.
@@ -284,6 +286,10 @@ type Worker struct {
 	SkipDraft bool
 	// Language is the language findings and answers are written in.
 	Language string
+	// Mention is how a comment addresses kibitz. The worker only needs it to
+	// write the help text; the decision of what counts as an address is the
+	// server's. Both read the same variable, so they cannot disagree.
+	Mention string
 	// MaxDeliveries is how many times a job is retried before the failure is
 	// reported on the pull request instead. It should match the queue's own
 	// dead letter threshold.
@@ -317,7 +323,7 @@ func LoadServer(env Lookup) (*Server, error) {
 		Policy: Policy{
 			BotLogins:    l.list("KIBITZ_BOT_LOGINS", nil),
 			AllowedRepos: l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
-			Mention:      l.str("KIBITZ_MENTION", "@kibitz"),
+			Mention:      l.str("KIBITZ_MENTION", policy.DefaultMention),
 			Keywords:     l.list("KIBITZ_TRIGGER_KEYWORDS", nil),
 			MaxEventAge:  l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
 		},
@@ -388,6 +394,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
 		Language:         l.str("KIBITZ_LANGUAGE", "日本語"),
+		Mention:          l.str("KIBITZ_MENTION", policy.DefaultMention),
 		MaxDeliveries:    l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),
 		MaxPostsPerHour:  l.positiveInt("KIBITZ_MAX_POSTS_PER_HOUR", 10),
 		BotLogins:        l.list("KIBITZ_BOT_LOGINS", nil),

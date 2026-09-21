@@ -9,6 +9,7 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/store/memory"
 	"github.com/yteraoka/kibitz/internal/worker"
@@ -520,5 +521,57 @@ func TestNotifyFailurePostsToThePullRequest(t *testing.T) {
 	}
 	if !strings.Contains(f.summaries[0], "@kibitz review") {
 		t.Error("the notice does not say how to retry")
+	}
+}
+
+// The help text is the only place kibitz explains itself, so it has to
+// explain *this* deployment: a worker told that comments address it as
+// "/kibitz" must not tell people to write "@kibitz".
+func TestHelpUsesTheConfiguredMention(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+
+	job := newJob(t, f, &fakeEngine{})
+	job.Mention = "/kibitz"
+
+	ev := pullRequestEvent(event.KindCommand, origin)
+	ev.Command = &event.Command{Name: policy.CommandHelp}
+
+	if err := job.Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d summaries posted, want 1", len(f.summaries))
+	}
+
+	help := f.summaries[0]
+	if !strings.Contains(help, "/kibitz review") {
+		t.Errorf("help does not use the configured mention:\n%s", help)
+	}
+	if strings.Contains(help, "@kibitz") {
+		t.Errorf("help still names the default mention:\n%s", help)
+	}
+	// And it states the rule that decides whether a comment acts or answers.
+	if !strings.Contains(help, "先頭") {
+		t.Errorf("help does not say where a command has to go:\n%s", help)
+	}
+}
+
+// Left unset, it is still true for a default deployment.
+func TestHelpFallsBackToTheDefaultMention(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+
+	ev := pullRequestEvent(event.KindCommand, origin)
+	ev.Command = &event.Command{Name: policy.CommandHelp}
+
+	if err := newJob(t, f, &fakeEngine{}).Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d summaries posted, want 1", len(f.summaries))
+	}
+	if !strings.Contains(f.summaries[0], policy.DefaultMention+" review") {
+		t.Errorf("help does not use the default mention:\n%s", f.summaries[0])
 	}
 }

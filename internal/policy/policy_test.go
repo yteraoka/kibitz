@@ -141,7 +141,7 @@ func TestEvaluateOtherBotsAreNotFiltered(t *testing.T) {
 }
 
 func TestEvaluatePromotesCommands(t *testing.T) {
-	ev := commentEvent("thanks!\n@kibitz review --focus security\n")
+	ev := commentEvent("@kibitz review --focus security\nよろしくお願いします\n")
 
 	d := engine().Evaluate(ev, now)
 	if !d.Publish {
@@ -184,9 +184,10 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{name: "bare command", body: "@kibitz review", want: "review"},
 		{name: "with arguments", body: "@kibitz review --focus security", want: "review", args: 2},
-		{name: "on its own line", body: "some context\n@kibitz implement\nthanks", want: "implement"},
+		{name: "further down the comment", body: "some context\n@kibitz implement\nthanks", want: ""},
 		{name: "case insensitive", body: "@KIBITZ Help", want: "help"},
-		{name: "quoted reply", body: "> @kibitz review", want: "review"},
+		{name: "quoted reply", body: "> @kibitz review", want: ""},
+		{name: "quoted reply with a follow-up", body: "> @kibitz review\n\n了解です", want: ""},
 		{name: "unknown verb", body: "@kibitz deploy to production", want: ""},
 		{name: "mention only", body: "@kibitz", want: ""},
 		{name: "mid sentence", body: "I asked @kibitz review this earlier", want: ""},
@@ -398,4 +399,33 @@ func TestMentionNeedNotLookLikeAnAccount(t *testing.T) {
 			t.Errorf("decision = %+v, want it dropped", d)
 		}
 	})
+}
+
+// A command is something a comment opens with. The same words appear when
+// somebody quotes an earlier comment or writes down how to ask for a review,
+// and neither should run one.
+func TestEvaluateCommandsMustOpenTheComment(t *testing.T) {
+	bodies := []string{
+		"> @kibitz review",
+		"ありがとうございます。\n@kibitz review",
+		"使い方: `@kibitz review` とコメントしてください",
+	}
+
+	for _, body := range bodies {
+		t.Run(body, func(t *testing.T) {
+			ev := commentEvent(body)
+
+			d := engine().Evaluate(ev, now)
+			if !d.Publish {
+				t.Fatalf("decision = %+v, want the mention still published", d)
+			}
+			// Still a mention, so kibitz answers rather than acts.
+			if ev.Kind != event.KindCommentCreated {
+				t.Errorf("kind = %s, want it left as a comment", ev.Kind)
+			}
+			if ev.Command != nil {
+				t.Errorf("command = %+v, want none", ev.Command)
+			}
+		})
+	}
 }
