@@ -4,6 +4,13 @@ GOLANGCI_LINT_VERSION  ?= v2.5.0
 VERSION                ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 TAG                    ?= $(VERSION)
 IMAGE_REPO             ?=
+# Cloud Run runs amd64. Building on an arm64 machine without this produces an
+# image the platform cannot start.
+PLATFORM               ?= linux/amd64
+# Optional override; the default lives in the worker Dockerfile so there is
+# one place that decides which opencode the agent runs.
+OPENCODE_VERSION       ?=
+WORKER_BUILD_ARGS      := $(if $(OPENCODE_VERSION),--build-arg OPENCODE_VERSION=$(OPENCODE_VERSION),)
 LDFLAGS                := -s -w -X main.version=$(VERSION)
 
 .PHONY: all
@@ -103,22 +110,28 @@ test-integration:
 down:
 	docker compose --profile pubsub -f docker-compose.yml -f docker-compose.pubsub.yml down -v
 
+# Builds both images for the local machine's architecture. For images that
+# will run on Cloud Run, use `make push`, which builds for linux/amd64.
 .PHONY: docker-build
 docker-build:
-	docker build -f deploy/docker/Dockerfile.server -t kibitz-server:$(VERSION) .
-	docker build -f deploy/docker/Dockerfile.worker -t kibitz-worker:$(VERSION) .
+	docker build -f deploy/docker/Dockerfile.server --build-arg VERSION=$(VERSION) -t kibitz-server:$(VERSION) .
+	docker build -f deploy/docker/Dockerfile.worker --build-arg VERSION=$(VERSION) $(WORKER_BUILD_ARGS) -t kibitz-worker:$(VERSION) .
 
-# Builds and pushes both images. IMAGE_REPO is the Artifact Registry
-# repository, which `terraform output image_repository` prints.
+# Builds both images for the deployment platform and pushes them. IMAGE_REPO
+# is the Artifact Registry repository, which `terraform output
+# image_repository` prints.
 #
 #   make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/my-project/kibitz TAG=v0.1.0
+#
+# buildx builds and pushes in one step, which is also what makes the
+# cross-architecture build work from an arm64 machine.
 .PHONY: push
 push:
 	@test -n "$(IMAGE_REPO)" || { echo "IMAGE_REPO is required, e.g. make push IMAGE_REPO=REGION-docker.pkg.dev/PROJECT/kibitz"; exit 1; }
-	docker build -f deploy/docker/Dockerfile.server --build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-server:$(TAG) .
-	docker build -f deploy/docker/Dockerfile.worker --build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-worker:$(TAG) .
-	docker push $(IMAGE_REPO)/kibitz-server:$(TAG)
-	docker push $(IMAGE_REPO)/kibitz-worker:$(TAG)
+	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.server \
+		--build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-server:$(TAG) --push .
+	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.worker \
+		--build-arg VERSION=$(TAG) $(WORKER_BUILD_ARGS) -t $(IMAGE_REPO)/kibitz-worker:$(TAG) --push .
 	@echo
 	@echo "server_image = \"$(IMAGE_REPO)/kibitz-server:$(TAG)\""
 	@echo "worker_image = \"$(IMAGE_REPO)/kibitz-worker:$(TAG)\""

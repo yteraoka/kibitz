@@ -120,6 +120,39 @@ make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/YOUR_PROJECT/kibitz TAG=v0.1
 
 最後に表示される 2 行を `terraform.tfvars` の `server_image` / `worker_image` に書く。
 
+### イメージの中身とビルド引数
+
+| イメージ | ベース | 中身 |
+| --- | --- | --- |
+| `kibitz-server` | distroless | Go バイナリのみ。リポジトリを触らずエージェントも動かさないため |
+| `kibitz-worker` | `node:22-slim` | Go バイナリ + `git` + `ripgrep` + `opencode` (バージョン固定) + エージェント定義。MCP サーバーをローカルプロセスとして起動するため Node ランタイムが要る |
+
+| ビルド引数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `VERSION` | `make` が git から生成 | `/healthz` とログに出るバージョン |
+| `OPENCODE_VERSION` | `deploy/docker/Dockerfile.worker` に記載 | エージェントの挙動は kibitz の出力そのものなので固定している。上げるときは意図的に |
+
+```bash
+# opencode を上げて試す
+make push IMAGE_REPO=... TAG=v0.2.0-rc1 OPENCODE_VERSION=1.19.0
+```
+
+### ビルドするアーキテクチャに注意
+
+**Cloud Run は amd64 で動く。** Apple Silicon などの arm64 マシンで普通に
+`docker build` すると arm64 のイメージができ、Cloud Run で起動しない。
+
+`make push` は `docker buildx build --platform linux/amd64 --push` を使うので、
+arm64 マシンからでも正しいイメージが push される。別のアーキテクチャに出す場合は
+`PLATFORM` を上書きする。
+
+```bash
+make push IMAGE_REPO=... TAG=v0.1.0 PLATFORM=linux/arm64
+```
+
+ローカルで動かすだけなら `make docker-build` (ホストのアーキテクチャでビルド)
+または `make up` (docker compose) を使う。
+
 ## 5. 全体を apply して Webhook URL を設定する
 
 ```bash

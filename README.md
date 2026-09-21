@@ -86,6 +86,7 @@ make test          # go test -race -cover ./...
 make lint          # golangci-lint (初回は自動でインストール)
 make ci            # vet + lint + test + govulncheck + build
 make build         # bin/kibitz-server, bin/kibitz-worker
+make docker-build  # イメージをホストのアーキテクチャでビルドする
 make up            # docker compose で両方を起動し /healthz を待つ
 make up-pubsub     # Pub/Sub と Firestore のエミュレータも起動する
 make test-integration  # エミュレータが必要なテスト
