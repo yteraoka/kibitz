@@ -58,6 +58,14 @@ const (
 	OpenCodeModeAttach = "attach"
 )
 
+// Trace configures trace export. With no endpoint, tracing is off and the
+// instrumentation costs nothing.
+type Trace struct {
+	Endpoint    string
+	Insecure    bool
+	SampleRatio float64
+}
+
 // Log holds logging settings shared by both binaries.
 type Log struct {
 	Level  slog.Level
@@ -179,6 +187,7 @@ type Server struct {
 	ListenAddr        string
 	MetricsAddr       string
 	Log               Log
+	Trace             Trace
 	MaxBodyBytes      int64
 	ReadHeaderTimeout time.Duration
 	ShutdownTimeout   time.Duration
@@ -192,6 +201,7 @@ type Server struct {
 type Worker struct {
 	HealthAddr       string
 	Log              Log
+	Trace            Trace
 	ShutdownTimeout  time.Duration
 	Queue            Queue
 	State            State
@@ -208,6 +218,14 @@ type Worker struct {
 	SkipDraft bool
 	// Language is the language findings and answers are written in.
 	Language string
+	// MaxDeliveries is how many times a job is retried before the failure is
+	// reported on the pull request instead. It should match the queue's own
+	// dead letter threshold.
+	MaxDeliveries int
+	// MaxPostsPerHour caps what kibitz writes to one pull request per hour.
+	MaxPostsPerHour int
+	// BotLogins are kibitz's own accounts, used as the second loop check.
+	BotLogins []string
 }
 
 // LoadServer reads the kibitz-server configuration.
@@ -218,6 +236,7 @@ func LoadServer(env Lookup) (*Server, error) {
 		ListenAddr:        l.str("KIBITZ_LISTEN_ADDR", ":8080"),
 		MetricsAddr:       l.str("KIBITZ_METRICS_ADDR", ":9090"),
 		Log:               loadLog(l),
+		Trace:             loadTrace(l),
 		MaxBodyBytes:      l.int64("KIBITZ_MAX_BODY_BYTES", 25<<20),
 		ReadHeaderTimeout: l.duration("KIBITZ_READ_HEADER_TIMEOUT", 10*time.Second),
 		ShutdownTimeout:   l.duration("KIBITZ_SHUTDOWN_TIMEOUT", 20*time.Second),
@@ -257,6 +276,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 	cfg := &Worker{
 		HealthAddr:      l.str("KIBITZ_WORKER_HEALTH_ADDR", ":8081"),
 		Log:             loadLog(l),
+		Trace:           loadTrace(l),
 		ShutdownTimeout: l.duration("KIBITZ_SHUTDOWN_TIMEOUT", 20*time.Second),
 		Queue:           loadQueue(l),
 		State:           loadState(l),
@@ -294,6 +314,9 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
 		Language:         l.str("KIBITZ_LANGUAGE", "日本語"),
+		MaxDeliveries:    l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),
+		MaxPostsPerHour:  l.positiveInt("KIBITZ_MAX_POSTS_PER_HOUR", 10),
+		BotLogins:        l.list("KIBITZ_BOT_LOGINS", nil),
 	}
 
 	// A GitHub App is either fully configured or not configured at all; half of
@@ -319,6 +342,14 @@ func loadLog(l *loader) Log {
 // loadQueue reads the queue settings. Only values without a default are
 // validated here: the others cannot be empty by construction, since an empty
 // environment variable falls back to the default.
+func loadTrace(l *loader) Trace {
+	return Trace{
+		Endpoint:    l.str("KIBITZ_OTEL_ENDPOINT", ""),
+		Insecure:    l.bool("KIBITZ_OTEL_INSECURE", false),
+		SampleRatio: l.ratio("KIBITZ_OTEL_SAMPLE_RATIO", 1),
+	}
+}
+
 func loadQueue(l *loader) Queue {
 	q := Queue{
 		Backend: l.enum("KIBITZ_QUEUE_BACKEND", QueuePubSub, QueuePubSub, QueueSQS, QueueMemory),

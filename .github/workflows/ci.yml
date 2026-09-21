@@ -73,10 +73,26 @@ jobs:
             sleep 2
           done
           echo "emulator did not start"; docker logs pubsub; exit 1
+      - name: Start the Firestore emulator
+        run: |
+          docker run -d --name firestore -p 8086:8086 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators firestore start --project=kibitz-test --host-port=0.0.0.0:8086
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8086/ >/dev/null 2>&1; then
+              echo "emulator is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "emulator did not start"; docker logs firestore; exit 1
       - name: Run the Pub/Sub tests against the emulator
         env:
           PUBSUB_EMULATOR_HOST: localhost:8085
         run: go test -race -count=1 ./internal/queue/pubsub/...
+      - name: Run the Firestore tests against the emulator
+        env:
+          FIRESTORE_EMULATOR_HOST: localhost:8086
+        run: go test -race -count=1 ./internal/store/firestore/...
 
   vuln:
     runs-on: ubuntu-latest

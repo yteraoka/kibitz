@@ -91,10 +91,11 @@ pubsub-init:
 		|| echo "subscription already exists"
 	@echo "pubsub emulator is ready"
 
-# Runs the tests that need the Pub/Sub emulator (skipped by `make test`).
+# Runs the tests that need the emulators (skipped by `make test`).
 .PHONY: test-integration
 test-integration:
 	PUBSUB_EMULATOR_HOST=localhost:8085 $(GO) test -race -count=1 ./internal/queue/pubsub/...
+	FIRESTORE_EMULATOR_HOST=localhost:8086 $(GO) test -race -count=1 ./internal/store/firestore/...
 
 .PHONY: down
 down:

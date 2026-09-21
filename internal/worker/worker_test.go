@@ -43,8 +43,8 @@ func TestRunHandlesEvents(t *testing.T) {
 	}
 
 	handled := make(chan string, 1)
-	w := worker.New(q, worker.HandlerFunc(func(_ context.Context, ev *event.ReviewEvent) error {
-		handled <- ev.ID
+	w := worker.New(q, worker.HandlerFunc(func(_ context.Context, j *worker.Job) error {
+		handled <- j.Event.ID
 		return nil
 	}), discardLogger(), &config.Worker{JobTimeout: time.Second})
 
@@ -72,9 +72,12 @@ func TestFailedJobIsRedelivered(t *testing.T) {
 
 	attempts := make(chan int, 4)
 	count := 0
-	w := worker.New(q, worker.HandlerFunc(func(context.Context, *event.ReviewEvent) error {
+	w := worker.New(q, worker.HandlerFunc(func(_ context.Context, j *worker.Job) error {
 		count++
 		attempts <- count
+		if j.Deliveries != count {
+			t.Errorf("Deliveries = %d on attempt %d", j.Deliveries, count)
+		}
 		if count < 2 {
 			return errors.New("transient failure")
 		}
@@ -108,7 +111,7 @@ func TestJobTimeout(t *testing.T) {
 	}
 
 	deadline := make(chan error, 1)
-	w := worker.New(q, worker.HandlerFunc(func(ctx context.Context, _ *event.ReviewEvent) error {
+	w := worker.New(q, worker.HandlerFunc(func(ctx context.Context, _ *worker.Job) error {
 		<-ctx.Done()
 		deadline <- ctx.Err()
 		return ctx.Err()

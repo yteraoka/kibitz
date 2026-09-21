@@ -108,6 +108,20 @@ func (l *loader) int64(key string, def int64) int64 {
 	return n
 }
 
+// ratio reads a fraction between 0 and 1 inclusive.
+func (l *loader) ratio(key string, def float64) float64 {
+	v, ok := l.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 || f > 1 {
+		l.fail(key, "must be a number between 0 and 1, got %q", v)
+		return def
+	}
+	return f
+}
+
 func (l *loader) bool(key string, def bool) bool {
 	v, ok := l.raw(key)
 	if !ok {

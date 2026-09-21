@@ -77,7 +77,7 @@ opencode バイナリも無いため、以下は最初の実デプロイで確�
 - `--file` によるプロンプト添付と `--agent` の解決 (エージェント定義はイメージに同梱)
 - GitHub App のインストールトークンと `refs/pull/N/head` の fetch
 
-## Phase 3: 信頼性 (目安 1 週)
+## Phase 3: 信頼性 (完了)
 
 - `internal/store` — `StateStore` インターフェース + `memory` + Firestore 実装
 - 冪等性 (配送 ID)、PR ロック、古い SHA のジョブ破棄
@@ -88,6 +88,16 @@ opencode バイナリも無いため、以下は最初の実デプロイで確�
 
 **完了条件**: 同一 Webhook を 3 回再送しても投稿は 1 回。連続 push で古い SHA の
 レビューが投稿されない。DLQ にメッセージが入るとアラートが飛ぶ。
+
+実装済み。`internal/store` は 1 つの適合テスト (`storetest`) をインメモリ実装と
+Firestore 実装の両方に通している (Firestore はエミュレータ、CI で実行)。
+`internal/worker.Guard` が冪等性・ロック・リース延長・再試行上限・失敗通知を担当する。
+トレースは Webhook からジョブまで 1 本に繋がることをテストで確認済み
+(キューをまたぐのが肝で、そこを直接テストしている)。
+
+**アラート設定だけは Terraform 側** (Phase 9)。アプリ側が提供するのは
+DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失敗時の PR 通知、
+`kibitz_jobs_total{outcome="failed"}` などのメトリクス。
 
 ## Phase 4: GitLab 対応 (目安 1 週)
 

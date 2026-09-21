@@ -51,6 +51,24 @@ func realMain() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	shutdownTracing, err := telemetry.SetupTracing(ctx, telemetry.TracingOptions{
+		Endpoint:    cfg.Trace.Endpoint,
+		Insecure:    cfg.Trace.Insecure,
+		SampleRatio: cfg.Trace.SampleRatio,
+		Service:     "kibitz-server",
+		Version:     version,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Flushing on the way out; otherwise the traces that explain a crash
+		// are the ones that never leave the process.
+		if err := shutdownTracing(context.Background()); err != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "flushing traces", slog.String("error", err.Error()))
+		}
+	}()
+
 	logger.LogAttrs(ctx, slog.LevelInfo, "starting",
 		slog.String("queue_backend", cfg.Queue.Backend),
 		slog.String("blob_backend", cfg.Blob.Backend),
@@ -77,6 +95,7 @@ func realMain() error {
 		MaxEventAge:  cfg.Policy.MaxEventAge,
 	})
 
+	metrics := telemetry.NewMetrics()
 	health := httpx.NewHealth(version)
 
 	mux := http.NewServeMux()
@@ -88,6 +107,7 @@ func realMain() error {
 		triggers,
 		logger,
 		webhook.WithMaxBody(cfg.MaxBodyBytes),
+		webhook.WithMetrics(metrics),
 	))
 	// GitLab lands in Phase 4 and Azure DevOps in Phase 5.
 
@@ -109,7 +129,7 @@ func realMain() error {
 	g.Add(func(ctx context.Context) error {
 		srv := &http.Server{
 			Addr:              cfg.MetricsAddr,
-			Handler:           metricsMux(health),
+			Handler:           metricsMux(health, metrics),
 			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		}
 		return httpx.Serve(ctx, logger, "metrics", srv, cfg.ShutdownTimeout)
@@ -150,15 +170,12 @@ func reveal(secrets []config.Secret) []string {
 	return out
 }
 
-// metricsMux serves the metrics listener. Metrics themselves are wired up in
-// Phase 3; the endpoint exists now so that scrape configuration and probes can
-// be written against a stable address.
-func metricsMux(health *httpx.Health) http.Handler {
+// metricsMux serves the metrics listener, kept separate from the webhook
+// listener so that scraping never competes with deliveries and so the metrics
+// port can stay off the public network.
+func metricsMux(health *httpx.Health, metrics *telemetry.Metrics) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintln(w, "# metrics are implemented in Phase 3 (see docs/roadmap.md)")
-	})
+	mux.Handle("GET /metrics", metrics.Handler())
 	return mux
 }

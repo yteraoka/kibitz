@@ -10,6 +10,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/store/memory"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
 )
@@ -94,6 +95,10 @@ func reviewResult(comments ...reviewer.OutputComment) *reviewer.Result {
 	return &reviewer.Result{Summary: out.Summary, RawOutput: out}
 }
 
+// queued wraps an event the way the worker does when it takes one off the
+// queue.
+func queued(ev *event.ReviewEvent) *worker.Job { return &worker.Job{Event: ev, Deliveries: 1} }
+
 func pullRequestEvent(kind event.Kind, origin string) *event.ReviewEvent {
 	return &event.ReviewEvent{
 		SchemaVersion: event.SchemaVersion,
@@ -140,7 +145,7 @@ func TestReviewPostsSummaryAndFindings(t *testing.T) {
 		reviewer.OutputComment{Path: "queue.go", Line: 2, Severity: "high", Title: "漏れる", Body: "ctx を見ていない"},
 	)}}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -173,7 +178,7 @@ func TestReviewDropsFindingsOutsideTheDiff(t *testing.T) {
 		reviewer.OutputComment{Path: "untouched.go", Line: 1, Severity: "high", Title: "no", Body: "not in the diff"},
 	)}}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -190,7 +195,7 @@ func TestReviewWithNoFindingsStillPostsASummary(t *testing.T) {
 	f := defaultForge()
 	e := &fakeEngine{results: []*reviewer.Result{reviewResult()}}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if len(f.summaries) != 1 || !strings.Contains(f.summaries[0], "指摘はありません") {
@@ -212,7 +217,7 @@ func TestReviewRetriesOnceOnMalformedOutput(t *testing.T) {
 		)},
 	}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -235,7 +240,7 @@ func TestReviewFailsAfterASecondBadOutput(t *testing.T) {
 		&reviewer.OutputError{Err: errors.New("still empty")},
 	}}
 
-	err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin))
+	err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin)))
 	if err == nil {
 		t.Fatal("Handle succeeded although the agent never produced usable output")
 	}
@@ -254,7 +259,7 @@ func TestReviewFallsBackWhenPositionsAreRejected(t *testing.T) {
 		reviewer.OutputComment{Path: "queue.go", Line: 2, Severity: "high", Title: "漏れる", Body: "ctx を見ていない"},
 	)}}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -274,7 +279,7 @@ func TestReviewSkipsClosedAndDraft(t *testing.T) {
 		f.pr.State = "closed"
 		e := &fakeEngine{}
 
-		if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+		if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
 		if len(e.requests) != 0 {
@@ -289,7 +294,7 @@ func TestReviewSkipsClosedAndDraft(t *testing.T) {
 
 		job := newJob(t, f, e)
 		job.SkipDraft = true
-		if err := job.Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+		if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
 		if len(e.requests) != 0 {
@@ -309,7 +314,7 @@ func TestReviewSkipsClosedAndDraft(t *testing.T) {
 		ev.Command = &event.Command{Name: "review"}
 		ev.Comment = &event.Comment{ID: "1", Body: "@kibitz review"}
 
-		if err := job.Handle(context.Background(), ev); err != nil {
+		if err := job.Handle(context.Background(), queued(ev)); err != nil {
 			t.Fatalf("Handle: %v", err)
 		}
 		if len(e.requests) != 1 {
@@ -324,7 +329,7 @@ func TestReviewSkipsEmptyDiff(t *testing.T) {
 	f.diff = &forge.Diff{}
 	e := &fakeEngine{}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if len(e.requests) != 0 {
@@ -339,7 +344,7 @@ func TestReviewFailsWhenThePullRequestCannotBeRead(t *testing.T) {
 	f := defaultForge()
 	f.prErr = errors.New("503 from the API")
 
-	err := newJob(t, f, &fakeEngine{}).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin))
+	err := newJob(t, f, &fakeEngine{}).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin)))
 	if err == nil {
 		t.Fatal("Handle succeeded although the pull request could not be read")
 	}
@@ -353,7 +358,7 @@ func TestAnswerRepliesInTheThread(t *testing.T) {
 	ev := pullRequestEvent(event.KindCommentCreated, origin)
 	ev.Comment = &event.Comment{ID: "9", ThreadID: "7", Body: "@kibitz なぜ競合するのですか?"}
 
-	if err := newJob(t, f, e).Handle(context.Background(), ev); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(ev)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if len(f.replies) != 1 || !strings.Contains(f.replies[0], "ロック") {
@@ -378,7 +383,7 @@ func TestReviewExcludesItsOwnComments(t *testing.T) {
 	}
 	e := &fakeEngine{results: []*reviewer.Result{reviewResult()}}
 
-	if err := newJob(t, f, e).Handle(context.Background(), pullRequestEvent(event.KindPROpened, origin)); err != nil {
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -394,7 +399,7 @@ func TestHandleUnknownPlatformIsAcknowledged(t *testing.T) {
 	ev.Source.Platform = event.PlatformGitLab
 
 	job := newJob(t, defaultForge(), &fakeEngine{})
-	if err := job.Handle(context.Background(), ev); err != nil {
+	if err := job.Handle(context.Background(), queued(ev)); err != nil {
 		t.Errorf("Handle = %v, want nil: retrying will not add a client", err)
 	}
 }
@@ -403,10 +408,117 @@ func TestHandleClosedEventDoesNothing(t *testing.T) {
 	origin, _, _ := originRepo(t)
 	e := &fakeEngine{}
 
-	if err := newJob(t, defaultForge(), e).Handle(context.Background(), pullRequestEvent(event.KindPRMerged, origin)); err != nil {
+	if err := newJob(t, defaultForge(), e).Handle(context.Background(), queued(pullRequestEvent(event.KindPRMerged, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if len(e.requests) != 0 {
 		t.Error("a merged pull request was reviewed")
+	}
+}
+
+func TestReviewSkipsACommitItAlreadyReviewed(t *testing.T) {
+	origin, headSHA, _ := originRepo(t)
+	f := defaultForge()
+	f.pr.Source.SHA = headSHA
+	e := &fakeEngine{results: []*reviewer.Result{reviewResult(), reviewResult()}}
+
+	j := newJob(t, f, e)
+	j.Store = memory.New()
+
+	ev := pullRequestEvent(event.KindPRUpdated, origin)
+	if err := j.Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	// A different delivery for the same commit: nothing changed, so there is
+	// nothing new to say.
+	second := pullRequestEvent(event.KindPRUpdated, origin)
+	second.Source.DeliveryID = "d2"
+	if err := j.Handle(context.Background(), queued(second)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if len(e.requests) != 1 {
+		t.Errorf("the agent ran %d times, want 1 for one commit", len(e.requests))
+	}
+}
+
+// An explicit command means "review it again", even for a commit that was
+// already reviewed.
+func TestCommandReviewsAnAlreadyReviewedCommit(t *testing.T) {
+	origin, headSHA, _ := originRepo(t)
+	f := defaultForge()
+	f.pr.Source.SHA = headSHA
+	e := &fakeEngine{results: []*reviewer.Result{reviewResult(), reviewResult()}}
+
+	j := newJob(t, f, e)
+	j.Store = memory.New()
+
+	if err := j.Handle(context.Background(), queued(pullRequestEvent(event.KindPRUpdated, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	cmd := pullRequestEvent(event.KindCommand, origin)
+	cmd.Source.DeliveryID = "d2"
+	cmd.Command = &event.Command{Name: "review"}
+	cmd.Comment = &event.Comment{ID: "1", Body: "@kibitz review"}
+	if err := j.Handle(context.Background(), queued(cmd)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if len(e.requests) != 2 {
+		t.Errorf("the agent ran %d times, want 2: a command forces a re-review", len(e.requests))
+	}
+}
+
+// If kibitz ever starts reacting to itself, the hourly cap stops it before the
+// thread fills up.
+func TestPostingIsCapped(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+
+	results := make([]*reviewer.Result, 6)
+	for i := range results {
+		results[i] = reviewResult()
+	}
+	e := &fakeEngine{results: results}
+
+	j := newJob(t, f, e)
+	j.Store = memory.New()
+	j.MaxPostsPerHour = 2
+
+	for i := range 4 {
+		ev := pullRequestEvent(event.KindCommand, origin)
+		ev.Source.DeliveryID = fmt.Sprintf("d%d", i)
+		ev.Command = &event.Command{Name: "review"}
+		ev.Comment = &event.Comment{ID: "1", Body: "@kibitz review"}
+
+		if err := j.Handle(context.Background(), queued(ev)); err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+	}
+
+	if len(f.summaries) != 2 {
+		t.Errorf("%d comments posted, want the cap of 2", len(f.summaries))
+	}
+}
+
+func TestNotifyFailurePostsToThePullRequest(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	j := newJob(t, f, &fakeEngine{})
+
+	ev := pullRequestEvent(event.KindPROpened, origin)
+	if err := j.NotifyFailure(context.Background(), ev, errors.New("the agent timed out")); err != nil {
+		t.Fatalf("NotifyFailure: %v", err)
+	}
+
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d comments posted, want 1", len(f.summaries))
+	}
+	if !strings.Contains(f.summaries[0], "the agent timed out") {
+		t.Errorf("the notice does not say what happened:\n%s", f.summaries[0])
+	}
+	if !strings.Contains(f.summaries[0], "@kibitz review") {
+		t.Error("the notice does not say how to retry")
 	}
 }

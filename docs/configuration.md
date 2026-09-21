@@ -7,6 +7,10 @@
 | `KIBITZ_LISTEN_ADDR` | `:8080` | HTTP リッスンアドレス |
 | `KIBITZ_METRICS_ADDR` | `:9090` | メトリクス用 (別リスナー) |
 | `KIBITZ_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error` |
+| `KIBITZ_LOG_FORMAT` | `json` | `json` / `text` |
+| `KIBITZ_OTEL_ENDPOINT` | - | OTLP (gRPC) のコレクタ。未設定ならトレースは無効 |
+| `KIBITZ_OTEL_INSECURE` | `false` | コレクタへ TLS なしで送る (サイドカー用) |
+| `KIBITZ_OTEL_SAMPLE_RATIO` | `1` | サンプリング率 (0〜1) |
 | `KIBITZ_MAX_BODY_BYTES` | `26214400` | Webhook ボディ上限 (25 MB) |
 | `KIBITZ_QUEUE_BACKEND` | `pubsub` | `pubsub` / `sqs` / `memory` |
 | `KIBITZ_PUBSUB_PROJECT_ID` | - | GCP プロジェクト |
@@ -31,6 +35,10 @@
 | `KIBITZ_QUEUE_BACKEND` | `pubsub` | サーバーと同じ |
 | `KIBITZ_PUBSUB_SUBSCRIPTION` | `kibitz-worker` | pull サブスクリプション |
 | `KIBITZ_STATE_BACKEND` | `firestore` | `firestore` / `dynamodb` / `memory` |
+| `KIBITZ_FIRESTORE_PROJECT_ID` | - | Firestore のプロジェクト (backend=firestore で必須) |
+| `KIBITZ_FIRESTORE_DATABASE` | `(default)` | Firestore のデータベース ID |
+| `KIBITZ_MAX_DELIVERIES` | `5` | この回数失敗したら再試行をやめて PR に通知する |
+| `KIBITZ_MAX_POSTS_PER_HOUR` | `10` | 1 PR あたり 1 時間の投稿上限 (ループ防止) |
 | `KIBITZ_IMPLEMENT_ENABLED` | `false` | Issue 起点の実装モード (Phase 8) |
 | `KIBITZ_CONCURRENCY` | `2` | 同時に走らせる OpenCode の数 |
 | `KIBITZ_JOB_TIMEOUT` | `15m` | ジョブ全体のタイムアウト |
@@ -59,6 +67,9 @@
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
 起動時 + 定期リフレッシュで取得する (`KIBITZ_*_SECRET_REF` に参照名を置く形も用意する)。
+
+ワーカーの `KIBITZ_BOT_LOGINS` はサーバーと同じ値を設定する。
+サーバー側のフィルタをすり抜けた場合の二重チェックに使う。
 
 Vertex AI の認証はサービスアカウント鍵ファイルを配置せず、
 **GKE の Workload Identity (または Cloud Run のサービスアカウント) による ADC** を使う。

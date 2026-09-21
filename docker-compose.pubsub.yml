@@ -19,5 +19,9 @@ services:
       KIBITZ_PUBSUB_PROJECT_ID: kibitz-dev
       KIBITZ_PUBSUB_TOPIC: kibitz-events
       KIBITZ_PUBSUB_SUBSCRIPTION: kibitz-worker
+      KIBITZ_STATE_BACKEND: firestore
+      KIBITZ_FIRESTORE_PROJECT_ID: kibitz-dev
+      FIRESTORE_EMULATOR_HOST: firestore:8086
     depends_on:
       - pubsub
+      - firestore

@@ -79,7 +79,8 @@ make lint          # golangci-lint (初回は自動でインストール)
 make ci            # vet + lint + test + govulncheck + build
 make build         # bin/kibitz-server, bin/kibitz-worker
 make up            # docker compose で両方を起動し /healthz を待つ
-make up-pubsub     # Pub/Sub エミュレータも一緒に起動する (Phase 2 以降)
+make up-pubsub     # Pub/Sub と Firestore のエミュレータも起動する
+make test-integration  # エミュレータが必要なテスト
 make down
 ```
 
@@ -120,7 +121,7 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 
 ## ステータス
 
-**Phase 2 まで実装完了** (実機検証は未了)。次は Phase 3 (冪等性・ロック・DLQ・可観測性)。
+**Phase 3 まで実装完了** (実機検証は未了)。次は Phase 4 (GitLab 対応)。
 進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
 
 | 項目 | 状態 |
@@ -139,6 +140,8 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 | PR の shallow clone (`internal/workspace`) | 完了 |
 | OpenCode の実行と出力検証 (`internal/reviewer`) | 完了 |
 | レビュージョブ (`internal/worker`) | 完了 |
+| 状態ストア (`internal/store`: memory / Firestore) | 完了 |
+| 冪等性・PR ロック・再試行上限・失敗通知 (`internal/worker.Guard`) | 完了 |
+| メトリクス (Prometheus) とトレース (OpenTelemetry) | 完了 |
 | 実機での疎通確認 | 未了 |
-| 冪等性・ロック・DLQ・可観測性 | Phase 3 |
 | GitLab / Azure DevOps | Phase 4 / 5 |

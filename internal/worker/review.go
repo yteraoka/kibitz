@@ -12,12 +12,22 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/store"
+	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/workspace"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// SummaryMarker identifies kibitz's own summary comment, so that reviewing a
-// pull request again replaces it instead of adding another one.
-const SummaryMarker = "<!-- kibitz:summary -->"
+// Markers identify kibitz's own comments so that they can be replaced rather
+// than stacked, and so kibitz can recognize its own writing.
+const (
+	SummaryMarker = "<!-- kibitz:summary -->"
+	FailureMarker = "<!-- kibitz:failure -->"
+	HelpMarker    = "<!-- kibitz:help -->"
+)
 
 // ReviewJob runs one review or one answer from start to finish: read the pull
 // request, fetch it, run the agent, check what came back, post it.
@@ -32,10 +42,21 @@ type ReviewJob struct {
 	Model      string
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
+	// Store remembers which commits have already been reviewed and how much
+	// has been posted lately. It may be nil, in which case neither check runs.
+	Store store.Store
+	// MaxPostsPerHour caps how much kibitz writes to one pull request in an
+	// hour. Zero means 10.
+	MaxPostsPerHour int
+	// ReviewedTTL is how long a reviewed commit is remembered.
+	ReviewedTTL time.Duration
+	// Metrics records what was posted and what was discarded. May be nil.
+	Metrics *telemetry.Metrics
 }
 
 // Handle implements [Handler].
-func (j *ReviewJob) Handle(ctx context.Context, ev *event.ReviewEvent) error {
+func (j *ReviewJob) Handle(ctx context.Context, job *Job) error {
+	ev := job.Event
 	client, ok := j.Forges[ev.Source.Platform]
 	if !ok {
 		// Acknowledged rather than retried: a platform this build cannot talk
@@ -79,7 +100,7 @@ func (j *ReviewJob) command(ctx context.Context, client forge.Client, ref forge.
 	case policy.CommandAnswer, policy.CommandExplain:
 		return j.answer(ctx, client, ref, ev)
 	case policy.CommandHelp:
-		return client.UpsertSummary(ctx, ref, "<!-- kibitz:help -->", helpText())
+		return client.UpsertSummary(ctx, ref, HelpMarker, helpText())
 	case policy.CommandIgnore, policy.CommandImplement, policy.CommandPlan:
 		// Ignore needs the state store (Phase 3); implement is Phase 8.
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "command is not implemented yet",
@@ -107,7 +128,25 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		return nil
 	}
 
+	// An explicit command is a request to review again, even if this commit
+	// was reviewed before; anything else is skipped as already done.
+	if ev.Kind != event.KindCommand {
+		reviewed, err := j.alreadyReviewed(ctx, ev, pr.Source.SHA)
+		if err != nil {
+			return err
+		}
+		if reviewed {
+			j.Logger.LogAttrs(ctx, slog.LevelInfo, "this commit has already been reviewed; skipping",
+				slog.String("ref", ref.String()),
+				slog.String("head", pr.Source.SHA),
+			)
+			return nil
+		}
+	}
+
+	ctx, diffSpan := telemetry.Tracer().Start(ctx, "review.diff")
 	diff, err := client.Diff(ctx, ref)
+	diffSpan.End()
 	if err != nil {
 		return fmt.Errorf("fetching the diff of %s: %w", ref, err)
 	}
@@ -152,10 +191,20 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		HeadSHA:          ws.HeadSHA,
 	}
 
-	result, err := j.runWithRetry(ctx, req)
+	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
+		trace.WithAttributes(attribute.String("kibitz.model", j.Model)))
+	result, err := j.runWithRetry(agentCtx, req)
 	if err != nil {
+		agentSpan.RecordError(err)
+		agentSpan.SetStatus(codes.Error, err.Error())
+		agentSpan.End()
 		return err
 	}
+	agentSpan.SetAttributes(
+		attribute.Int("kibitz.input_tokens", result.Usage.InputTokens),
+		attribute.Int("kibitz.output_tokens", result.Usage.OutputTokens),
+	)
+	agentSpan.End()
 
 	sanitized := reviewer.Sanitize(result.RawOutput, reviewer.NewPositions(diff), j.Limits)
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "review produced findings",
@@ -169,7 +218,39 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.Duration("agent_duration", result.Usage.Duration),
 	)
 
-	return j.post(ctx, client, ref, result, sanitized, ws.HeadSHA)
+	j.record(ev, result, sanitized)
+
+	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
+		trace.WithAttributes(telemetry.AttrFindings.Int(len(sanitized.Findings))))
+	defer postSpan.End()
+	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA)
+}
+
+// record reports what the run produced, which is how cost and noise are
+// tracked over time.
+func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized) {
+	if j.Metrics == nil {
+		return
+	}
+	platform := string(ev.Source.Platform)
+
+	for _, f := range sanitized.Findings {
+		j.Metrics.CommentsPosted.WithLabelValues(platform, string(f.Severity)).Inc()
+	}
+	for reason, n := range map[string]int{
+		"out_of_diff":    sanitized.OutOfDiff,
+		"below_severity": sanitized.BelowSeverity,
+		"duplicate":      sanitized.Duplicate,
+		"over_limit":     sanitized.Excess,
+	} {
+		if n > 0 {
+			j.Metrics.FindingsDropped.WithLabelValues(reason).Add(float64(n))
+		}
+	}
+	if model := j.Model; model != "" {
+		j.Metrics.AgentTokens.WithLabelValues(model, "input").Add(float64(result.Usage.InputTokens))
+		j.Metrics.AgentTokens.WithLabelValues(model, "output").Add(float64(result.Usage.OutputTokens))
+	}
 }
 
 // runWithRetry gives the agent one more attempt when its output did not meet
@@ -200,6 +281,9 @@ func (j *ReviewJob) runWithRetry(ctx context.Context, req reviewer.Request) (*re
 }
 
 func (j *ReviewJob) prepareWorkspace(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, pr *event.PullRequest) (*workspace.Workspace, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "review.workspace")
+	defer span.End()
+
 	cred, err := client.CloneAuth(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("getting clone credentials for %s: %w", ref, err)
@@ -222,9 +306,41 @@ func (j *ReviewJob) prepareWorkspace(ctx context.Context, client forge.Client, r
 	return ws, nil
 }
 
+// alreadyReviewed reports whether this exact commit has already been reviewed,
+// which happens when a webhook is redelivered or when two events resolve to
+// the same head.
+func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, headSHA string) (bool, error) {
+	if j.Store == nil || headSHA == "" {
+		return false, nil
+	}
+
+	ttl := j.ReviewedTTL
+	if ttl <= 0 {
+		ttl = 30 * 24 * time.Hour
+	}
+	first, err := j.Store.MarkProcessed(ctx, store.JobKey(ev, headSHA), ttl)
+	if err != nil {
+		return false, fmt.Errorf("checking whether %s was reviewed: %w", headSHA, err)
+	}
+	return !first, nil
+}
+
 // post writes the review back to the pull request: one summary comment that is
 // replaced on every run, plus the findings as one review.
-func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA string) error {
+func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA string) error {
+	allowed, err := j.allowPost(ctx, ev)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		// Refusing to post is the last line of defence against a comment
+		// loop, so it is loud rather than silent.
+		j.Logger.LogAttrs(ctx, slog.LevelError, "posting limit reached; not writing to the pull request",
+			slog.String("ref", ref.String()),
+		)
+		return nil
+	}
+
 	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA)); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
@@ -243,7 +359,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		})
 	}
 
-	err := client.CreateReview(ctx, ref, review)
+	err = client.CreateReview(ctx, ref, review)
 	if err == nil {
 		return nil
 	}
@@ -263,6 +379,49 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		return nil
 	}
 	return fmt.Errorf("posting the review to %s: %w", ref, err)
+}
+
+// allowPost reports whether kibitz may still write to this pull request in the
+// current hour. It is the backstop against a loop: if kibitz somehow starts
+// reacting to itself, it stops after a bounded number of comments instead of
+// filling the thread.
+func (j *ReviewJob) allowPost(ctx context.Context, ev *event.ReviewEvent) (bool, error) {
+	if j.Store == nil {
+		return true, nil
+	}
+	limit := j.MaxPostsPerHour
+	if limit <= 0 {
+		limit = 10
+	}
+
+	count, err := j.Store.Incr(ctx, store.PostsKey(ev, time.Now()), 1, time.Hour)
+	if err != nil {
+		// A counter that cannot be read must not stop reviews; the loop is
+		// unlikely and the review is the point.
+		j.Logger.LogAttrs(ctx, slog.LevelWarn, "could not check the posting limit",
+			slog.String("error", err.Error()),
+		)
+		return true, nil
+	}
+	return count <= int64(limit), nil
+}
+
+// NotifyFailure implements [Notifier]. It replaces its own previous notice
+// rather than adding one per attempt.
+func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, cause error) error {
+	client, ok := j.Forges[ev.Source.Platform]
+	if !ok || ev.PullRequest == nil {
+		return nil
+	}
+
+	var b strings.Builder
+	b.WriteString("レビューに失敗しました。\n\n")
+	b.WriteString("```\n")
+	b.WriteString(oneLine(cause.Error(), 500))
+	b.WriteString("\n```\n\n")
+	b.WriteString("`@kibitz review` で再実行できます。\n")
+
+	return client.UpsertSummary(ctx, forge.RefOf(ev), FailureMarker, b.String())
 }
 
 func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent) error {
@@ -312,7 +471,7 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 func kibitzExcluded(comments []forge.Comment, ev *event.ReviewEvent) []forge.Comment {
 	out := make([]forge.Comment, 0, len(comments))
 	for _, c := range comments {
-		if strings.Contains(c.Body, SummaryMarker) {
+		if strings.Contains(c.Body, SummaryMarker) || strings.Contains(c.Body, FailureMarker) {
 			continue
 		}
 		if ev.Comment != nil && c.ID == ev.Comment.ID {
@@ -377,6 +536,15 @@ func renderFindingsAsText(findings []reviewer.Finding) string {
 		fmt.Fprintf(&b, "  %s\n", strings.ReplaceAll(f.Body, "\n", "\n  "))
 	}
 	return b.String()
+}
+
+// oneLine flattens an error for a comment body.
+func oneLine(s string, limit int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) > limit {
+		return s[:limit] + "…"
+	}
+	return s
 }
 
 func shortSHA(sha string) string {

@@ -25,6 +25,9 @@ import (
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 	"github.com/yteraoka/kibitz/internal/run"
+	"github.com/yteraoka/kibitz/internal/store"
+	storefirestore "github.com/yteraoka/kibitz/internal/store/firestore"
+	storememory "github.com/yteraoka/kibitz/internal/store/memory"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -56,6 +59,24 @@ func realMain() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	shutdownTracing, err := telemetry.SetupTracing(ctx, telemetry.TracingOptions{
+		Endpoint:    cfg.Trace.Endpoint,
+		Insecure:    cfg.Trace.Insecure,
+		SampleRatio: cfg.Trace.SampleRatio,
+		Service:     "kibitz-worker",
+		Version:     version,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Flushing on the way out; otherwise the traces that explain a crash
+		// are the ones that never leave the process.
+		if err := shutdownTracing(context.Background()); err != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "flushing traces", slog.String("error", err.Error()))
+		}
+	}()
+
 	logger.LogAttrs(ctx, slog.LevelInfo, "starting",
 		slog.String("queue_backend", cfg.Queue.Backend),
 		slog.String("state_backend", cfg.State.Backend),
@@ -76,17 +97,44 @@ func realMain() error {
 		}
 	}()
 
-	job, err := newReviewJob(cfg, logger)
+	state, err := newStore(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	w := worker.New(subscriber, job, logger, cfg)
+	defer func() {
+		if err := state.Close(); err != nil {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "closing the state store", slog.String("error", err.Error()))
+		}
+	}()
+
+	metrics := telemetry.NewMetrics()
+
+	job, err := newReviewJob(cfg, logger, state, metrics)
+	if err != nil {
+		return err
+	}
+
+	// The guard is what makes the worker safe to run in more than one copy:
+	// one delivery is handled once, one pull request at a time.
+	guard := &worker.Guard{
+		Next:          job,
+		Store:         state,
+		Notifier:      job,
+		Logger:        logger,
+		ClaimTTL:      cfg.JobTimeout * 2,
+		DoneTTL:       7 * 24 * time.Hour,
+		LockTTL:       cfg.JobTimeout,
+		MaxDeliveries: cfg.MaxDeliveries,
+		BotLogins:     cfg.BotLogins,
+	}
+	w := worker.New(subscriber, guard, logger, cfg, worker.WithMetrics(metrics))
 
 	health := httpx.NewHealth(version)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
 	mux.HandleFunc("GET /readyz", health.Ready)
+	mux.Handle("GET /metrics", metrics.Handler())
 
 	var g run.Group
 	g.Add(func(ctx context.Context) error {
@@ -129,9 +177,26 @@ func newSubscriber(ctx context.Context, cfg *config.Worker, logger *slog.Logger)
 	}
 }
 
+// newStore builds the state store for the configured backend.
+func newStore(ctx context.Context, cfg *config.Worker) (store.Store, error) {
+	switch cfg.State.Backend {
+	case config.StateFirestore:
+		return storefirestore.New(ctx, storefirestore.Config{
+			ProjectID: cfg.State.FirestoreProject,
+			Database:  cfg.State.FirestoreDatabase,
+		})
+	case config.StateMemory:
+		// Development only: a worker that forgets what it has done reviews
+		// everything twice, so this is never right in production.
+		return storememory.New(), nil
+	default:
+		return nil, fmt.Errorf("state backend %q is not implemented yet", cfg.State.Backend)
+	}
+}
+
 // newReviewJob assembles the pieces one review needs: a client per platform,
 // the agent engine, and the limits the output is held to.
-func newReviewJob(cfg *config.Worker, logger *slog.Logger) (*worker.ReviewJob, error) {
+func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics) (*worker.ReviewJob, error) {
 	forges := make(map[event.Platform]forge.Client)
 
 	if cfg.GitHub.AppID != 0 {
@@ -178,10 +243,13 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger) (*worker.ReviewJob, e
 			MaxComments: cfg.Limits.MaxComments,
 			MinSeverity: reviewer.Severity(cfg.Limits.MinSeverity),
 		},
-		Logger:    logger,
-		Language:  cfg.Language,
-		Model:     cfg.OpenCode.Model,
-		SkipDraft: cfg.SkipDraft,
+		Logger:          logger,
+		Language:        cfg.Language,
+		Model:           cfg.OpenCode.Model,
+		SkipDraft:       cfg.SkipDraft,
+		Store:           state,
+		MaxPostsPerHour: cfg.MaxPostsPerHour,
+		Metrics:         metrics,
 	}, nil
 }
 

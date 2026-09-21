@@ -155,11 +155,16 @@ type StateStore interface {
 
 | キー | 内容 | TTL |
 | --- | --- | --- |
-| `delivery:{platform}:{delivery_id}` | 配送単位の重複排除 | 7d |
-| `job:{platform}:{repo}:{pr}:{kind}:{head_sha}` | 同じ内容の再レビュー抑止 | 30d |
-| `lock:{platform}:{repo}:{pr}` | PR 単位の実行ロック (lease) | 15m |
-| `session:{platform}:{repo}:{pr}` | OpenCode セッション ID (追加質問の文脈継続用) | 30d |
-| `budget:{platform}:{repo}:{yyyymm}` | トークン / コスト使用量 | 60d |
+| `delivery:{platform}:{delivery_id}` | 配送単位の重複排除 | 実行中は短い TTL、完了後に 7d |
+| `job:{platform}:{repo}:{pr}:{head_sha}` | 同じコミットの再レビュー抑止 | 30d |
+| `lock:{platform}/{repo}/{pr}` | PR 単位の実行ロック (lease) | ジョブタイムアウトと同じ。実行中は延長 |
+| `session:{platform}/{repo}/{pr}` | OpenCode セッション ID (追加質問の文脈継続用) | 30d |
+| `posts:{platform}/{repo}/{pr}:{yyyymmddhh}` | その時間に投稿した件数 (ループ防止) | 1h |
+
+**配送キーは「作業中の短い予約」と「完了の記録」を兼ねる。** 処理を始めるときに
+短い TTL で予約し、成功したら 7 日の TTL で上書きする。失敗したときは**予約を削除する**。
+こうしないと、失敗したジョブの再配送が「処理済み」と誤判定されてレビューが消える。
+予約の TTL が短いのは、ワーカーがクラッシュしたときに再試行が止まる時間を短くするため。
 
 実装は GCP なら Firestore、AWS なら DynamoDB (条件付き書き込みで lock を実現)、
 ローカル / 単一ノードならインメモリ、必要なら Redis 実装を追加する。

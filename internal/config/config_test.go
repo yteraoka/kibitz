@@ -254,3 +254,54 @@ func TestMaxEventAgeDefaultsToDisabled(t *testing.T) {
 		t.Error("a negative event age was accepted")
 	}
 }
+
+func TestTraceConfiguration(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	// Tracing is off unless a collector is named, so the instrumentation costs
+	// nothing by default.
+	if cfg.Trace.Endpoint != "" || cfg.Trace.SampleRatio != 1 {
+		t.Errorf("trace defaults = %+v", cfg.Trace)
+	}
+
+	env := minimalServerEnv()
+	env["KIBITZ_OTEL_ENDPOINT"] = "otel-collector:4317"
+	env["KIBITZ_OTEL_INSECURE"] = "true"
+	env["KIBITZ_OTEL_SAMPLE_RATIO"] = "0.25"
+
+	cfg, err = config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Trace.Endpoint != "otel-collector:4317" || !cfg.Trace.Insecure || cfg.Trace.SampleRatio != 0.25 {
+		t.Errorf("trace config = %+v", cfg.Trace)
+	}
+
+	for _, bad := range []string{"2", "-0.5", "most"} {
+		env["KIBITZ_OTEL_SAMPLE_RATIO"] = bad
+		if _, err := config.LoadServer(config.MapEnv(env)); err == nil {
+			t.Errorf("a sample ratio of %q was accepted", bad)
+		}
+	}
+}
+
+func TestWorkerReliabilityDefaults(t *testing.T) {
+	cfg, err := config.LoadWorker(config.MapEnv(minimalWorkerEnv()))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if cfg.MaxDeliveries != 5 {
+		t.Errorf("MaxDeliveries = %d, want 5", cfg.MaxDeliveries)
+	}
+	if cfg.MaxPostsPerHour != 10 {
+		t.Errorf("MaxPostsPerHour = %d, want 10", cfg.MaxPostsPerHour)
+	}
+	if !cfg.SkipDraft {
+		t.Error("SkipDraft = false, want drafts skipped by default")
+	}
+	if cfg.Limits.MinSeverity != "medium" {
+		t.Errorf("MinSeverity = %q, want medium", cfg.Limits.MinSeverity)
+	}
+}

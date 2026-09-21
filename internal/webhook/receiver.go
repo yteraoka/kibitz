@@ -6,12 +6,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/httpx"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue"
+	"github.com/yteraoka/kibitz/internal/telemetry"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Receiver is the HTTP entry point for one platform. It does as little as
@@ -29,6 +33,7 @@ type Receiver struct {
 	publishAttempts int
 	publishBackoff  time.Duration
 	now             func() time.Time
+	metrics         *telemetry.Metrics
 }
 
 // ReceiverOption customizes a receiver.
@@ -61,6 +66,11 @@ func WithPublishRetry(attempts int, backoff, timeout time.Duration) ReceiverOpti
 	}
 }
 
+// WithMetrics records webhook outcomes.
+func WithMetrics(m *telemetry.Metrics) ReceiverOption {
+	return func(r *Receiver) { r.metrics = m }
+}
+
 // WithReceiverClock replaces the clock used for staleness checks.
 func WithReceiverClock(now func() time.Time) ReceiverOption {
 	return func(r *Receiver) { r.now = now }
@@ -86,6 +96,17 @@ func NewReceiver(h Handler, pub queue.Publisher, pol *policy.Engine, logger *slo
 }
 
 func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The trace starts here and is carried on the event, so a posted comment
+	// can be followed back to the delivery that caused it.
+	inbound := headerCarrier(r)
+	ctx := telemetry.ExtractTrace(r.Context(), inbound)
+	ctx, span := telemetry.Tracer().Start(ctx, "webhook.receive",
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(telemetry.AttrPlatform.String(string(rc.handler.Platform()))),
+	)
+	defer span.End()
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -126,7 +147,12 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.skip(r, w, "unsupported_event", nil)
 		return
 	}
-	rc.attachTrace(r, ev)
+	rc.attachTrace(r.Context(), ev, inbound)
+	span.SetAttributes(
+		telemetry.AttrKind.String(string(ev.Kind)),
+		telemetry.AttrRepository.String(ev.Repository.FullName),
+		telemetry.AttrEventID.String(ev.ID),
+	)
 
 	decision := rc.policy.Evaluate(ev, rc.now())
 	if !decision.Publish {
@@ -136,6 +162,9 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	msgID, err := rc.publish(r.Context(), ev)
 	if err != nil {
+		if rc.metrics != nil {
+			rc.metrics.PublishFailures.WithLabelValues(string(ev.Source.Platform)).Inc()
+		}
 		// Answering 5xx is the only way to ask the forge to try again, and on
 		// GitHub it at least makes the failure visible in the hook's delivery
 		// log for a manual redelivery.
@@ -143,6 +172,11 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rc.metrics != nil {
+		platform := string(ev.Source.Platform)
+		rc.metrics.WebhooksReceived.WithLabelValues(platform, "published", "").Inc()
+		rc.metrics.EventsPublished.WithLabelValues(platform, string(ev.Kind)).Inc()
+	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event published",
 		slog.String("platform", string(ev.Source.Platform)),
 		slog.String("kind", string(ev.Kind)),
@@ -186,17 +220,37 @@ func (rc *Receiver) publish(ctx context.Context, ev *event.ReviewEvent) (string,
 	return "", err
 }
 
-// attachTrace carries W3C trace context from the delivery into the message, so
-// a review can be followed from the webhook all the way to the posted comment.
-func (rc *Receiver) attachTrace(r *http.Request, ev *event.ReviewEvent) {
-	traceparent := r.Header.Get("traceparent")
-	if traceparent == "" {
+// attachTrace writes the current trace context onto the event, so the worker
+// continues this trace instead of starting its own.
+//
+// With tracing switched off there is nothing to inject, and the caller's own
+// traceparent is passed through instead: kibitz not being traced is no reason
+// to break someone else's trace.
+func (rc *Receiver) attachTrace(ctx context.Context, ev *event.ReviewEvent, inbound telemetry.Carrier) {
+	carrier := telemetry.Carrier{}
+	telemetry.InjectTrace(ctx, carrier)
+
+	if carrier["traceparent"] == "" {
+		carrier = inbound
+	}
+	if carrier["traceparent"] == "" {
 		return
 	}
 	ev.Trace = &event.Trace{
-		TraceParent: traceparent,
-		TraceState:  r.Header.Get("tracestate"),
+		TraceParent: carrier["traceparent"],
+		TraceState:  carrier["tracestate"],
 	}
+}
+
+// headerCarrier exposes the request headers to the propagator.
+func headerCarrier(r *http.Request) telemetry.Carrier {
+	carrier := telemetry.Carrier{}
+	for _, key := range []string{"traceparent", "tracestate", "baggage"} {
+		if v := r.Header.Get(key); v != "" {
+			carrier[key] = v
+		}
+	}
+	return carrier
 }
 
 // skip answers 204: the delivery was valid but kibitz has nothing to do.
@@ -213,11 +267,18 @@ func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, reason string, 
 			slog.String("delivery_id", ev.Source.DeliveryID),
 		)
 	}
+	if rc.metrics != nil {
+		rc.metrics.WebhooksReceived.WithLabelValues(string(rc.handler.Platform()), "skipped", reason).Inc()
+	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelDebug, "event skipped", attrs...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, status int, msg string, err error) {
+	if rc.metrics != nil {
+		rc.metrics.WebhooksReceived.WithLabelValues(
+			string(rc.handler.Platform()), "rejected", strconv.Itoa(status)).Inc()
+	}
 	level := slog.LevelWarn
 	if status >= 500 {
 		level = slog.LevelError

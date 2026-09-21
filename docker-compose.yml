@@ -36,6 +36,20 @@ services:
   # Started only with `make up-pubsub` (or `docker compose --profile pubsub up`).
   # It is a large image and nothing uses it until the Pub/Sub backend lands in
   # Phase 2, so it stays out of the default `make up`.
+  firestore:
+    profiles: ["pubsub"]
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command:
+      - gcloud
+      - beta
+      - emulators
+      - firestore
+      - start
+      - --project=kibitz-dev
+      - --host-port=0.0.0.0:8086
+    ports:
+      - "8086:8086"
+
   pubsub:
     profiles: ["pubsub"]
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators

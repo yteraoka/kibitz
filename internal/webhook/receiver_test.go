@@ -17,6 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue"
@@ -339,5 +344,62 @@ func TestReceiverReportsPublishFailure(t *testing.T) {
 	}
 	if got := pub.calls.Load(); got != 2 {
 		t.Errorf("%d publish attempts, want 2", got)
+	}
+}
+
+// With tracing enabled the event carries kibitz's own span context, so the
+// worker's job becomes a child of the webhook rather than a sibling.
+func TestReceiverInjectsItsOwnTraceContext(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+	})
+
+	q := memory.New()
+	rc := newReceiver(t, q)
+
+	r := post(fixture(t, "pull_request.opened.json"), "pull_request")
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, r)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got := make(chan *event.ReviewEvent, 1)
+	go func() {
+		_ = q.Receive(ctx, func(_ context.Context, m *queue.Message) error {
+			got <- m.Event
+			return nil
+		})
+	}()
+
+	select {
+	case ev := <-got:
+		if ev.Trace == nil || ev.Trace.TraceParent == "" {
+			t.Fatal("the event carries no trace context")
+		}
+		spans := exporter.GetSpans()
+		if len(spans) == 0 {
+			t.Fatal("no span was recorded")
+		}
+		if !strings.Contains(ev.Trace.TraceParent, spans[0].SpanContext.TraceID().String()) {
+			t.Errorf("traceparent %q does not carry the recorded trace %s",
+				ev.Trace.TraceParent, spans[0].SpanContext.TraceID())
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out")
 	}
 }
