@@ -328,3 +328,4 @@ gcloud run services update kibitz-worker --region asia-northeast1 --min-instance
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
 | レビューが来ない・ログも無い | ワーカーが 0 インスタンス | `cpu_idle = false` と `min_instance_count = 1` が効いているか確認 |
 | `git fetch` が失敗する | App のインストール先にリポジトリが含まれていない | GitHub App の Install 設定でリポジトリを追加 |
+| worker のビルドが `opencode-ai's postinstall script was not run` で失敗 | `--ignore-scripts` で opencode の postinstall が動いていない | `npm rebuild -g opencode-ai` を後続で実行する (修正済み。古い Dockerfile を使っている場合は更新する) |

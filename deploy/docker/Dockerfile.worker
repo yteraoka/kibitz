@@ -27,8 +27,19 @@ RUN apt-get update \
 
 # Pinned rather than "latest": the agent's behaviour is part of kibitz's
 # output, so it changes when kibitz is released, not when upstream publishes.
+#
+# --ignore-scripts stops every dependency's install hooks from running, but
+# opencode ships its actual binary as a platform-specific optional dependency
+# and its own postinstall is what puts that binary in place. `npm rebuild` runs
+# the hooks for that one package and nothing else, which keeps the rest of the
+# tree from executing code at build time.
+#
+# Which binary is chosen is decided here, not at runtime: the postinstall reads
+# the build machine's CPU features, so a build under emulation picks the
+# baseline variant. That runs anywhere, which is the safe direction.
 ARG OPENCODE_VERSION=1.18.31
 RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
+    && npm rebuild -g opencode-ai \
     && opencode --version
 
 COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
