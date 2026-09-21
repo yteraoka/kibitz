@@ -25,7 +25,12 @@ gcloud config set project YOUR_PROJECT_ID
 
 kibitz は GitHub App としてのみ認証する (PAT は使わない)。
 
-`https://github.com/organizations/YOUR_ORG/settings/apps/new` で作成する。
+App の所有者によって作成ページが違う。**所有者は後から変更できない**ので先に決める。
+
+| 所有者 | 作成ページ | 向いている場合 |
+| --- | --- | --- |
+| 個人アカウント | `https://github.com/settings/apps/new` | 個人のリポジトリで使う。設定画面からは Settings → Developer settings → GitHub Apps → New GitHub App |
+| Organization | `https://github.com/organizations/YOUR_ORG/settings/apps/new` | チームで使う。担当者が抜けても組織の管理者が引き継げる |
 
 **Repository permissions**
 
@@ -56,8 +61,10 @@ openssl rand -hex 32   # この値を控える
 
 1. **App ID** を控える (App の設定ページ上部)
 2. **Generate a private key** で `.pem` をダウンロード
-3. **Install App** で対象組織にインストールし、インストール後の URL
-   `.../installations/<INSTALLATION_ID>` から **Installation ID** を控える
+3. **Install App** で対象のアカウント (または組織) にインストールし、
+   インストール後の URL `.../installations/<INSTALLATION_ID>` から
+   **Installation ID** を控える。ここで対象リポジトリを選ぶ
+   (選び忘れると `git fetch` が失敗する。§8 を参照)
 
 ## 2. Terraform の変数を用意する
 
