@@ -101,14 +101,16 @@ variable "mention" {
 
     GitHub gives it no special meaning: it is matched by kibitz itself, and a
     GitHub App cannot be @-mentioned at all. What GitHub does do is notify the
-    **account of that name if one exists**, so "@kibitz" in a public
-    repository sends mail to whoever owns github.com/kibitz.
+    account of that name if one exists, and github.com/kibitz is a real
+    person, so the "@" form sends them mail from every public repository that
+    asks for a review.
 
-    A token that is not a username avoids that entirely. "/kibitz" works the
-    same way, commands and arguments included, and notifies nobody.
+    Hence the default slash. It works the same way, commands and arguments
+    included, and notifies nobody. Changing it to an "@" form means taking on
+    that the name is unclaimed, and stays unclaimed.
   EOT
   type        = string
-  default     = "@kibitz"
+  default     = "/kibitz"
 }
 
 variable "trigger_keywords" {

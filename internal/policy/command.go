@@ -9,7 +9,13 @@ import (
 // DefaultMention is how a comment addresses kibitz unless configured
 // otherwise. It is shared so that the server's rules and the worker's help
 // text cannot drift apart.
-const DefaultMention = "@kibitz"
+//
+// It is deliberately not "@kibitz". GitHub reads "@name" as a mention of
+// whoever owns that account — kibitz itself cannot be mentioned, since a
+// GitHub App has no account to mention — so the "@" form sends mail to a
+// stranger every time somebody asks for a review. A slash has no meaning to
+// the forge and every meaning here. See docs/security.md.
+const DefaultMention = "/kibitz"
 
 // Command names kibitz understands in a comment.
 const (
@@ -33,13 +39,14 @@ var knownCommands = map[string]bool{
 }
 
 // Mentions reports whether body addresses kibitz. The mention has to stand on
-// its own rather than merely appear inside a longer word, so that a quoted
-// address in prose does not summon the bot.
+// its own rather than merely appear inside a longer word, and code is not
+// speech: a mention inside a fenced block or an inline span is somebody
+// writing about kibitz, not to it.
 func Mentions(body, mention string) bool {
 	if mention == "" {
 		return false
 	}
-	lowerBody, lowerMention := strings.ToLower(body), strings.ToLower(mention)
+	lowerBody, lowerMention := strings.ToLower(StripCode(body)), strings.ToLower(mention)
 
 	for i := 0; ; {
 		idx := strings.Index(lowerBody[i:], lowerMention)
@@ -95,8 +102,24 @@ func ParseCommand(body, mention string) *event.Command {
 		return nil
 	}
 
-	// Only the first line can carry it, and only as its first word.
-	first, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
+	// Only the comment's first line of content can carry it, and only as its
+	// first word. The two are walked together so that a line which was all
+	// code counts as that first line and comes up empty, rather than the
+	// command being found on the line below it.
+	lines := strings.Split(body, "\n")
+	stripped := strings.Split(StripCode(body), "\n")
+
+	first := ""
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if i < len(stripped) {
+			first = stripped[i]
+		}
+		break
+	}
+
 	fields := strings.Fields(first)
 	if len(fields) < 2 || !strings.EqualFold(fields[0], mention) {
 		return nil

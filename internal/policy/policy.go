@@ -147,7 +147,7 @@ func (e *Engine) wanted(ev *event.ReviewEvent) bool {
 
 	text := ev.PullRequest.Title + "\n" + ev.PullRequest.Description
 
-	// The mention counts as a keyword: writing "@kibitz review this" in the
+	// The mention counts as a keyword: writing "/kibitz review this" in the
 	// description is the obvious way to ask, and having to learn a second
 	// vocabulary for it would be surprising.
 	if Mentions(text, e.mention) {
@@ -156,7 +156,9 @@ func (e *Engine) wanted(ev *event.ReviewEvent) bool {
 
 	// The keywords are lowercased in New, and punctuation like "[review]" is
 	// matched anywhere rather than as a word, so a title can carry it as a tag.
-	haystack := strings.ToLower(text)
+	// Code is excluded for the same reason it is in a comment: a description
+	// that shows how to ask for a review is not asking for one.
+	haystack := strings.ToLower(StripCode(text))
 	for _, keyword := range e.keywords {
 		if strings.Contains(haystack, keyword) {
 			return true

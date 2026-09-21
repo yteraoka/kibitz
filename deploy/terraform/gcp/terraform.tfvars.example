@@ -23,10 +23,10 @@ allowed_repos = ["my-org/*"]
 # ユーザー名になり得ない形にしておけば通知は発生しない。
 #
 #   mention = "/kibitz"
-mention = "@kibitz"
+mention = "/kibitz"
 
 # レビューを依頼するキーワード。空にすると全 PR をレビューする。
-# 設定すると、タイトルか本文にこれらか @kibitz を含む PR だけが publish される
+# 設定すると、タイトルか本文にこれらか /kibitz を含む PR だけが publish される
 # (コメントでの依頼は常に有効)。無駄なメッセージが減り、worker が 0 インスタンス
 # に落ちやすくなる。
 #

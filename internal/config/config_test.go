@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/config"
+	"github.com/yteraoka/kibitz/internal/policy"
 )
 
 func minimalServerEnv() map[string]string {
@@ -42,8 +43,10 @@ func TestLoadServerDefaults(t *testing.T) {
 	if cfg.Queue.PubSub.Topic != "kibitz-events" {
 		t.Errorf("Topic = %q, want kibitz-events", cfg.Queue.PubSub.Topic)
 	}
-	if cfg.Policy.Mention != "@kibitz" {
-		t.Errorf("Mention = %q, want @kibitz", cfg.Policy.Mention)
+	// Not "@kibitz": that would mention whoever owns the account of that
+	// name on the forge. See docs/security.md.
+	if cfg.Policy.Mention != policy.DefaultMention {
+		t.Errorf("Mention = %q, want %q", cfg.Policy.Mention, policy.DefaultMention)
 	}
 	if got, want := cfg.Policy.AllowedRepos, []string{"*"}; len(got) != 1 || got[0] != want[0] {
 		t.Errorf("AllowedRepos = %v, want %v", got, want)
@@ -70,7 +73,7 @@ func TestEmptyValueFallsBackToDefault(t *testing.T) {
 	if cfg.Queue.PubSub.Topic != "kibitz-events" {
 		t.Errorf("Topic = %q, want the default", cfg.Queue.PubSub.Topic)
 	}
-	if cfg.Policy.Mention != "@kibitz" {
+	if cfg.Policy.Mention != policy.DefaultMention {
 		t.Errorf("Mention = %q, want the default", cfg.Policy.Mention)
 	}
 }

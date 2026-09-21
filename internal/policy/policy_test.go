@@ -1,6 +1,7 @@
 package policy_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -408,7 +409,6 @@ func TestEvaluateCommandsMustOpenTheComment(t *testing.T) {
 	bodies := []string{
 		"> @kibitz review",
 		"ありがとうございます。\n@kibitz review",
-		"使い方: `@kibitz review` とコメントしてください",
 	}
 
 	for _, body := range bodies {
@@ -427,5 +427,86 @@ func TestEvaluateCommandsMustOpenTheComment(t *testing.T) {
 				t.Errorf("command = %+v, want none", ev.Command)
 			}
 		})
+	}
+}
+
+// Code is not speech. Writing down how to ask for a review is the most
+// ordinary thing to do in a pull request, and it must not ask for one.
+func TestEvaluateIgnoresCode(t *testing.T) {
+	bodies := []string{
+		"使い方: `@kibitz review` とコメントしてください",
+		"```\n@kibitz review\n```",
+		"```sh\n@kibitz review --focus security\n```\nこう書きます",
+		"> 使い方:\n> ```\n> @kibitz review\n> ```",
+		"``@kibitz review``",
+	}
+
+	for _, body := range bodies {
+		t.Run(body, func(t *testing.T) {
+			ev := commentEvent(body)
+
+			d := engine().Evaluate(ev, now)
+			if d.Publish {
+				t.Errorf("decision = %+v, want it dropped", d)
+			}
+			if d.Reason != policy.ReasonNoMention {
+				t.Errorf("reason = %q, want %q", d.Reason, policy.ReasonNoMention)
+			}
+		})
+	}
+}
+
+// A comment whose first line is code has no command on its first line, and
+// the line below it is not the head of the comment.
+func TestParseCommandDoesNotPromoteTheLineBelowCode(t *testing.T) {
+	body := "`前置き`\n@kibitz review"
+
+	if cmd := policy.ParseCommand(body, "@kibitz"); cmd != nil {
+		t.Errorf("ParseCommand = %+v, want nil", cmd)
+	}
+}
+
+// An unmatched backtick is a backtick, not the start of a span that swallows
+// the rest of the comment.
+func TestStripCodeKeepsUnmatchedBackticks(t *testing.T) {
+	body := "`@kibitz review"
+
+	if !policy.Mentions(body, "@kibitz") {
+		t.Errorf("Mentions(%q) = false, want the mention to survive", body)
+	}
+}
+
+func TestStripCode(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "nothing to strip", body: "plain text", want: "plain text"},
+		{name: "inline span", body: "use `code` here", want: "use   here"},
+		{name: "double backticks", body: "a ``b `c` d`` e", want: "a   e"},
+		{name: "unmatched", body: "a ` b", want: "a ` b"},
+		{name: "fence", body: "before\n```\ninside\n```\nafter", want: "before\n\n\n\nafter"},
+		{name: "tilde fence", body: "~~~\ninside\n~~~", want: "\n\n"},
+		{name: "quoted fence", body: "> ```\n> inside\n> ```", want: "\n\n"},
+		{name: "unclosed fence runs to the end", body: "```\ninside\nmore", want: "\n\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := policy.StripCode(tc.body); got != tc.want {
+				t.Errorf("StripCode(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// Every line stays a line, because the head-of-comment rule is decided by
+// position.
+func TestStripCodePreservesLineCount(t *testing.T) {
+	body := "one\n```\ntwo\n```\n`three`\nfour"
+
+	if got, want := len(strings.Split(policy.StripCode(body), "\n")), len(strings.Split(body, "\n")); got != want {
+		t.Errorf("stripped body has %d lines, want %d", got, want)
 	}
 }

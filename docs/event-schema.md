@@ -67,7 +67,7 @@
     "id": "555",
     "thread_id": "th_1",
     "in_reply_to": "",
-    "body": "@kibitz なぜこの実装だと競合するのですか?",
+    "body": "/kibitz なぜこの実装だと競合するのですか?",
     "author": { "id": "1", "login": "yteraoka", "is_bot": false },
     "path": "internal/queue/sqs/subscriber.go",
     "line": 88,
@@ -89,7 +89,7 @@
 | `pr.ready_for_review` | draft 解除 | 全体レビュー |
 | `pr.review_requested` | ボットにレビュー依頼 | 全体レビュー |
 | `comment.created` | PR 上のコメント | メンション時のみ回答 (スレッド継続) |
-| `command` | 明示コマンド (`@kibitz review` 等) | コマンドに応じた処理 |
+| `command` | 明示コマンド (`/kibitz review` 等) | コマンドに応じた処理 |
 | `pr.closed` / `pr.merged` | クローズ | セッションと作業領域の後片付け |
 | `issue.comment` | Issue 上のメンション | 質問への回答。Phase 8 以降は実装指示も受け付ける |
 | `issue.assigned` | ボットに Issue がアサインされた | Phase 8: 実装モードの起動条件 (既定は無効) |
@@ -147,11 +147,11 @@ KIBITZ_TRIGGER_KEYWORDS=/review,[review],レビュー希望
 | `command` | publish | publish (キーワード不要) |
 
 - 判定対象は PR の**タイトルと本文**。大文字小文字は区別しない。
-- メンション (`@kibitz`) 自体もキーワードとして扱う。本文に `@kibitz お願いします`
+- メンション (`/kibitz`) 自体もキーワードとして扱う。本文に `/kibitz お願いします`
   と書けばレビューされる。
 - コメントは対象外。ボットに話しかけること自体が依頼なので、PR 側のキーワードは要らない。
 - 途中からレビューさせたくなったら、PR の説明を編集するのではなくコメントで
-  `@kibitz review` と書くのが確実 (`edited` は元々 publish していない)。
+  `/kibitz review` と書くのが確実 (`edited` は元々 publish していない)。
 
 publish されなかったイベントは HTTP 204、メトリクス
 `kibitz_webhooks_received_total{outcome="skipped",reason="no_keyword"}`、
@@ -166,17 +166,17 @@ publish されなかったイベントは HTTP 204、メトリクス
 プラットフォーム共通。
 
 ```
-@kibitz review                     # 全体を再レビュー
-@kibitz review --focus security    # 観点を指定
-@kibitz review --full              # 増分ではなく全体
-@kibitz explain internal/queue/sqs/subscriber.go:88
-@kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
-@kibitz ignore                     # この PR では以降レビューしない
-@kibitz help
+/kibitz review                     # 全体を再レビュー
+/kibitz review --focus security    # 観点を指定
+/kibitz review --full              # 増分ではなく全体
+/kibitz explain internal/queue/sqs/subscriber.go:88
+/kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
+/kibitz ignore                     # この PR では以降レビューしない
+/kibitz help
 
 # Phase 8 (Issue 上で使用、既定は無効)
-@kibitz implement                  # この Issue の内容を実装してブランチと PR を作る
-@kibitz plan                       # 実装方針だけを提示する (コードは書かない)
+/kibitz implement                  # この Issue の内容を実装してブランチと PR を作る
+/kibitz plan                       # 実装方針だけを提示する (コードは書かない)
 ```
 
 メンション名は設定で変更可能 (`KIBITZ_MENTION`)。`@` である必要はなく、
@@ -191,17 +191,31 @@ publish されなかったイベントは HTTP 204、メトリクス
 
 | コメント | 結果 |
 | --- | --- |
-| `@kibitz review` | ✅ コマンド (レビュー実行) |
-| `@kibitz review --focus security`<br>`よろしく` | ✅ コマンド (2 行目以降は自由に書ける) |
-| `ありがとうございます。`<br>`@kibitz review` | 質問として扱う (実行しない) |
-| `> @kibitz review` (引用) | 質問として扱う (実行しない) |
-| 使い方: `` `@kibitz review` `` と書いてください | 質問として扱う (実行しない) |
-| `@kibitz なぜ競合しますか?` | 質問 (コマンド名が無いため) |
+| `/kibitz review` | ✅ コマンド (レビュー実行) |
+| `/kibitz review --focus security`<br>`よろしく` | ✅ コマンド (2 行目以降は自由に書ける) |
+| `ありがとうございます。`<br>`/kibitz review` | 質問として扱う (実行しない) |
+| `> /kibitz review` (引用) | 質問として扱う (実行しない) |
+| `/kibitz なぜ競合しますか?` | 質問 (コマンド名が無いため) |
+| 使い方: `` `/kibitz review` `` と書いてください | **無視** (コードスパン) |
+| ` ``` ` で囲んだブロックの中の `/kibitz review` | **無視** (コードブロック) |
 
 引用返信、使い方の説明、コマンドについての質問には、どれも同じ文字列が現れる。
 **同僚が「こう書けばレビューされます」と説明しただけでレビューが走る**のは、
 ボットが嫌われて止められる典型的な理由なので、実行はコメントの先頭に限定している。
 先頭以外のメンションも kibitz には届くが、**回答が 1 件増えるだけで、何も実行しない**。
+
+### 4.2 コードの中は見ない
+
+コードスパン (`` `...` ``) とコードブロック (` ``` ` / `~~~`) の中は、
+コマンド判定でもメンション判定でも**存在しないものとして扱う**。
+使い方の説明を書いても呼び出されないし、回答も返らない。
+
+- 引用 (`>`) の中のコードブロックも対象
+- 閉じられていないバッククォートはコードではなく、ただの文字として扱う
+- PR のタイトル / 本文のキーワード判定 (`KIBITZ_TRIGGER_KEYWORDS`) も同じ
+  — テンプレートのコードブロックに `/review` が書いてあっても publish されない
+- 行数は保たれるので、1 行目がコードだけのコメントは「先頭にコマンドが無い」と
+  判定される (2 行目が繰り上がることはない)
 
 ## 5. テスト方針
 

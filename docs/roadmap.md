@@ -129,7 +129,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - 巨大 PR 向け triage エージェント
 
 **完了条件**: 指摘に対して「なぜ?」と返信すると文脈を踏まえた回答が返る。
-`@kibitz review --focus security` が期待通り動く。
+`/kibitz review --focus security` が期待通り動く。
 
 ## Phase 7: 外部サービス / MCP 統合 (目安 1〜2 週)
 
@@ -156,7 +156,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - CI 設定・`.kibitz.yaml`・依存定義ファイルの編集禁止
 - 自己レビューの禁止 (kibitz が作った PR に kibitz はレビューしない)
 
-**完了条件**: 許可されたユーザーが Issue で `@kibitz implement` と書くと、
+**完了条件**: 許可されたユーザーが Issue で `/kibitz implement` と書くと、
 ビルドとテストが通った状態の draft PR が作られる。
 許可外のユーザーの指示、許可外パスの編集、テスト失敗のいずれでも PR が作られない。
 

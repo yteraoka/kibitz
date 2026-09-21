@@ -241,7 +241,7 @@ Issue の内容を読んでコードを書き、ブランチと PR を作るモ�
 起動条件 (すべて満たす必要がある)
   - .kibitz.yaml の implement.enabled が true
   - 指示者が implement.allowed_actors に含まれる (第三者の指示では動かない)
-  - Issue 上での明示コマンド (@kibitz implement) である
+  - Issue 上での明示コマンド (/kibitz implement) である
   - 対象リポジトリが運用側の許可リストに含まれる
 
 実行

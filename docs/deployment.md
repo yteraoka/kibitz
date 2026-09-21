@@ -404,7 +404,7 @@ gcloud logging read 'jsonPayload.delivery_id="<配送ID>"' --limit 20
 | --- | --- |
 | `unsupported_event` | kibitz が扱わないイベント (`ping`、`labeled`、`edited` など) |
 | `no_keyword` | `trigger_keywords` を設定していて、PR のタイトル / 本文に無い |
-| `no_mention` | コメントだが `@kibitz` が入っていない |
+| `no_mention` | コメントだが `/kibitz` が入っていない (コードスパンやコードブロックの中は数えない) |
 | `self_authored` | kibitz 自身の発言 (無限ループ防止) |
 | `repo_not_allowed` | `allowed_repos` に合わない |
 | `stale` | `KIBITZ_MAX_EVENT_AGE` より古い配送 (既定では無効) |
@@ -607,7 +607,7 @@ printf '%s' "$(cat body.json)" | \
 | コメントが二重に付く | `bot_logins` が実際のアカウント名と違う | 投稿されたコメントの作者名を見て tfvars を修正 |
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
 | レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカーサービスの `roles/run.developer` があるか |
-| PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。**コメントの先頭に** `@kibitz review` と書けば実行される |
+| PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。**コメントの先頭に** `/kibitz review` と書けば実行される |
 | ワーカーが 1 台上がりっぱなし | scaler が失敗している、またはメトリクスが読めていない | `gcloud run jobs executions list --job kibitz-scaler`。SA に `roles/monitoring.viewer` があるか |
 | コメントしたのにレビューが走らない (回答だけ返る) | コマンドがコメントの先頭に無い | 引用や説明文の途中のメンションは質問として扱う。先頭に書く ([event-schema.md](event-schema.md#41-コマンドはコメントの先頭だけ)) |
 | レビュー中にワーカーが落ちる | `worker_idle_after` を短くしすぎている | メトリクスの遅延より長くする (既定 15 分)。ジョブは再配送されるのでレビューは失われない |
