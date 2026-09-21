@@ -1,5 +1,7 @@
 # kibitz
 
+<img src="assets/kibitz-app-logo-512.png" alt="" width="96" align="right">
+
 GitHub / GitLab / Azure DevOps の Pull Request (Merge Request) に対して、
 AI による **コードレビュー** と **問い合わせへの回答** を行うマルチプラットフォーム対応ボット。
 

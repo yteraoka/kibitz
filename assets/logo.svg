@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="kibitz">
+  <title>kibitz</title>
+
+  <!-- Full bleed: GitHub applies its own corner rounding, and a coloured
+       square keeps the mark from picking up whatever sits behind it. -->
+  <rect width="1024" height="1024" fill="#20304F"/>
+
+  <!-- A speech bubble holding a diff: the two things kibitz does, in one
+       silhouette that survives being shrunk to a comment avatar. Bubble and
+       tail are one path so the join stays clean at every size. -->
+  <path fill="#FFFFFF" d="
+    M 296 236
+    H 728
+    A 100 100 0 0 1 828 336
+    V 556
+    A 100 100 0 0 1 728 656
+    H 520
+    L 322 792
+    L 350 656
+    H 296
+    A 100 100 0 0 1 196 556
+    V 336
+    A 100 100 0 0 1 296 236
+    Z"/>
+
+  <!-- The diff marks. Colours are GitHub's own additions and deletions, so the
+       meaning is already familiar wherever this appears. -->
+  <rect x="292" y="346" width="440" height="72" rx="36" fill="#3FB950"/>
+  <rect x="292" y="474" width="300" height="72" rx="36" fill="#F85149"/>
+</svg>
