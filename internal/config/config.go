@@ -159,6 +159,10 @@ type OpenCode struct {
 	TriageModel   string
 	FallbackModel string
 	Vertex        Vertex
+	// ReviewAgent and AnswerAgent name the agent definitions shipped in the
+	// worker image. An empty value falls back to OpenCode's default agent.
+	ReviewAgent string
+	AnswerAgent string
 }
 
 // Limits bounds a single review job.
@@ -166,6 +170,8 @@ type Limits struct {
 	MaxComments  int
 	MaxDiffLines int
 	CloneDepth   int
+	// MinSeverity drops findings below this level.
+	MinSeverity string
 }
 
 // Server is the kibitz-server configuration.
@@ -198,6 +204,10 @@ type Worker struct {
 	MCPAllowlist     []string
 	GitHub           GitHubApp
 	ImplementEnabled bool
+	// SkipDraft leaves draft pull requests alone until they are marked ready.
+	SkipDraft bool
+	// Language is the language findings and answers are written in.
+	Language string
 }
 
 // LoadServer reads the kibitz-server configuration.
@@ -265,11 +275,14 @@ func LoadWorker(env Lookup) (*Worker, error) {
 				ProjectID: l.str("GOOGLE_CLOUD_PROJECT", ""),
 				Location:  l.str("VERTEX_LOCATION", "global"),
 			},
+			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
+			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
 		},
 		Limits: Limits{
 			MaxComments:  l.positiveInt("KIBITZ_MAX_COMMENTS", 20),
 			MaxDiffLines: l.positiveInt("KIBITZ_MAX_DIFF_LINES", 10000),
 			CloneDepth:   l.positiveInt("KIBITZ_CLONE_DEPTH", 50),
+			MinSeverity:  l.enum("KIBITZ_MIN_SEVERITY", "medium", "critical", "high", "medium", "low", "info"),
 		},
 		MCPAllowlist: l.list("KIBITZ_MCP_ALLOWLIST", nil),
 		GitHub: GitHubApp{
@@ -279,6 +292,8 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			BaseURL:        l.str("KIBITZ_GITHUB_BASE_URL", ""),
 		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
+		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
+		Language:         l.str("KIBITZ_LANGUAGE", "日本語"),
 	}
 
 	// A GitHub App is either fully configured or not configured at all; half of

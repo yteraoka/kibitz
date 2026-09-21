@@ -120,7 +120,7 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 
 ## ステータス
 
-**Phase 1 まで完了。** 次は Phase 2 (Pub/Sub + Forge クライアント + OpenCode 実行)。
+**Phase 2 まで実装完了** (実機検証は未了)。次は Phase 3 (冪等性・ロック・DLQ・可観測性)。
 進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
 
 | 項目 | 状態 |
@@ -134,5 +134,11 @@ KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
 | GitHub Webhook の検証・正規化 (`internal/webhook/github`) | 完了 |
 | トリガ判定とコマンド解析 (`internal/policy`) | 完了 |
 | キュー抽象化とインメモリ実装 (`internal/queue`) | 完了 |
-| Cloud Pub/Sub、Forge クライアント、OpenCode 実行 | Phase 2 |
+| Cloud Pub/Sub の publish / subscribe (`internal/queue/pubsub`) | 完了 |
+| GitHub App 認証と API クライアント (`internal/forge/github`) | 完了 |
+| PR の shallow clone (`internal/workspace`) | 完了 |
+| OpenCode の実行と出力検証 (`internal/reviewer`) | 完了 |
+| レビュージョブ (`internal/worker`) | 完了 |
+| 実機での疎通確認 | 未了 |
+| 冪等性・ロック・DLQ・可観測性 | Phase 3 |
 | GitLab / Azure DevOps | Phase 4 / 5 |

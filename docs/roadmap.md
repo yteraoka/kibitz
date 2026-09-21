@@ -53,7 +53,7 @@ CI の docker ジョブで初めて実行される。
 5 分の既定値だと、失敗した配送を GitHub の Redeliver で後から再送する正当な運用が
 黙って 204 になってしまうため。リプレイ対策は Phase 3 の配送 ID 重複排除が主軸。
 
-## Phase 2: 最初のエンドツーエンド (GitHub + Pub/Sub + OpenCode) (目安 2 週)
+## Phase 2: 最初のエンドツーエンド (GitHub + Pub/Sub + OpenCode) (実装完了・実機検証待ち)
 
 - `internal/queue/pubsub` — Publisher / Subscriber (ordering key、ack 延長、DLQ)
 - `internal/forge` — `Client` インターフェースと GitHub 実装
@@ -67,6 +67,15 @@ CI の docker ジョブで初めて実行される。
 
 **完了条件**: テスト用リポジトリで PR を作ると、数分以内にサマリコメントと
 インライン指摘が投稿される。ワーカーを途中で kill しても再配送で復旧する。
+
+コードは実装済み。ユニットテストと、fake を使った経路全体のテストは通っている。
+**ただし実機での確認が未了**: この環境には GitHub App も Vertex AI も
+opencode バイナリも無いため、以下は最初の実デプロイで確認する。
+
+- OpenCode の Vertex AI プロバイダ ID (`google-vertex-anthropic` か `google-vertex` か)
+- `opencode run --format json` のイベント形式 (現在は既知のキーを拾う防御的な実装)
+- `--file` によるプロンプト添付と `--agent` の解決 (エージェント定義はイメージに同梱)
+- GitHub App のインストールトークンと `refs/pull/N/head` の fetch
 
 ## Phase 3: 信頼性 (目安 1 週)
 

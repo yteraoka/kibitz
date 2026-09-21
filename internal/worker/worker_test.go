@@ -5,6 +5,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,4 +124,46 @@ func TestJobTimeout(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("the job was not cut off at its timeout")
 	}
+}
+
+// originRepo builds a repository whose pull request head is published the way
+// a forge publishes it, so a review job can fetch it.
+func originRepo(t *testing.T) (dir, headSHA, baseSHA string) {
+	t.Helper()
+
+	dir = t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=kibitz", "GIT_AUTHOR_EMAIL=kibitz@example.com",
+			"GIT_COMMITTER_NAME=kibitz", "GIT_COMMITTER_EMAIL=kibitz@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run("init", "--quiet", "--initial-branch=main")
+	if err := os.WriteFile(filepath.Join(dir, "queue.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+	run("add", ".")
+	run("commit", "--quiet", "-m", "initial")
+	baseSHA = run("rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(dir, "queue.go"), []byte("package main\n\nfunc Receive() {}\n"), 0o600); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+	run("add", ".")
+	run("commit", "--quiet", "-m", "add Receive")
+	headSHA = run("rev-parse", "HEAD")
+
+	run("update-ref", "refs/pull/42/head", headSHA)
+	run("reset", "--quiet", "--hard", baseSHA)
+
+	return dir, headSHA, baseSHA
 }

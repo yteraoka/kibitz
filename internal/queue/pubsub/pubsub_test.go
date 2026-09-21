@@ -110,13 +110,12 @@ func receive(ctx context.Context, t *testing.T, sub *kpubsub.Subscriber, fn func
 
 	out := make(chan *queue.Message, 8)
 	go func() {
-		err := sub.Receive(ctx, func(_ context.Context, m *queue.Message) error {
+		// The error is deliberately dropped: this outlives the test body, and
+		// reporting from here would race with the test finishing.
+		_ = sub.Receive(ctx, func(_ context.Context, m *queue.Message) error {
 			out <- m
 			return fn(m)
 		})
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Errorf("Receive: %v", err)
-		}
 	}()
 	return out
 }

@@ -30,10 +30,16 @@ RUN apt-get update \
 
 COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
 
+# The agent definitions kibitz runs with. They are part of the image, not of
+# the repository under review: a pull request must not be able to rewrite the
+# instructions its own reviewer follows.
+COPY deploy/opencode/agents/ /etc/kibitz/opencode/agents/
+
 # Workspaces are disposable; one clone per job, removed afterwards.
 RUN useradd --create-home --uid 10001 kibitz \
-    && mkdir -p /var/tmp/kibitz \
-    && chown kibitz:kibitz /var/tmp/kibitz
+    && mkdir -p /var/tmp/kibitz /home/kibitz/.config/opencode \
+    && cp -r /etc/kibitz/opencode/agents /home/kibitz/.config/opencode/agents \
+    && chown -R kibitz:kibitz /var/tmp/kibitz /home/kibitz
 
 EXPOSE 8081
 USER kibitz
