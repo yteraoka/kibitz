@@ -147,9 +147,6 @@ func TestLoadWorkerDefaults(t *testing.T) {
 	if cfg.OpenCode.Vertex.Location != "global" {
 		t.Errorf("Vertex.Location = %q, want global", cfg.OpenCode.Vertex.Location)
 	}
-	if !strings.Contains(cfg.OpenCode.Model, "claude-opus-5") {
-		t.Errorf("Model = %q, want the Vertex claude-opus-5 default", cfg.OpenCode.Model)
-	}
 	if cfg.ImplementEnabled {
 		t.Error("ImplementEnabled = true, want false by default")
 	}
@@ -318,5 +315,39 @@ func TestMetricsOnTheMainListener(t *testing.T) {
 	}
 	if cfg.MetricsAddr != cfg.ListenAddr {
 		t.Errorf("MetricsAddr = %q, want it folded into %q", cfg.MetricsAddr, cfg.ListenAddr)
+	}
+}
+
+// Gemini on Vertex needs no access request, so it is the default. The provider
+// that serves it is `google-vertex`, which serves Claude too; `opencode models`
+// is what confirms an id.
+func TestDefaultModel(t *testing.T) {
+	cfg, err := config.LoadWorker(config.MapEnv(minimalWorkerEnv()))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if got, want := cfg.OpenCode.Model, "google-vertex/gemini-3.1-pro-preview"; got != want {
+		t.Errorf("Model = %q, want %q", got, want)
+	}
+}
+
+// Credentials for key-based providers are named, never valued, in kibitz's own
+// configuration.
+func TestProviderEnvIsNamesOnly(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_PROVIDER_ENV"] = "ZHIPU_API_KEY, OPENROUTER_API_KEY"
+
+	cfg, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	want := []string{"ZHIPU_API_KEY", "OPENROUTER_API_KEY"}
+	if len(cfg.OpenCode.ProviderEnv) != len(want) {
+		t.Fatalf("ProviderEnv = %v, want %v", cfg.OpenCode.ProviderEnv, want)
+	}
+	for i := range want {
+		if cfg.OpenCode.ProviderEnv[i] != want[i] {
+			t.Errorf("ProviderEnv[%d] = %q, want %q", i, cfg.OpenCode.ProviderEnv[i], want[i])
+		}
 	}
 }

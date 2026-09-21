@@ -66,7 +66,7 @@ pi でも実装できる粒度に保つ。
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "google-vertex-anthropic/claude-opus-5",
+  "model": "google-vertex/gemini-3.1-pro-preview",
   "permission": {
     "*": "deny",
     "read": "allow",
@@ -112,13 +112,18 @@ pi でも実装できる粒度に保つ。
 
 ## 3.1 モデルとプロバイダ
 
-**Google Vertex AI 経由の Claude を使う。** GCP メインの方針と揃い、
-認証を GKE / Cloud Run のサービスアカウント (ADC) に寄せられるため、
-モデル API キーという長期シークレットを 1 つ減らせる。
+**既定は Google Vertex AI 経由の Gemini。** GCP メインの方針と揃い、
+認証を Cloud Run のサービスアカウント (ADC) に寄せられるため、
+モデル API キーという長期シークレットを持たずに済む。
+
+Vertex 上の Claude も同じプロバイダ (`google-vertex`) から使えるが、
+**Anthropic モデルの利用申請が必要**なため既定にはしない。
+GLM のように API キーで認証するプロバイダも、`KIBITZ_PROVIDER_ENV` に
+環境変数名を指定すれば使える (値は環境から読むので設定には入らない)。
 
 | 項目 | 決定 |
 | --- | --- |
-| 既定モデル | `claude-opus-5` (レビュー品質を優先。コンテキストが大きく、巨大な差分を分割せずに扱いやすい) |
+| 既定モデル | `google-vertex/gemini-3.1-pro-preview` (申請不要ですぐ動く)。選択肢は [deployment.md](deployment.md#モデルの選び方) の表 |
 | 補助タスク | triage やサマリ生成など、安くしたい用途は `KIBITZ_TRIAGE_MODEL` で別指定できるようにする |
 | リージョン | 既定は `global` (可用性が高くエラーが減る)。データ所在地の要件があれば `asia-northeast1` などに固定する。**リージョンによって使えるモデルが違う**ため、固定する場合は Model Garden で事前に確認する |
 | 認証 | Workload Identity による ADC。鍵ファイルは配置しない |

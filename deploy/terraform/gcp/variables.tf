@@ -32,9 +32,35 @@ variable "worker_image" {
 }
 
 variable "model" {
-  description = "Model the agent runs, as provider/model. Confirm the provider id against `opencode models` before the first deploy."
+  description = <<-EOT
+    Model the agent runs, as provider/model.
+
+    Gemini on Vertex AI is the default because it needs no access request and
+    authenticates with the worker's own service account. `google-vertex` serves
+    both Gemini and Claude; Claude there has to be requested first, and its ids
+    carry a version suffix (google-vertex/claude-opus-5@default).
+
+    For a provider that authenticates with an API key, such as GLM through
+    Zhipu (zai/glm-5.3), set model_api_key_env_name as well.
+
+    `opencode models` inside the worker image lists what a given set of
+    credentials can reach.
+  EOT
   type        = string
-  default     = "google-vertex-anthropic/claude-opus-5"
+  default     = "google-vertex/gemini-3.1-pro-preview"
+}
+
+variable "model_api_key_env_name" {
+  description = <<-EOT
+    Environment variable the model provider authenticates with, when it needs
+    an API key rather than the service account. Leave empty for Vertex AI.
+
+    Examples: ZHIPU_API_KEY for GLM (zai/...), OPENROUTER_API_KEY for
+    OpenRouter. Setting this creates a Secret Manager secret to hold the key;
+    add the value with `gcloud secrets versions add`.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "vertex_location" {

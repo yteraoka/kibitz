@@ -10,10 +10,52 @@ Terraform は [deploy/terraform/gcp](../deploy/terraform/gcp) にある。
 | Google Cloud プロジェクト | 課金有効。Firestore のロケーションは後から変更できない |
 | `gcloud` / `terraform` / `docker` | Terraform は [mise](https://mise.jdx.dev) で固定してある。リポジトリのルートで `mise install` を実行すると `mise.toml` に書かれた 1.16.3 が入る |
 | GitHub App を作成できる権限 | 組織の Owner、または App の作成権限 |
-| Vertex AI で Claude が有効 | Model Garden で対象モデルを有効化しておく |
+| モデルが使える状態 | 既定は Vertex AI の Gemini。**Anthropic のモデルは Vertex では利用申請が必要**なので、申請を通していない場合は Gemini か、API キーで使えるプロバイダ (GLM など) を選ぶ。下の「モデルの選び方」を参照 |
 
 Vertex AI のモデルはリージョンによって提供状況が違う。`vertex_location` を
 `global` 以外にする場合は、**先に Model Garden でそのリージョンに対象モデルがあることを確認する**。
+
+### モデルの選び方
+
+プロバイダ ID とモデル ID は opencode が models.dev から取得する一覧に従う。
+**ワーカーのイメージの中で実際に引ける**ので、推測せずここで確認する。
+
+```bash
+# 認証情報が検出できたプロバイダのモデルだけが出る
+docker run --rm --entrypoint opencode \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/dev/null -e GOOGLE_CLOUD_PROJECT=dummy \
+  YOUR_WORKER_IMAGE models google-vertex
+```
+
+確認済みの対応関係:
+
+| 使いたいもの | `model` の値 | 認証 | 備考 |
+| --- | --- | --- | --- |
+| Gemini (Vertex) | `google-vertex/gemini-3.1-pro-preview` | サービスアカウント (ADC) | **既定。申請不要、シークレット不要** |
+| Gemini (Vertex, 安価) | `google-vertex/gemini-3.8-flash` | 同上 | 速くて安い。レビュー品質は落ちる |
+| Claude (Vertex) | `google-vertex/claude-opus-5@default` | 同上 | **Vertex での Anthropic モデル利用申請が必要**。ID に `@default` が付く点に注意 |
+| GLM (Z.AI) | `zai/glm-5.3` | `ZHIPU_API_KEY` | `model_api_key_env_name = "ZHIPU_API_KEY"` を設定する |
+| GLM (Coding Plan) | `zai-coding-plan/glm-5.3` | `ZHIPU_API_KEY` | GLM Coding Plan の契約がある場合 |
+| OpenRouter 経由 | `openrouter/...` | `OPENROUTER_API_KEY` | `model_api_key_env_name = "OPENROUTER_API_KEY"` |
+
+`google-vertex` は **Gemini と Claude の両方**を提供する。Claude 側だけが申請を要する。
+
+### API キーが必要なプロバイダを使う場合
+
+`model_api_key_env_name` にそのプロバイダが見る環境変数名を入れると、
+Secret Manager のシークレットが作られ、ワーカーにその名前で注入される。
+値は Terraform には入らない。
+
+```hcl
+model                  = "zai/glm-5.3"
+model_api_key_env_name = "ZHIPU_API_KEY"
+```
+
+```bash
+# 手順 4 と同じタイミングで値を入れる
+printf '%s' 'YOUR_ZHIPU_API_KEY' | \
+  gcloud secrets versions add kibitz-model-api-key --data-file=-
+```
 
 ```bash
 gcloud auth login
@@ -191,10 +233,8 @@ gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 50
 `msg=starting` に続けて `msg=listening` が出ていれば良い。
 ここで落ちている場合、よくある原因は次の 2 つ:
 
-- **Vertex AI のプロバイダ ID が違う** — `model=...` のログと OpenCode が知っている
-  プロバイダ名が一致しているか。実機で `opencode models | grep -i vertex` を
-  ワーカーのイメージ内で実行して確認する
-  (`docker run --rm --entrypoint opencode IMAGE models`)
+- **モデル ID が違う** — 上の「モデルの選び方」の表と `model` の値が合っているか。
+  Vertex の Claude は利用申請が通っていないと使えない
 - **Firestore のデータベースが無い / 権限不足** — `datastore.user` が付いているか
 
 ### 6-4. 実際にレビューさせる
@@ -219,7 +259,7 @@ msg="job finished"                duration=1m58s
 
 | 確認項目 | 確認方法 | 失敗したときの症状 |
 | --- | --- | --- |
-| Vertex AI のプロバイダ ID | 6-4 が通る | ワーカーが `no provider configured` で失敗 |
+| モデル ID とプロバイダ | 6-4 が通る | `no provider configured` や `model not found` で失敗 |
 | OpenCode の JSON イベント形式 | `input_tokens` が 0 でない | 動くがトークン数が 0 のまま |
 | `--file` でのプロンプト添付 | 6-4 が通る | 指摘が的外れ、または空 |
 | `--agent` の解決 | 6-4 が通る | `unknown agent` で失敗 |

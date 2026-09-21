@@ -226,6 +226,30 @@ resource "google_cloud_run_v2_service" "worker" {
         }
       }
 
+      # A provider that authenticates with a key gets it under the name that
+      # provider looks for, and kibitz is told to forward that name to the
+      # agent. The value never appears in kibitz's own configuration.
+      dynamic "env" {
+        for_each = var.model_api_key_env_name != "" ? [var.model_api_key_env_name] : []
+        content {
+          name = env.value
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.model_api_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.model_api_key_env_name != "" ? [var.model_api_key_env_name] : []
+        content {
+          name  = "KIBITZ_PROVIDER_ENV"
+          value = env.value
+        }
+      }
+
       # Clones and agent scratch space go to memory-backed storage; the
       # container filesystem is small and the workspace is disposable anyway.
       volume_mounts {
@@ -254,6 +278,7 @@ resource "google_cloud_run_v2_service" "worker" {
 
   depends_on = [
     google_secret_manager_secret_iam_member.worker_private_key,
+    google_secret_manager_secret_iam_member.worker_model_api_key,
     google_pubsub_subscription_iam_member.worker_subscribe,
     google_project_iam_member.worker_firestore,
     google_project_iam_member.worker_vertex,

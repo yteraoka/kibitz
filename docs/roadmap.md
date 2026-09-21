@@ -72,7 +72,8 @@ CI の docker ジョブで初めて実行される。
 **ただし実機での確認が未了**: この環境には GitHub App も Vertex AI も
 opencode バイナリも無いため、以下は最初の実デプロイで確認する。
 
-- OpenCode の Vertex AI プロバイダ ID (`google-vertex-anthropic` か `google-vertex` か)
+- ~~OpenCode の Vertex AI プロバイダ ID~~ **確認済み**: `google-vertex` (Gemini と Claude の両方)。
+  Vertex 上の Claude は利用申請が必要なため、既定は Gemini にした
 - `opencode run --format json` のイベント形式 (現在は既知のキーを拾う防御的な実装)
 - `--file` によるプロンプト添付と `--agent` の解決 (エージェント定義はイメージに同梱)
 - GitHub App のインストールトークンと `refs/pull/N/head` の fetch

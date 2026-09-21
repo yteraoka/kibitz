@@ -20,3 +20,16 @@ allowed_repos = ["my-org/*"]
 #   gcloud alpha monitoring channels create --display-name=... --type=email \
 #     --channel-labels=email_address=team@example.com
 alert_notification_channels = []
+
+# Model. Gemini on Vertex AI needs no access request and authenticates with the
+# worker's own service account, so it needs no secret.
+#
+#   model = "google-vertex/gemini-3.1-pro-preview"   # 既定
+#   model = "google-vertex/gemini-3.8-flash"         # 安価・高速
+#   model = "google-vertex/claude-opus-5@default"    # Anthropic の利用申請が必要
+#
+# GLM など API キーで認証するプロバイダを使う場合は、キーを入れる変数名を指定する。
+# Secret Manager のシークレットが作られるので、値は gcloud で投入する。
+#
+#   model                  = "zai/glm-5.3"
+#   model_api_key_env_name = "ZHIPU_API_KEY"

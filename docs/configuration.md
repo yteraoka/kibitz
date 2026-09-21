@@ -48,7 +48,8 @@
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
-| `KIBITZ_MODEL` | `google-vertex-anthropic/claude-opus-5` | `provider/model` 形式。Vertex AI 経由 |
+| `KIBITZ_MODEL` | `google-vertex/gemini-3.1-pro-preview` | `provider/model` 形式。既定は Vertex AI の Gemini (申請不要) |
+| `KIBITZ_PROVIDER_ENV` | - | API キーで認証するプロバイダ用に、エージェントへ渡す環境変数名 (カンマ区切り)。例: `ZHIPU_API_KEY`。**名前だけを設定し、値は環境から読む** |
 | `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
 | `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替 |
 | `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
@@ -75,10 +76,12 @@ Vertex AI の認証はサービスアカウント鍵ファイルを配置せず�
 **GKE の Workload Identity (または Cloud Run のサービスアカウント) による ADC** を使う。
 ワーカーのサービスアカウントに必要なのは `roles/aiplatform.user` のみ。
 
-> **要確認 (Phase 0)**: OpenCode における Vertex AI のプロバイダ ID は models.dev 由来で、
-> `google-vertex-anthropic` か `google-vertex` かを実機で確認して確定する
-> (`opencode models` などで一覧を出す)。モデル ID 側は Vertex でも接頭辞なしの
-> `claude-opus-5` 形式で、日付スナップショットを使う場合のみ `@` 区切りになる。
+> **確認済み**: Vertex AI のプロバイダ ID は `google-vertex` で、Gemini と Claude の
+> 両方を提供する (`google-vertex-anthropic` も別に存在する)。Vertex 上の Claude は
+> `google-vertex/claude-opus-5@default` のように版の接尾辞が付き、**利用申請が必要**。
+> GLM は `zai/glm-5.3` で、`ZHIPU_API_KEY` を見る。
+> 一覧はワーカーのイメージ内で `opencode models <provider>` で引ける
+> ([deployment.md](deployment.md#モデルの選び方))。
 
 ## 3. リポジトリ設定 `.kibitz.yaml`
 
@@ -108,7 +111,7 @@ review:
   max_comments: 15
   # 承認 / 変更要求を出すか (既定 false)
   allow_verdict: false
-  model: google-vertex-anthropic/claude-opus-5
+  model: google-vertex/gemini-3.1-pro-preview
 
 answer:
   enabled: true

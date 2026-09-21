@@ -228,7 +228,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:       cfg.OpenCode.Model,
 		ReviewAgent: cfg.OpenCode.ReviewAgent,
 		AnswerAgent: cfg.OpenCode.AnswerAgent,
-		Env:         vertexEnv(cfg.OpenCode.Vertex),
+		Env:         agentEnv(cfg, logger),
 	}, logger)
 
 	return &worker.ReviewJob{
@@ -253,15 +253,42 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 	}, nil
 }
 
-// vertexEnv passes the Vertex AI settings through to the agent. There is no
-// API key: authentication is the worker's own service account.
-func vertexEnv(v config.Vertex) []string {
+// agentEnv builds the environment the agent runs with: the Vertex AI settings,
+// plus any provider credentials the deployment forwards by name.
+//
+// On Vertex there is no API key at all -- authentication is the worker's own
+// service account. Providers that do need a key (GLM through Zhipu, for
+// instance) are named in KIBITZ_PROVIDER_ENV and their values are taken from
+// the process environment, so no credential is ever written into kibitz's
+// configuration or logged.
+func agentEnv(cfg *config.Worker, logger *slog.Logger) []string {
 	var env []string
-	if v.ProjectID != "" {
+	if v := cfg.OpenCode.Vertex; v.ProjectID != "" {
 		env = append(env, "GOOGLE_CLOUD_PROJECT="+v.ProjectID)
 	}
-	if v.Location != "" {
+	if v := cfg.OpenCode.Vertex; v.Location != "" {
 		env = append(env, "VERTEX_LOCATION="+v.Location)
+	}
+
+	var forwarded, missing []string
+	for _, name := range cfg.OpenCode.ProviderEnv {
+		value, ok := os.LookupEnv(name)
+		if !ok || value == "" {
+			missing = append(missing, name)
+			continue
+		}
+		env = append(env, name+"="+value)
+		forwarded = append(forwarded, name)
+	}
+
+	if len(forwarded) > 0 {
+		// Names only. The values are credentials.
+		logger.LogAttrs(context.Background(), slog.LevelInfo, "forwarding provider credentials to the agent",
+			slog.Any("variables", forwarded))
+	}
+	if len(missing) > 0 {
+		logger.LogAttrs(context.Background(), slog.LevelWarn, "provider credentials are named but not set",
+			slog.Any("variables", missing))
 	}
 	return env
 }

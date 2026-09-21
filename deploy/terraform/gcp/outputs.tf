@@ -23,6 +23,11 @@ output "github_private_key_secret_name" {
   value       = google_secret_manager_secret.github_private_key.secret_id
 }
 
+output "model_api_key_secret_name" {
+  description = "Secret to add the model provider's API key to. Empty when the provider is Vertex AI, which needs no key."
+  value       = var.model_api_key_env_name != "" ? google_secret_manager_secret.model_api_key[0].secret_id : ""
+}
+
 output "service_accounts" {
   description = "Identities the two components run as."
   value = {

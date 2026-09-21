@@ -171,6 +171,12 @@ type OpenCode struct {
 	// worker image. An empty value falls back to OpenCode's default agent.
 	ReviewAgent string
 	AnswerAgent string
+	// ProviderEnv names environment variables to forward to the agent, for
+	// providers that authenticate with an API key (ZHIPU_API_KEY for GLM,
+	// OPENROUTER_API_KEY, and so on). Only the names are configured; the
+	// values come from the process environment, so a credential never has to
+	// be written into kibitz's own configuration.
+	ProviderEnv []string
 }
 
 // Limits bounds a single review job.
@@ -295,7 +301,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			Bin:           l.str("KIBITZ_OPENCODE_BIN", "opencode"),
 			Mode:          l.enum("KIBITZ_OPENCODE_MODE", OpenCodeModeRun, OpenCodeModeRun, OpenCodeModeAttach),
 			ServerURL:     l.str("KIBITZ_OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
-			Model:         l.str("KIBITZ_MODEL", "google-vertex-anthropic/claude-opus-5"),
+			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-3.1-pro-preview"),
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
 			FallbackModel: l.str("KIBITZ_MODEL_FALLBACK", ""),
 			Vertex: Vertex{
@@ -304,6 +310,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			},
 			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
+			ProviderEnv: l.list("KIBITZ_PROVIDER_ENV", nil),
 		},
 		Limits: Limits{
 			MaxComments:  l.positiveInt("KIBITZ_MAX_COMMENTS", 20),
