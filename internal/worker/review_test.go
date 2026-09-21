@@ -519,7 +519,7 @@ func TestNotifyFailurePostsToThePullRequest(t *testing.T) {
 	if !strings.Contains(f.summaries[0], "the agent timed out") {
 		t.Errorf("the notice does not say what happened:\n%s", f.summaries[0])
 	}
-	if !strings.Contains(f.summaries[0], "@kibitz review") {
+	if !strings.Contains(f.summaries[0], policy.DefaultMention+" review") {
 		t.Error("the notice does not say how to retry")
 	}
 }
@@ -573,5 +573,34 @@ func TestHelpFallsBackToTheDefaultMention(t *testing.T) {
 	}
 	if !strings.Contains(f.summaries[0], policy.DefaultMention+" review") {
 		t.Errorf("help does not use the default mention:\n%s", f.summaries[0])
+	}
+}
+
+// The failure notice tells people how to retry, so it has to name the token
+// this deployment actually answers to.
+func TestFailureNoticeUsesTheConfiguredMention(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+
+	job := newJob(t, f, &fakeEngine{})
+	job.Mention = "/kibitz"
+
+	ev := pullRequestEvent(event.KindPROpened, origin)
+	if err := job.NotifyFailure(context.Background(), ev, errors.New("opencode: exit status 1")); err != nil {
+		t.Fatalf("NotifyFailure: %v", err)
+	}
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d summaries posted, want 1", len(f.summaries))
+	}
+
+	notice := f.summaries[0]
+	if !strings.Contains(notice, "/kibitz review") {
+		t.Errorf("notice does not say how to retry:\n%s", notice)
+	}
+	if strings.Contains(notice, "@kibitz") {
+		t.Errorf("notice names a mention this deployment ignores:\n%s", notice)
+	}
+	if !strings.Contains(notice, "opencode: exit status 1") {
+		t.Errorf("notice does not carry the cause:\n%s", notice)
 	}
 }

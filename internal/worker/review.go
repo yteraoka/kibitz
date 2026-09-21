@@ -423,7 +423,7 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	b.WriteString("```\n")
 	b.WriteString(oneLine(cause.Error(), 500))
 	b.WriteString("\n```\n\n")
-	b.WriteString("`@kibitz review` で再実行できます。\n")
+	fmt.Fprintf(&b, "`%s review` で再実行できます。\n", j.mention())
 
 	return client.UpsertSummary(ctx, forge.RefOf(ev), FailureMarker, b.String())
 }
