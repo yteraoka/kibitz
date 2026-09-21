@@ -117,6 +117,10 @@ Cloud Run ジョブとして Cloud Scheduler から毎分起動する
 
 ## 3. リポジトリ設定 `.kibitz.yaml`
 
+> **未実装 (Phase 7)。** パーサと設定マージはまだ無いので、いまリポジトリに
+> `.kibitz.yaml` を置いても**何も起きない**。現時点の挙動は環境変数だけで決まる
+> ([roadmap.md](roadmap.md))。以下はその設計。
+
 リポジトリのデフォルトブランチ側から読む (PR 側の変更は反映しない — [security.md](security.md))。
 
 ```yaml

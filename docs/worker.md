@@ -35,6 +35,7 @@ pi でも実装できる粒度に保つ。
     - 変更差分 (unified diff、生成物・lock ファイル・巨大ファイルを除外)
     - PR タイトル / 本文 / 既存のレビューコメント
     - リポジトリのルール: AGENTS.md, CONTRIBUTING.md, .kibitz.yaml の guidelines
+      (Phase 7。現時点では読み込んでいない)
     - 前回レビュー済み SHA (増分レビュー時)
 
 [3] OpenCode 設定の生成 (ジョブごとの一時ファイル)
@@ -42,8 +43,9 @@ pi でも実装できる粒度に保つ。
     - model, agent, permission, mcp を注入
 
 [4] 実行
+    プロンプトは <workspace>/.kibitz/prompt.md に書き出してから渡す
     opencode run --format json --agent kibitz-review --dir <workspace> \
-      --session <既存セッションID|なし> --auto "<プロンプト>"
+      --session <既存セッションID|なし> --auto --file .kibitz/prompt.md "<指示>"
     - タイムアウト付き context、超過時は SIGTERM → SIGKILL
     - stdout(JSON イベント) は逐次パースしてログ/メトリクスへ
 
@@ -60,6 +62,22 @@ pi でも実装できる粒度に保つ。
 [7] 後片付け
     ワークスペース削除、セッション ID を状態ストアへ保存、使用量を記録
 ```
+
+### ワークスペースの `.kibitz/`
+
+`.kibitz/prompt.md` と `.kibitz/out/` は**ワーカーがジョブごとに作る作業ファイル**で、
+リポジトリが用意するものではない。
+
+- `prompt.md` は毎回 `reviewer.BuildPrompt` の結果で上書きする。
+  リポジトリに同名のファイルが commit されていても、**クローン側で置き換えられる**
+  (push はしないので、リポジトリの中身は変わらない)。
+  PR 側からプロンプトを差し替えられない、という意味で安全側の挙動
+- 書き出しに失敗した場合はそこでジョブがエラーになり、エージェントは起動しない
+  (`opencode: writing prompt: ...`)。ジョブは再配送の対象になる
+- ワークスペースはジョブごとに使い捨てるので、後始末は要らない
+
+リポジトリ側からレビューの観点を指示する仕組み (`.kibitz.yaml` の `guidelines`) は
+Phase 7。現時点では、プロンプトに入るリポジトリ固有の情報は無い。
 
 ## 3. OpenCode 設定 (ジョブごとに生成)
 
