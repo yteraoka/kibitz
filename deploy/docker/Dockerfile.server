@@ -1,0 +1,21 @@
+# kibitz-server: receives webhooks and publishes normalized events.
+# It touches no repositories and runs no agent, so it ships on distroless.
+FROM golang:1.24 AS build
+
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/kibitz-server ./cmd/kibitz-server
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/kibitz-server /usr/local/bin/kibitz-server
+
+EXPOSE 8080 9090
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/kibitz-server"]

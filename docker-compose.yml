@@ -1,0 +1,51 @@
+# Local development stack.
+#
+# Phase 0 runs both binaries against the in-memory queue: the Pub/Sub publisher
+# and subscriber arrive in Phase 2. The emulator is already here so that the
+# switch is a matter of changing KIBITZ_QUEUE_BACKEND.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.server
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      KIBITZ_LOG_LEVEL: debug
+      KIBITZ_LOG_FORMAT: text
+      KIBITZ_QUEUE_BACKEND: memory
+      KIBITZ_GITHUB_WEBHOOK_SECRETS: dev-secret
+      KIBITZ_BOT_LOGINS: kibitz[bot]
+      PUBSUB_EMULATOR_HOST: pubsub:8085
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.worker
+    ports:
+      - "8081:8081"
+    environment:
+      KIBITZ_LOG_LEVEL: debug
+      KIBITZ_LOG_FORMAT: text
+      KIBITZ_QUEUE_BACKEND: memory
+      KIBITZ_STATE_BACKEND: memory
+      KIBITZ_CONCURRENCY: "1"
+      PUBSUB_EMULATOR_HOST: pubsub:8085
+
+  # Started only with `make up-pubsub` (or `docker compose --profile pubsub up`).
+  # It is a large image and nothing uses it until the Pub/Sub backend lands in
+  # Phase 2, so it stays out of the default `make up`.
+  pubsub:
+    profiles: ["pubsub"]
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command:
+      - gcloud
+      - beta
+      - emulators
+      - pubsub
+      - start
+      - --project=kibitz-dev
+      - --host-port=0.0.0.0:8085
+    ports:
+      - "8085:8085"

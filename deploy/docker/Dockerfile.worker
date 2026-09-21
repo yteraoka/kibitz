@@ -1,0 +1,40 @@
+# kibitz-worker: consumes events and runs the agent engine.
+#
+# Unlike the server this image needs a userland: git to fetch pull requests,
+# ripgrep for the agent's search tool, and (from Phase 2) the opencode binary
+# plus a Node.js runtime for MCP servers started as local processes.
+FROM golang:1.24 AS build
+
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/kibitz-worker ./cmd/kibitz-worker
+
+FROM debian:stable-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+# Phase 2 adds the opencode binary here, pinned to an exact version:
+#   ARG OPENCODE_VERSION
+#   RUN curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" sh
+
+COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
+
+# Workspaces are disposable; one clone per job, removed afterwards.
+RUN useradd --create-home --uid 10001 kibitz \
+    && mkdir -p /var/tmp/kibitz \
+    && chown kibitz:kibitz /var/tmp/kibitz
+
+EXPOSE 8081
+USER kibitz
+ENTRYPOINT ["/usr/local/bin/kibitz-worker"]

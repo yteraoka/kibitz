@@ -71,6 +71,49 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 - モデルは **Vertex AI 経由の Claude** (既定 `claude-opus-5`)。認証は Workload Identity。
 - レビューと回答の**出力は日本語**。
 
+## 開発
+
+```bash
+make test          # go test -race -cover ./...
+make lint          # golangci-lint (初回は自動でインストール)
+make ci            # vet + lint + test + govulncheck + build
+make build         # bin/kibitz-server, bin/kibitz-worker
+make up            # docker compose で両方を起動し /healthz を待つ
+make up-pubsub     # Pub/Sub エミュレータも一緒に起動する (Phase 2 以降)
+make down
+```
+
+ローカルでバイナリを直接動かす場合は、最低限のバックエンドを指定する。
+
+```bash
+KIBITZ_QUEUE_BACKEND=memory KIBITZ_GITHUB_WEBHOOK_SECRETS=dev make run-server
+KIBITZ_QUEUE_BACKEND=memory KIBITZ_STATE_BACKEND=memory make run-worker
+
+curl -s localhost:8080/healthz    # {"status":"ok","version":"dev"}
+curl -s localhost:8081/healthz    # worker
+```
+
+設定が足りない場合は起動時に**不足しているものを全部まとめて**報告して終了する。
+
+```
+kibitz-server: configuration:
+KIBITZ_PUBSUB_PROJECT_ID: is required when KIBITZ_QUEUE_BACKEND is pubsub
+KIBITZ_LOG_LEVEL: must be one of debug, info, warn, error, got "loud"
+```
+
+設定項目の一覧は [docs/configuration.md](docs/configuration.md)。
+
 ## ステータス
 
-設計フェーズ。実装は [docs/roadmap.md](docs/roadmap.md) の Phase 0 から順に進める。
+**Phase 0 (土台) 完了。** 次は Phase 1 (GitHub Webhook の検証と正規化)。
+進捗は [docs/roadmap.md](docs/roadmap.md) を参照。
+
+| 項目 | 状態 |
+| --- | --- |
+| `cmd/kibitz-server` / `cmd/kibitz-worker` の骨格、graceful shutdown | 完了 |
+| 設定の読み込みと起動時検証 (`internal/config`) | 完了 |
+| 構造化ログとシークレットのマスク (`internal/telemetry`) | 完了 |
+| HTTP ミドルウェアとヘルスチェック (`internal/httpx`) | 完了 |
+| Dockerfile / docker compose / CI | 完了 |
+| Webhook の受信・正規化 | Phase 1 |
+| キュー、Forge クライアント、OpenCode 実行 | Phase 2 |

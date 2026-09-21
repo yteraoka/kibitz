@@ -16,16 +16,22 @@ Phase 2 の時点で「GitHub の PR に AI レビューが付く」状態を作
 | モデル | **Vertex AI 経由の Claude** (既定 `claude-opus-5`) | GCP メインと揃う。ADC で認証でき、モデル API キーという長期シークレットを持たずに済む |
 | 出力言語 | **日本語** | `review.language` で切り替え可能にはするが、既定は日本語 |
 
-## Phase 0: 土台 (目安 2〜3 日)
+## Phase 0: 土台 (完了)
 
 - `go.mod` (`github.com/yteraoka/kibitz`)、`Makefile`、`.golangci.yml`、`.editorconfig`
 - GitHub Actions: `go vet` / `golangci-lint` / `go test -race` / `govulncheck` / build
 - `internal/config` (環境変数の読み込みと検証、起動時に不足を検出して落ちる)
 - `internal/telemetry` (`slog` の初期化、シークレットマスク、OTel の土台)
 - `cmd/kibitz-server` / `cmd/kibitz-worker` の骨格 (graceful shutdown、`/healthz`)
-- `deploy/docker/` の Dockerfile 2 つ、`docker-compose.yml` (Pub/Sub エミュレータ込み)
+- `deploy/docker/` の Dockerfile 2 つ、`docker-compose.yml`
+  (Pub/Sub エミュレータは compose のプロファイルに分離。Phase 2 で使う)
+- `internal/run` — 複数コンポーネントの起動と停止をまとめる小さなグループ
 
 **完了条件**: `make up` でサーバーとワーカーが起動し、`/healthz` が 200 を返す。CI が緑。
+
+実装済み。`internal` パッケージのテストカバレッジは 80〜100%
+(`cmd` は配線のみでテストなし)。`make up` と Dockerfile のビルドは
+CI の docker ジョブで初めて実行される。
 
 ## Phase 1: Webhook 受信 (GitHub) と正規化 (目安 1 週)
 
