@@ -173,8 +173,10 @@ KIBITZ_TRIGGER_KEYWORDS=/review,[review],レビュー希望
 - 途中からレビューさせたくなったら、PR の説明を編集するのではなくコメントで
   `@kibitz review` と書くのが確実 (`edited` は元々 publish していない)。
 
-publish されなかったイベントは HTTP 204 とメトリクス
-`kibitz_webhooks_received_total{outcome="skipped",reason="no_keyword"}` になる。
+publish されなかったイベントは HTTP 204、メトリクス
+`kibitz_webhooks_received_total{outcome="skipped",reason="no_keyword"}`、
+およびログ 1 行 (`msg="event skipped" published=false reason=no_keyword`) になる
+([deployment.md](deployment.md#配送のログ))。
 キューにメッセージが載らないので、ワーカーも起きない ([deployment.md](deployment.md) の
 オートスケール)。
 

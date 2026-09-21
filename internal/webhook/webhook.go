@@ -51,6 +51,19 @@ type Handler interface {
 	Normalize(r *http.Request, body []byte) (*event.ReviewEvent, error)
 }
 
+// DeliveryDescriber reports the forge's own identifiers for a delivery: the
+// id it can be found and redelivered by, and the name of the event in the
+// forge's vocabulary. A handler implements it so that deliveries which never
+// became an event — an unsupported action, a payload that did not parse, a
+// signature that did not match — are still traceable to a line in the forge's
+// delivery log.
+//
+// It reads headers only: a payload that could not be trusted or parsed is not
+// a source of identifiers.
+type DeliveryDescriber interface {
+	Delivery(r *http.Request) (id, name string)
+}
+
 // Fingerprint identifies a secret without revealing it, so that "is the value
 // in the running container the one I pasted into the forge" can be answered
 // from a log line. It is the first bytes of the SHA-256 of the secret, which

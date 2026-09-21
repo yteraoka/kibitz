@@ -277,7 +277,19 @@ curl -i "$(terraform output -raw server_url)/healthz"
 
 GitHub App の設定ページ **Advanced** タブに配送履歴がある。
 `ping` イベントが **204** なら署名検証まで通っている。401 なら Webhook secret が
-シークレットの中身と一致していない。
+シークレットの中身と一致していない (手順 7 の「401 の切り分け」)。
+
+サーバー側は**配送 1 件につき 1 行**、何を受け取って publish したかどうかを出す。
+
+```bash
+gcloud run services logs read kibitz-server --region asia-northeast1 --limit 50 | \
+  grep -E 'event published|event skipped'
+```
+
+```
+msg="event published" published=true  event_name=pull_request.opened kind=pr.opened repository=my-org/app pr=42 actor=yteraoka delivery_id=... message_id=...
+msg="event skipped"   published=false reason=no_keyword event_name=pull_request.synchronize kind=pr.updated repository=my-org/app pr=42 actor=yteraoka delivery_id=...
+```
 
 ### 6-3. ワーカーが起動している
 
@@ -359,6 +371,46 @@ curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_
 
 ワーカーの `/metrics` は内部からのみ到達できる。Managed Prometheus に
 取り込む場合は、Cloud Run のサイドカーとして OTel collector を追加する。
+
+### 配送のログ
+
+「PR を作ったのにレビューが来ない」を最初に切り分ける場所。サーバーは配送 1 件に
+つき 1 行を info で出し、**publish したかどうかを `published` で明示**する。
+
+| フィールド | 内容 |
+| --- | --- |
+| `published` | Pub/Sub に載せたか (`true` / `false`) |
+| `reason` | 載せなかった理由 ([event-schema.md](event-schema.md#3-トリガ判定-internalpolicy)) |
+| `event_name` | GitHub 側の呼び名 (`pull_request.synchronize` など)。**Advanced タブの配送履歴と同じ語彙** |
+| `kind` | kibitz 側の種別 (`pr.updated` など) |
+| `repository` / `pr` / `actor` | どの PR の、誰の操作か |
+| `delivery_id` | GitHub の配送 ID。Advanced タブで検索して Redeliver できる |
+| `event_id` | 正規化イベントの ID。ワーカー側のログと突き合わせられる |
+| `message_id` | Pub/Sub のメッセージ ID (publish したときだけ) |
+
+```bash
+# publish されなかったものだけ、理由つきで
+gcloud logging read \
+  'resource.labels.service_name="kibitz-server" AND jsonPayload.published=false' \
+  --limit 50 --format='value(jsonPayload.reason,jsonPayload.event_name,jsonPayload.repository,jsonPayload.pr)'
+
+# 1 件の配送を端から端まで追う (サーバーとワーカーの両方に出る)
+gcloud logging read 'jsonPayload.delivery_id="<配送ID>"' --limit 20
+```
+
+`reason` の主なもの:
+
+| reason | 意味 |
+| --- | --- |
+| `unsupported_event` | kibitz が扱わないイベント (`ping`、`labeled`、`edited` など) |
+| `no_keyword` | `trigger_keywords` を設定していて、PR のタイトル / 本文に無い |
+| `no_mention` | コメントだが `@kibitz` が入っていない |
+| `self_authored` | kibitz 自身の発言 (無限ループ防止) |
+| `repo_not_allowed` | `allowed_repos` に合わない |
+| `stale` | `KIBITZ_MAX_EVENT_AGE` より古い配送 (既定では無効) |
+
+PR のタイトルや本文はログに出していない。`repository` と `pr` があれば PR 自体を
+見に行けるので、ログに残す理由が無いため。
 
 ### アラート
 

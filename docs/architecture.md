@@ -66,6 +66,10 @@ Webhook を受け取り、検証して正規化イベントを publish するだ
 6. queue.Publisher.Publish() — 短いタイムアウト + 数回のリトライ
 7. ワーカーの起動要求 (0 インスタンスから立ち上げる。2.3 を参照)
 8. 202 Accepted (publish 失敗時のみ 5xx を返し、Forge 側の再送に委ねる)
+
+配送 1 件につき 1 行のログを出す。publish したかどうか (`published`)、しなかった
+理由 (`reason`)、および Forge 側の配送 ID を必ず含める — 「レビューが来ない」を
+調べる出発点がここしか無いため ([deployment.md](deployment.md#配送のログ))。
 ```
 
 標準ライブラリの `net/http` + Go 1.22 の `http.ServeMux` を使い、Web フレームワークは入れない。

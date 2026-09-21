@@ -67,6 +67,13 @@ func New(secrets []string, opts ...Option) *Handler {
 // Platform implements [webhook.Handler].
 func (h *Handler) Platform() event.Platform { return event.PlatformGitHub }
 
+// Delivery implements [webhook.DeliveryDescriber]. The action is not included
+// because it lives in the payload, which has not been verified or parsed
+// wherever this is the only thing available.
+func (h *Handler) Delivery(r *http.Request) (id, name string) {
+	return r.Header.Get(HeaderDelivery), r.Header.Get(HeaderEvent)
+}
+
 // Verify checks the HMAC-SHA256 signature GitHub computes over the raw body.
 func (h *Handler) Verify(r *http.Request, body []byte) error {
 	if len(h.secrets) == 0 {

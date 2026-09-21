@@ -1,10 +1,12 @@
 package webhook_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -51,10 +53,8 @@ func sign(body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func newReceiver(t *testing.T, pub queue.Publisher, opts ...webhook.ReceiverOption) *webhook.Receiver {
-	t.Helper()
-
-	triggers := policy.New(policy.Config{
+func testPolicy() *policy.Engine {
+	return policy.New(policy.Config{
 		BotLogins:    []string{"kibitz[bot]"},
 		AllowedRepos: []string{"yteraoka/*"},
 		Mention:      "@kibitz",
@@ -62,8 +62,13 @@ func newReceiver(t *testing.T, pub queue.Publisher, opts ...webhook.ReceiverOpti
 		// off here and tested on its own.
 		MaxEventAge: 0,
 	})
+}
+
+func newReceiver(t *testing.T, pub queue.Publisher, opts ...webhook.ReceiverOption) *webhook.Receiver {
+	t.Helper()
+
 	opts = append([]webhook.ReceiverOption{webhook.WithReceiverClock(func() time.Time { return now })}, opts...)
-	return webhook.NewReceiver(githubhook.New([]string{secret}), pub, triggers, discardLogger(), opts...)
+	return webhook.NewReceiver(githubhook.New([]string{secret}), pub, testPolicy(), discardLogger(), opts...)
 }
 
 func post(body []byte, eventName string) *http.Request {
@@ -442,4 +447,136 @@ func TestReceiverDoesNotWakeOnSkippedDeliveries(t *testing.T) {
 	if got := waker.n.Load(); got != 0 {
 		t.Errorf("wake-ups = %d, want none", got)
 	}
+}
+
+// capture collects the log records a receiver writes, so the tests can assert
+// on what an operator would actually see.
+func capture(t *testing.T) (*slog.Logger, func() []map[string]any) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	return logger, func() []map[string]any {
+		var out []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+			if line == "" {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				t.Fatalf("log line is not JSON: %v (%q)", err, line)
+			}
+			out = append(out, record)
+		}
+		return out
+	}
+}
+
+func only(t *testing.T, records []map[string]any) map[string]any {
+	t.Helper()
+	if len(records) != 1 {
+		t.Fatalf("got %d log records, want exactly 1: %v", len(records), records)
+	}
+	return records[0]
+}
+
+func field(t *testing.T, record map[string]any, key string, want any) {
+	t.Helper()
+	if got, ok := record[key]; !ok {
+		t.Errorf("log record has no %q: %v", key, record)
+	} else if got != want {
+		t.Errorf("%s = %v, want %v", key, got, want)
+	}
+}
+
+func TestReceiverLogsWhatItPublished(t *testing.T) {
+	logger, records := capture(t)
+	q := memory.New()
+	rc := webhook.NewReceiver(githubhook.New([]string{secret}), q, testPolicy(), logger,
+		webhook.WithReceiverClock(func() time.Time { return now }))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "pull_request.opened.json"), "pull_request"))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+
+	record := only(t, records())
+	field(t, record, "msg", "event published")
+	field(t, record, "published", true)
+	field(t, record, "platform", "github")
+	field(t, record, "kind", "pr.opened")
+	field(t, record, "event_name", "pull_request.opened")
+	field(t, record, "repository", "yteraoka/kibitz")
+	field(t, record, "delivery_id", "7f3c")
+	if _, ok := record["pr"]; !ok {
+		t.Errorf("log record has no pull request number: %v", record)
+	}
+	if _, ok := record["message_id"]; !ok {
+		t.Errorf("log record has no message_id: %v", record)
+	}
+}
+
+// The interesting half: a delivery that was received and deliberately not
+// published still says so, with enough detail to explain why.
+func TestReceiverLogsWhatItDidNotPublish(t *testing.T) {
+	logger, records := capture(t)
+	q := memory.New()
+	rc := webhook.NewReceiver(githubhook.New([]string{secret}), q, testPolicy(), logger,
+		webhook.WithReceiverClock(func() time.Time { return now }))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "issue_comment.created_by_bot.json"), "issue_comment"))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body)
+	}
+
+	record := only(t, records())
+	field(t, record, "msg", "event skipped")
+	field(t, record, "published", false)
+	field(t, record, "reason", string(policy.ReasonSelfAuthored))
+	field(t, record, "kind", "comment.created")
+	field(t, record, "repository", "yteraoka/kibitz")
+	field(t, record, "delivery_id", "7f3c")
+}
+
+// A payload that never became an event is still traceable to a line in the
+// forge's delivery log.
+func TestReceiverLogsDeliveriesThatAreNotEvents(t *testing.T) {
+	logger, records := capture(t)
+	q := memory.New()
+	rc := webhook.NewReceiver(githubhook.New([]string{secret}), q, testPolicy(), logger,
+		webhook.WithReceiverClock(func() time.Time { return now }))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "ping.json"), "ping"))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body)
+	}
+
+	record := only(t, records())
+	field(t, record, "published", false)
+	field(t, record, "reason", "unsupported_event")
+	field(t, record, "delivery_id", "7f3c")
+	field(t, record, "event_name", "ping")
+}
+
+func TestReceiverLogsRejectedDeliveries(t *testing.T) {
+	logger, records := capture(t)
+	q := memory.New()
+	rc := webhook.NewReceiver(githubhook.New([]string{"a different secret"}), q, testPolicy(), logger,
+		webhook.WithReceiverClock(func() time.Time { return now }))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "pull_request.opened.json"), "pull_request"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body)
+	}
+
+	record := only(t, records())
+	field(t, record, "msg", "webhook rejected")
+	field(t, record, "published", false)
+	field(t, record, "delivery_id", "7f3c")
+	field(t, record, "event_name", "pull_request")
 }

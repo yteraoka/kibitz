@@ -134,10 +134,10 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			rc.reject(r, w, http.StatusRequestEntityTooLarge, "payload too large", err)
+			rc.reject(r, w, nil, http.StatusRequestEntityTooLarge, "payload too large", err)
 			return
 		}
-		rc.reject(r, w, http.StatusBadRequest, "could not read body", err)
+		rc.reject(r, w, nil, http.StatusBadRequest, "could not read body", err)
 		return
 	}
 
@@ -146,18 +146,18 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrNoSecrets):
 			// kibitz's own misconfiguration, not the caller's fault.
-			rc.reject(r, w, http.StatusInternalServerError, "webhook verification is not configured", err)
+			rc.reject(r, w, nil, http.StatusInternalServerError, "webhook verification is not configured", err)
 		case errors.Is(err, ErrMissingSignature):
-			rc.reject(r, w, http.StatusBadRequest, "signature is missing", err)
+			rc.reject(r, w, nil, http.StatusBadRequest, "signature is missing", err)
 		default:
-			rc.reject(r, w, http.StatusUnauthorized, "signature is invalid", err)
+			rc.reject(r, w, nil, http.StatusUnauthorized, "signature is invalid", err)
 		}
 		return
 	}
 
 	ev, err := rc.handler.Normalize(r, body)
 	if err != nil {
-		rc.reject(r, w, http.StatusBadRequest, "could not normalize payload", err)
+		rc.reject(r, w, nil, http.StatusBadRequest, "could not normalize payload", err)
 		return
 	}
 	if ev == nil {
@@ -185,7 +185,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Answering 5xx is the only way to ask the forge to try again, and on
 		// GitHub it at least makes the failure visible in the hook's delivery
 		// log for a manual redelivery.
-		rc.reject(r, w, http.StatusServiceUnavailable, "could not publish event", err)
+		rc.reject(r, w, ev, http.StatusServiceUnavailable, "could not publish event", err)
 		return
 	}
 
@@ -198,12 +198,10 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.waker.Wake()
 	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event published",
-		slog.String("platform", string(ev.Source.Platform)),
-		slog.String("kind", string(ev.Kind)),
-		slog.String("repository", ev.Repository.FullName),
-		slog.String("delivery_id", ev.Source.DeliveryID),
-		slog.String("message_id", msgID),
-		slog.String("request_id", httpx.RequestIDFrom(r.Context())),
+		append(rc.deliveryAttrs(r, ev),
+			slog.Bool("published", true),
+			slog.String("message_id", msgID),
+		)...,
 	)
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -274,27 +272,24 @@ func headerCarrier(r *http.Request) telemetry.Carrier {
 }
 
 // skip answers 204: the delivery was valid but kibitz has nothing to do.
+//
+// It logs at info rather than debug, because "nothing was published" is the
+// answer to the question an operator actually asks — why did my pull request
+// not get reviewed — and it is not an answer they can get from anywhere else.
 func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, reason string, ev *event.ReviewEvent) {
-	attrs := []slog.Attr{
-		slog.String("platform", string(rc.handler.Platform())),
-		slog.String("reason", reason),
-		slog.String("request_id", httpx.RequestIDFrom(r.Context())),
-	}
-	if ev != nil {
-		attrs = append(attrs,
-			slog.String("kind", string(ev.Kind)),
-			slog.String("repository", ev.Repository.FullName),
-			slog.String("delivery_id", ev.Source.DeliveryID),
-		)
-	}
 	if rc.metrics != nil {
 		rc.metrics.WebhooksReceived.WithLabelValues(string(rc.handler.Platform()), "skipped", reason).Inc()
 	}
-	rc.logger.LogAttrs(r.Context(), slog.LevelDebug, "event skipped", attrs...)
+	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event skipped",
+		append(rc.deliveryAttrs(r, ev),
+			slog.Bool("published", false),
+			slog.String("reason", reason),
+		)...,
+	)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, status int, msg string, err error) {
+func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, ev *event.ReviewEvent, status int, msg string, err error) {
 	if rc.metrics != nil {
 		rc.metrics.WebhooksReceived.WithLabelValues(
 			string(rc.handler.Platform()), "rejected", strconv.Itoa(status)).Inc()
@@ -304,10 +299,58 @@ func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, status int, m
 		level = slog.LevelError
 	}
 	rc.logger.LogAttrs(r.Context(), level, "webhook rejected",
-		slog.String("platform", string(rc.handler.Platform())),
-		slog.Int("status", status),
-		slog.String("error", err.Error()),
-		slog.String("request_id", httpx.RequestIDFrom(r.Context())),
+		append(rc.deliveryAttrs(r, ev),
+			slog.Bool("published", false),
+			slog.Int("status", status),
+			slog.String("error", err.Error()),
+		)...,
 	)
 	http.Error(w, msg, status)
+}
+
+// deliveryAttrs describes one delivery for the log: what arrived, about which
+// pull request, and whose doing it was. Every outcome carries the same set,
+// so that one query answers "what did this delivery do" whether the event was
+// published, skipped or refused.
+//
+// Before a payload has been normalized there is no event to describe, and the
+// handler is asked for the forge's own identifiers instead: enough to find
+// the delivery in the forge's own log and redeliver it.
+func (rc *Receiver) deliveryAttrs(r *http.Request, ev *event.ReviewEvent) []slog.Attr {
+	attrs := make([]slog.Attr, 0, 10)
+	attrs = append(attrs,
+		slog.String("platform", string(rc.handler.Platform())),
+		slog.String("request_id", httpx.RequestIDFrom(r.Context())),
+	)
+
+	if ev == nil {
+		if d, ok := rc.handler.(DeliveryDescriber); ok {
+			id, name := d.Delivery(r)
+			if id != "" {
+				attrs = append(attrs, slog.String("delivery_id", id))
+			}
+			if name != "" {
+				attrs = append(attrs, slog.String("event_name", name))
+			}
+		}
+		return attrs
+	}
+
+	attrs = append(attrs,
+		slog.String("delivery_id", ev.Source.DeliveryID),
+		slog.String("event_id", ev.ID),
+		// The forge's own vocabulary ("pull_request.synchronize"), which is
+		// what the delivery log and the hook settings page show.
+		slog.String("event_name", ev.Source.EventName),
+		slog.String("kind", string(ev.Kind)),
+		slog.String("repository", ev.Repository.FullName),
+		slog.String("actor", ev.Actor.Login),
+	)
+	if ev.PullRequest != nil {
+		attrs = append(attrs, slog.Int("pr", ev.PullRequest.Number))
+	}
+	if ev.Command != nil {
+		attrs = append(attrs, slog.String("command", ev.Command.Name))
+	}
+	return attrs
 }
