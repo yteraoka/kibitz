@@ -54,9 +54,19 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | [docs/event-schema.md](docs/event-schema.md) | 3 プラットフォームの Webhook 差異と正規化イベントスキーマ |
 | [docs/queue.md](docs/queue.md) | Pub/Sub / SQS 抽象化、順序制御、冪等性、リトライ、DLQ、Claim Check |
 | [docs/worker.md](docs/worker.md) | OpenCode のヘッドレス実行、MCP 統合、プロンプト設計、構造化出力 |
+| [docs/agent-engine.md](docs/agent-engine.md) | エージェントエンジンの選定 (OpenCode / pi の比較と決定) |
 | [docs/security.md](docs/security.md) | 署名検証、シークレット管理、プロンプトインジェクション、fork PR の扱い |
 | [docs/configuration.md](docs/configuration.md) | サーバー / ワーカーの環境変数、リポジトリ設定 `.kibitz.yaml` |
 | [docs/roadmap.md](docs/roadmap.md) | フェーズ別実装計画、受け入れ条件、テスト戦略、未決事項 |
+
+## 前提
+
+- **クラウドは GCP をメイン**とする (Cloud Pub/Sub / Firestore / Cloud Run)。
+  AWS (SQS) 対応はインターフェースとして残し、実装の優先度は下げる。
+- **単一組織での利用**を前提とする (マルチテナント分離は行わない)。
+- **当面はコメント投稿のみ。** 将来的に Issue からの指示でコードを実装し、
+  ブランチと PR を作るモードを追加する ([docs/roadmap.md](docs/roadmap.md) Phase 8)。
+- エージェントエンジンは **OpenCode** を採用 ([docs/agent-engine.md](docs/agent-engine.md))。
 
 ## ステータス
 

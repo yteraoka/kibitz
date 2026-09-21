@@ -91,6 +91,15 @@
 | `comment.created` | PR 上のコメント | メンション時のみ回答 (スレッド継続) |
 | `command` | 明示コマンド (`@kibitz review` 等) | コマンドに応じた処理 |
 | `pr.closed` / `pr.merged` | クローズ | セッションと作業領域の後片付け |
+| `issue.comment` | Issue 上のメンション | 質問への回答。Phase 8 以降は実装指示も受け付ける |
+| `issue.assigned` | ボットに Issue がアサインされた | Phase 8: 実装モードの起動条件 (既定は無効) |
+
+`issue.*` は Phase 8 (実装モード) で使う。スキーマ上は `pull_request` を省略し、
+`issue` オブジェクト (id / number / title / body / labels / assignees) を持つ。
+GitHub は `issues` / `issue_comment`、GitLab は `issue` / `note`、
+Azure DevOps は Work Item の `workitem.updated` / `workitem.commented` が対応する
+(Azure DevOps は Git と Work Item が別サービスなので、リポジトリとの紐付けを
+Work Item のリンクから解決する必要がある)。
 
 ### 設計上の決定
 
@@ -131,6 +140,10 @@ PR コメント中の 1 行として解釈する。プラットフォーム共�
 @kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
 @kibitz ignore                     # この PR では以降レビューしない
 @kibitz help
+
+# Phase 8 (Issue 上で使用、既定は無効)
+@kibitz implement                  # この Issue の内容を実装してブランチと PR を作る
+@kibitz plan                       # 実装方針だけを提示する (コードは書かない)
 ```
 
 メンション名は設定で変更可能にする (GitLab / ADO ではボットアカウント名が異なるため)。

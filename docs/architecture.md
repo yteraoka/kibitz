@@ -1,5 +1,18 @@
 # アーキテクチャ
 
+## 0. 前提
+
+| 項目 | 決定 |
+| --- | --- |
+| メインクラウド | **GCP** (Cloud Pub/Sub / Firestore / Cloud Storage / Cloud Run・GKE) |
+| AWS 対応 | インターフェースとしては用意するが実装優先度は下げる (SQS / DynamoDB / S3) |
+| テナント | **単一組織**。テナント分離は行わない (将来必要になったらキー設計に組織 ID を足す) |
+| ワーカーの書き込み | **当面はコメント投稿のみ。** 将来 Issue 起点の実装モードを追加 (Phase 8) |
+| エージェントエンジン | **OpenCode** ([agent-engine.md](agent-engine.md)) |
+
+単一組織前提でも、Webhook シークレットやトークンの取り扱いは
+[security.md](security.md) の方針を崩さない (将来の分離コストを下げるため)。
+
 ## 1. 設計方針
 
 1. **受信と実行を分離する**
@@ -18,6 +31,9 @@
    OpenCode の呼び出し方 (`opencode run` / `opencode serve` への HTTP) も実装差し替えで選べるようにする。
 5. **失敗は再試行、二重実行は冪等性で防ぐ**
    キューは at-least-once 前提。配送 ID とジョブキーで重複実行を抑止する。
+6. **書き込み権限は段階的に開放する**
+   レビュー (読み取りのみ) → suggestion → ブランチ作成と PR の順に、
+   それぞれ独立した設定で有効化できるようにする。既定はすべて無効。
 
 ## 2. コンポーネント
 
@@ -93,6 +109,13 @@ type Client interface {
 
     // 認証・クローン
     CloneAuth(ctx context.Context, ref PRRef) (CloneCredential, error)
+}
+
+// Phase 8 (実装モード) で追加する。既定の実装は ErrNotEnabled を返す。
+type Writer interface {
+    CreateBranch(ctx context.Context, repo RepoRef, name, baseSHA string) error
+    PushChanges(ctx context.Context, repo RepoRef, branch string, commit Commit) error
+    CreatePullRequest(ctx context.Context, repo RepoRef, pr NewPullRequest) (PRRef, error)
 }
 ```
 

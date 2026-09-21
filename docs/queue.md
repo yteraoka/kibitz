@@ -1,5 +1,10 @@
 # キュー設計 (Cloud Pub/Sub / Amazon SQS)
 
+**GCP をメインとするため Cloud Pub/Sub を先に実装する。**
+SQS 実装はインターフェースを満たす第二実装として後から追加する
+([roadmap.md](roadmap.md) Phase X)。ただし SQS の 256 KB 制限を前提にした
+Claim Check の設計は最初から入れておく (生 payload の保全にも使うため)。
+
 ## 1. 抽象化
 
 ```go

@@ -30,10 +30,12 @@
 | `KIBITZ_QUEUE_BACKEND` | `pubsub` | サーバーと同じ |
 | `KIBITZ_PUBSUB_SUBSCRIPTION` | `kibitz-worker` | pull サブスクリプション |
 | `KIBITZ_STATE_BACKEND` | `firestore` | `firestore` / `dynamodb` / `memory` |
+| `KIBITZ_IMPLEMENT_ENABLED` | `false` | Issue 起点の実装モード (Phase 8) |
 | `KIBITZ_CONCURRENCY` | `2` | 同時に走らせる OpenCode の数 |
 | `KIBITZ_JOB_TIMEOUT` | `15m` | ジョブ全体のタイムアウト |
 | `KIBITZ_WORKSPACE_DIR` | `/var/tmp/kibitz` | クローン先 |
 | `KIBITZ_CLONE_DEPTH` | `50` | shallow clone の深さ |
+| `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi` (将来) / `fake` (テスト用) |
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
@@ -94,6 +96,19 @@ mcp:
 
 budget:
   monthly_tokens: 20000000
+
+# Phase 8 で追加予定。既定は無効
+implement:
+  enabled: false
+  # 実装を指示できるユーザー (これ以外の指示は無視する)
+  allowed_actors: [yteraoka]
+  # 触ってよい範囲
+  paths_allow: ["internal/**", "cmd/**"]
+  # 実行を許すコマンド
+  commands_allow: ["go build ./...", "go test ./...", "golangci-lint run"]
+  branch_prefix: "kibitz/"
+  # 常に draft PR として作る
+  draft: true
 ```
 
 設定の優先順位 (後が優先):
