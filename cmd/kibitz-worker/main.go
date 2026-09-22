@@ -278,6 +278,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:          cfg.OpenCode.Model,
 		ReviewAgent:    cfg.OpenCode.ReviewAgent,
 		AnswerAgent:    cfg.OpenCode.AnswerAgent,
+		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
 		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
@@ -290,6 +291,8 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 			Depth:   cfg.Limits.CloneDepth,
 			Timeout: 5 * time.Minute,
 		},
+		MaxDiffLines: cfg.Limits.MaxDiffLines,
+		TriageModel:  cfg.OpenCode.TriageModel,
 		Limits: reviewer.Limits{
 			MaxComments: cfg.Limits.MaxComments,
 			MinSeverity: reviewer.Severity(cfg.Limits.MinSeverity),

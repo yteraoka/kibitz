@@ -26,9 +26,11 @@ type Config struct {
 	Bin string
 	// Model is the provider/model to run, e.g. google-vertex/gemini-3.1-pro-preview.
 	Model string
-	// ReviewAgent and AnswerAgent name the agent definitions to use.
+	// ReviewAgent, AnswerAgent and TriageAgent name the agent definitions to
+	// use.
 	ReviewAgent string
 	AnswerAgent string
+	TriageAgent string
 	// MCPServers are the servers to enable, already filtered against the
 	// operator's allow list.
 	MCPServers map[string]MCPServer
@@ -65,6 +67,9 @@ func New(cfg Config, logger *slog.Logger) *Runner {
 	if cfg.AnswerAgent == "" {
 		cfg.AnswerAgent = "kibitz-answer"
 	}
+	if cfg.TriageAgent == "" {
+		cfg.TriageAgent = "kibitz-triage"
+	}
 	return &Runner{cfg: cfg, logger: logger}
 }
 
@@ -89,7 +94,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	if err := writeFile(promptPath, []byte(reviewer.BuildPrompt(req))); err != nil {
 		return nil, fmt.Errorf("opencode: writing prompt: %w", err)
 	}
-	outputPath := filepath.Join(req.WorkspaceDir, reviewer.OutputPath)
+	outputPath := filepath.Join(req.WorkspaceDir, outputPathFor(req.Mode))
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 		return nil, fmt.Errorf("opencode: creating output directory: %w", err)
 	}
@@ -129,8 +134,18 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 
 	data, err := os.ReadFile(outputPath) //nolint:gosec // a path this process just built
 	if err != nil {
-		return nil, fmt.Errorf("opencode: the agent did not write %s: %w", reviewer.OutputPath, err)
+		return nil, fmt.Errorf("opencode: the agent did not write %s: %w", outputPathFor(req.Mode), err)
 	}
+
+	if req.Mode == reviewer.ModeTriage {
+		triage, err := reviewer.ParseTriage(data)
+		if err != nil {
+			return nil, &reviewer.OutputError{Err: err}
+		}
+		result.Triage = triage
+		return result, nil
+	}
+
 	out, err := reviewer.ParseOutput(data)
 	if err != nil {
 		return nil, &reviewer.OutputError{Err: err}
@@ -186,6 +201,15 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 	return stdout, nil
 }
 
+// outputPathFor is the file the agent writes for this mode. Triage writes its
+// own, so that a selection can never be read as a review that found nothing.
+func outputPathFor(mode reviewer.Mode) string {
+	if mode == reviewer.ModeTriage {
+		return reviewer.TriageOutputPath
+	}
+	return reviewer.OutputPath
+}
+
 // isMissingSession reports whether opencode refused because the session id it
 // was given no longer exists.
 func isMissingSession(err error) bool {
@@ -196,8 +220,11 @@ func isMissingSession(err error) bool {
 // asserted in tests without running anything.
 func (r *Runner) args(req reviewer.Request) []string {
 	agent := r.cfg.ReviewAgent
-	if req.Mode == reviewer.ModeAnswer {
+	switch req.Mode {
+	case reviewer.ModeAnswer:
 		agent = r.cfg.AnswerAgent
+	case reviewer.ModeTriage:
+		agent = r.cfg.TriageAgent
 	}
 
 	args := []string{

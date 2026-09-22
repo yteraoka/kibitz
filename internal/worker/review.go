@@ -41,6 +41,12 @@ type ReviewJob struct {
 	Language   string
 	Guidelines string
 	Model      string
+	// MaxDiffLines is how large a change may be before it is triaged rather
+	// than reviewed whole. Zero disables triage.
+	MaxDiffLines int
+	// TriageModel runs the triage pass. It reads file names, not code, so a
+	// cheaper model is usually the right one. Empty means [ReviewJob.Model].
+	TriageModel string
 	// Mention is how a comment addresses kibitz. It is only used to write the
 	// help text, which would otherwise tell people to use a token this
 	// deployment does not answer to.
@@ -208,12 +214,15 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		}
 	}()
 
+	// Too large to review in one pass: a first pass decides what to read.
+	selection := j.triage(ctx, ws, ev, pr, focus)
+
 	req := reviewer.Request{
 		Mode:             reviewer.ModeReview,
 		WorkspaceDir:     ws.Dir,
 		Event:            ev,
 		PullRequest:      pr,
-		Diff:             focus,
+		Diff:             selection.Diff,
 		ExistingComments: kibitzExcluded(comments, ev),
 		Language:         j.Language,
 		Model:            j.Model,
@@ -248,7 +257,8 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.String("ref", ref.String()),
 		slog.String("head", ws.HeadSHA),
 		slog.String("since", since),
-		slog.Int("files_reviewed", len(focus.Files)),
+		slog.Int("files_reviewed", len(selection.Diff.Files)),
+		slog.Int("files_skipped", len(selection.Skipped)),
 		slog.Int("findings", len(sanitized.Findings)),
 		slog.Int("dropped", sanitized.Dropped()),
 		slog.Int("out_of_diff", sanitized.OutOfDiff),
@@ -263,7 +273,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
 		trace.WithAttributes(telemetry.AttrFindings.Int(len(sanitized.Findings))))
 	defer postSpan.End()
-	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since)
+	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since, selection)
 }
 
 // incremental narrows the diff to what has been pushed since the last review,
@@ -424,7 +434,7 @@ func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, 
 
 // post writes the review back to the pull request: one summary comment that is
 // replaced on every run, plus the findings as one review.
-func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string) error {
+func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged) error {
 	allowed, err := j.allowPost(ctx, ev)
 	if err != nil {
 		return err
@@ -438,7 +448,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		return nil
 	}
 
-	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA)); err != nil {
+	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection)); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
 	if len(sanitized.Findings) == 0 {
@@ -469,7 +479,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 			slog.String("ref", ref.String()),
 			slog.String("error", err.Error()),
 		)
-		body := j.summaryBody(result, sanitized, headSHA, sinceSHA) + "\n\n" + renderFindingsAsText(sanitized.Findings)
+		body := j.summaryBody(result, sanitized, headSHA, sinceSHA, selection) + "\n\n" + renderFindingsAsText(sanitized.Findings)
 		if fallbackErr := client.UpsertSummary(ctx, ref, SummaryMarker, body); fallbackErr != nil {
 			return fmt.Errorf("posting the fallback summary to %s: %w", ref, fallbackErr)
 		}
@@ -645,7 +655,7 @@ func kibitzExcluded(comments []forge.Comment, ev *event.ReviewEvent) []forge.Com
 	return out
 }
 
-func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string) string {
+func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged) string {
 	var b strings.Builder
 
 	b.WriteString(strings.TrimSpace(result.Summary))
@@ -655,6 +665,20 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 		b.WriteString("指摘はありません。\n")
 	} else {
 		fmt.Fprintf(&b, "指摘: %d 件\n", n)
+	}
+	// A review that quietly skipped half the change is worse than no review,
+	// so the part that was not read is named rather than implied.
+	if n := len(selection.Skipped); n > 0 {
+		fmt.Fprintf(&b, "\n変更が大きいため、%d 件のファイルを選んでレビューしました (残り %d 件は未レビュー)。\n",
+			len(selection.Diff.Files), n)
+		if selection.Notes != "" {
+			fmt.Fprintf(&b, "\n%s\n", selection.Notes)
+		}
+		b.WriteString("\n<details><summary>レビューしなかったファイル</summary>\n\n")
+		for _, path := range selection.Skipped {
+			fmt.Fprintf(&b, "- `%s`\n", path)
+		}
+		b.WriteString("\n</details>\n")
 	}
 	if sanitized.OutOfDiff > 0 {
 		fmt.Fprintf(&b, "\n_%d 件の指摘は差分に含まれない行を指していたため省略しました。_\n", sanitized.OutOfDiff)
