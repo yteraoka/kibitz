@@ -11,6 +11,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/store"
 	"github.com/yteraoka/kibitz/internal/store/memory"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -602,5 +603,176 @@ func TestFailureNoticeUsesTheConfiguredMention(t *testing.T) {
 	}
 	if !strings.Contains(notice, "opencode: exit status 1") {
 		t.Errorf("notice does not carry the cause:\n%s", notice)
+	}
+}
+
+// A reply of "why?" means nothing without what it is replying to, and what it
+// is replying to is usually one of kibitz's own findings.
+func TestAnswerCarriesTheThread(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.comments = []forge.Comment{
+		{ID: "1", ThreadID: "7", Body: "ここで ctx を見ていません", Author: event.Actor{Login: "kibitz[bot]"}, Path: "queue.go", Line: 88},
+		{ID: "5", ThreadID: "7", Body: "なぜ問題になりますか?", Author: event.Actor{Login: "yteraoka"}},
+		{ID: "6", ThreadID: "other", Body: "無関係なスレッド", Author: event.Actor{Login: "someone"}},
+		{ID: "9", ThreadID: "7", Body: "@kibitz なぜ競合するのですか?", Author: event.Actor{Login: "yteraoka"}},
+	}
+	e := &fakeEngine{results: []*reviewer.Result{{Reply: "ロックの期限が切れるためです。"}}}
+
+	ev := pullRequestEvent(event.KindCommentCreated, origin)
+	ev.Comment = &event.Comment{ID: "9", ThreadID: "7", Body: "@kibitz なぜ競合するのですか?"}
+
+	if err := newJob(t, f, e).Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	thread := e.requests[0].Thread
+	if len(thread) != 2 {
+		t.Fatalf("thread = %+v, want the two comments of this thread", thread)
+	}
+	// kibitz's own finding is context here, unlike in a review.
+	if thread[0].ID != "1" || thread[1].ID != "5" {
+		t.Errorf("thread = %+v, want it oldest first without the question", thread)
+	}
+}
+
+// A comment on the conversation has no thread of its own, so the conversation
+// is the thread.
+func TestAnswerWithoutAThreadUsesTheConversation(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.comments = []forge.Comment{
+		{ID: "1", Body: "最初のコメント", Author: event.Actor{Login: "yteraoka"}},
+		{ID: "9", Body: "@kibitz これは何をしていますか?", Author: event.Actor{Login: "yteraoka"}},
+	}
+	e := &fakeEngine{results: []*reviewer.Result{{Reply: "キューを読んでいます。"}}}
+
+	ev := pullRequestEvent(event.KindCommentCreated, origin)
+	ev.Comment = &event.Comment{ID: "9", Body: "@kibitz これは何をしていますか?"}
+
+	if err := newJob(t, f, e).Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := e.requests[0].Thread; len(got) != 1 || got[0].ID != "1" {
+		t.Errorf("thread = %+v, want the rest of the conversation", got)
+	}
+}
+
+// The review opens the conversation a later question continues.
+func TestReviewRemembersItsSession(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	s := memory.New()
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Summary: "問題なし", SessionID: "ses_review", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "問題なし"}},
+		{Reply: "こうです。"},
+	}}
+
+	job := newJob(t, f, e)
+	job.Store = s
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+
+	ev := pullRequestEvent(event.KindCommentCreated, origin)
+	ev.Comment = &event.Comment{ID: "9", ThreadID: "7", Body: "@kibitz なぜ?"}
+	if err := job.Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	if got := e.requests[1].SessionID; got != "ses_review" {
+		t.Errorf("session = %q, want the one the review opened", got)
+	}
+}
+
+func TestIgnoreStopsReviewsButNotAnswers(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	s := memory.New()
+	e := &fakeEngine{results: []*reviewer.Result{{Reply: "答えます。"}}}
+
+	job := newJob(t, f, e)
+	job.Store = s
+
+	ignore := pullRequestEvent(event.KindCommand, origin)
+	ignore.Command = &event.Command{Name: policy.CommandIgnore}
+	if err := job.Handle(context.Background(), queued(ignore)); err != nil {
+		t.Fatalf("ignore: %v", err)
+	}
+	if len(f.summaries) != 1 || !strings.Contains(f.summaries[0], "レビューしません") {
+		t.Fatalf("summaries = %v, want the request acknowledged", f.summaries)
+	}
+
+	// A push is now ignored.
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPRUpdated, origin))); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(f.reviews) != 0 {
+		t.Errorf("reviews = %+v, want none while ignored", f.reviews)
+	}
+
+	// Questions are still answered: being told to stop reviewing is not being
+	// told to stop talking.
+	ev := pullRequestEvent(event.KindCommentCreated, origin)
+	ev.Comment = &event.Comment{ID: "9", Body: "@kibitz これは?"}
+	if err := job.Handle(context.Background(), queued(ev)); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	if len(f.replies) != 1 {
+		t.Errorf("replies = %v, want the question answered", f.replies)
+	}
+}
+
+// Asking for a review is asking to be reviewed again.
+func TestReviewCommandLiftsIgnore(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	s := memory.New()
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Summary: "見ました", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"}},
+	}}
+
+	job := newJob(t, f, e)
+	job.Store = s
+
+	ignore := pullRequestEvent(event.KindCommand, origin)
+	ignore.Command = &event.Command{Name: policy.CommandIgnore}
+	if err := job.Handle(context.Background(), queued(ignore)); err != nil {
+		t.Fatalf("ignore: %v", err)
+	}
+
+	review := pullRequestEvent(event.KindCommand, origin)
+	review.Command = &event.Command{Name: policy.CommandReview}
+	if err := job.Handle(context.Background(), queued(review)); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if len(e.requests) != 1 || e.requests[0].Mode != reviewer.ModeReview {
+		t.Fatalf("requests = %+v, want the review to have run", e.requests)
+	}
+}
+
+// Closing the pull request ends the conversation.
+func TestCloseForgetsThePullRequest(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	s := memory.New()
+
+	job := newJob(t, f, &fakeEngine{})
+	job.Store = s
+
+	ignore := pullRequestEvent(event.KindCommand, origin)
+	ignore.Command = &event.Command{Name: policy.CommandIgnore}
+	if err := job.Handle(context.Background(), queued(ignore)); err != nil {
+		t.Fatalf("ignore: %v", err)
+	}
+
+	closed := pullRequestEvent(event.KindPRMerged, origin)
+	if err := job.Handle(context.Background(), queued(closed)); err != nil {
+		t.Fatalf("merged: %v", err)
+	}
+
+	if _, err := s.Get(context.Background(), store.IgnoreKey(closed)); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the ignore flag survived the pull request being merged (err = %v)", err)
 	}
 }

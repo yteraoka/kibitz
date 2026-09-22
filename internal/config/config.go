@@ -290,6 +290,9 @@ type Worker struct {
 	ImplementEnabled bool
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
+	// SessionTTL is how long the agent's conversation about one pull request,
+	// and an "ignore" asked for on it, are remembered.
+	SessionTTL time.Duration
 	// Language is the language findings and answers are written in.
 	Language string
 	// Mention is how a comment addresses kibitz. The worker only needs it to
@@ -402,6 +405,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
+		SessionTTL:       l.duration("KIBITZ_SESSION_TTL", 7*24*time.Hour),
 		Language:         l.str("KIBITZ_LANGUAGE", "日本語"),
 		Mention:          l.str("KIBITZ_MENTION", policy.DefaultMention),
 		MaxDeliveries:    l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),

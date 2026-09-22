@@ -27,6 +27,7 @@ const (
 	SummaryMarker = "<!-- kibitz:summary -->"
 	FailureMarker = "<!-- kibitz:failure -->"
 	HelpMarker    = "<!-- kibitz:help -->"
+	IgnoreMarker  = "<!-- kibitz:ignore -->"
 )
 
 // ReviewJob runs one review or one answer from start to finish: read the pull
@@ -54,6 +55,9 @@ type ReviewJob struct {
 	MaxPostsPerHour int
 	// ReviewedTTL is how long a reviewed commit is remembered.
 	ReviewedTTL time.Duration
+	// SessionTTL is how long the agent's conversation about one pull request,
+	// and an "ignore" asked for on it, are remembered. Zero means a week.
+	SessionTTL time.Duration
 	// Metrics records what was posted and what was discarded. May be nil.
 	Metrics *telemetry.Metrics
 }
@@ -84,8 +88,11 @@ func (j *ReviewJob) Handle(ctx context.Context, job *Job) error {
 		return j.answer(ctx, client, ref, ev)
 
 	case event.KindPRClosed, event.KindPRMerged:
-		// Session cleanup lands with the state store in Phase 3.
-		return nil
+		// The conversation is over: nothing kibitz remembers about this pull
+		// request is worth keeping, and an "ignore" that outlived it would
+		// silently apply to a pull request nobody can reopen the discussion
+		// on.
+		return j.forget(ctx, ev)
 
 	default:
 		return nil
@@ -100,13 +107,18 @@ func (j *ReviewJob) command(ctx context.Context, client forge.Client, ref forge.
 
 	switch name {
 	case policy.CommandReview:
+		// Asking for a review is asking to be reviewed again, so it lifts an
+		// earlier "ignore" rather than being refused by it.
+		j.unignore(ctx, ev)
 		return j.review(ctx, client, ref, ev)
 	case policy.CommandAnswer, policy.CommandExplain:
 		return j.answer(ctx, client, ref, ev)
 	case policy.CommandHelp:
 		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention()))
-	case policy.CommandIgnore, policy.CommandImplement, policy.CommandPlan:
-		// Ignore needs the state store (Phase 3); implement is Phase 8.
+	case policy.CommandIgnore:
+		return j.acknowledgeIgnore(ctx, client, ref, ev)
+	case policy.CommandImplement, policy.CommandPlan:
+		// Phase 8.
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "command is not implemented yet",
 			slog.String("command", name),
 		)
@@ -129,6 +141,15 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	}
 	if pr.Draft && j.SkipDraft && ev.Kind != event.KindCommand {
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "pull request is a draft; skipping", slog.String("ref", ref.String()))
+		return nil
+	}
+
+	// Asked to stay out. A command has already lifted the flag by the time it
+	// gets here, so this only stops the automatic reviews.
+	if j.ignored(ctx, ev) {
+		j.Logger.LogAttrs(ctx, slog.LevelInfo, "this pull request is being ignored; skipping",
+			slog.String("ref", ref.String()),
+		)
 		return nil
 	}
 
@@ -198,6 +219,12 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
 		trace.WithAttributes(attribute.String("kibitz.model", j.Model)))
 	result, err := j.runWithRetry(agentCtx, req)
+	if result != nil {
+		// A review starts fresh — its job is to look at the code, not to be
+		// anchored by what it said last time — but the conversation it opens
+		// is what a later "why?" continues.
+		j.rememberSession(ctx, ev, result.SessionID)
+	}
 	if err != nil {
 		agentSpan.RecordError(err)
 		agentSpan.SetStatus(codes.Error, err.Error())
@@ -428,6 +455,22 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	return client.UpsertSummary(ctx, forge.RefOf(ev), FailureMarker, b.String())
 }
 
+// acknowledgeIgnore records the request and says so, because a command that
+// silently does nothing is indistinguishable from a broken one.
+func (j *ReviewJob) acknowledgeIgnore(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent) error {
+	if err := j.ignore(ctx, ev); err != nil {
+		return fmt.Errorf("recording the ignore request for %s: %w", ref, err)
+	}
+	j.Logger.LogAttrs(ctx, slog.LevelInfo, "asked to ignore this pull request",
+		slog.String("ref", ref.String()),
+	)
+
+	body := fmt.Sprintf(
+		"この PR は以降レビューしません。\n\n再開するときは `%s review` とコメントしてください。質問には引き続き答えます。\n",
+		j.mention())
+	return client.UpsertSummary(ctx, ref, IgnoreMarker, body)
+}
+
 func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent) error {
 	if ev.Comment == nil {
 		return nil
@@ -442,6 +485,18 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		return fmt.Errorf("fetching the diff of %s: %w", ref, err)
 	}
 
+	// A reply of "why?" is answerable only with what it is replying to. That
+	// is context, not a requirement: an answer without the thread is worse
+	// than one with it, but better than none.
+	comments, err := client.Comments(ctx, ref)
+	if err != nil {
+		j.Logger.LogAttrs(ctx, slog.LevelWarn, "could not list the thread the question is in",
+			slog.String("ref", ref.String()),
+			slog.String("error", err.Error()),
+		)
+	}
+	thread := threadOf(comments, ev.Comment)
+
 	ws, err := j.prepareWorkspace(ctx, client, ref, ev, pr)
 	if err != nil {
 		return err
@@ -455,6 +510,8 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		PullRequest:  pr,
 		Diff:         diff,
 		Question:     ev.Comment.Body,
+		Thread:       thread,
+		SessionID:    j.session(ctx, ev),
 		Language:     j.Language,
 		Model:        j.Model,
 		Guidelines:   j.Guidelines,
@@ -463,11 +520,47 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	if err != nil {
 		return err
 	}
+	j.rememberSession(ctx, ev, result.SessionID)
+
+	j.Logger.LogAttrs(ctx, slog.LevelInfo, "answered a question",
+		slog.String("ref", ref.String()),
+		slog.Int("thread_comments", len(thread)),
+		slog.Int("input_tokens", result.Usage.InputTokens),
+		slog.Int("output_tokens", result.Usage.OutputTokens),
+	)
 
 	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
 		return fmt.Errorf("replying on %s: %w", ref, err)
 	}
 	return nil
+}
+
+// threadOf picks out the conversation a question belongs to, oldest first and
+// without the question itself.
+//
+// A comment on the diff belongs to its thread; a comment on the conversation
+// has no thread of its own, so the conversation is the thread. kibitz's own
+// comments are kept either way: the finding being asked about is usually one
+// of them.
+func threadOf(comments []forge.Comment, question *event.Comment) []forge.Comment {
+	if question == nil {
+		return nil
+	}
+
+	out := make([]forge.Comment, 0, len(comments))
+	for _, c := range comments {
+		if c.ID == question.ID {
+			continue
+		}
+		if question.ThreadID != "" && c.ThreadID != question.ThreadID {
+			continue
+		}
+		out = append(out, c)
+	}
+	if len(out) > maxThreadComments {
+		out = out[len(out)-maxThreadComments:]
+	}
+	return out
 }
 
 // kibitzExcluded drops kibitz's own comments from the context handed to the
@@ -574,6 +667,7 @@ func helpText(mention string) string {
 		fmt.Sprintf("- `%s review` — 差分をレビューします (`--focus security` などで観点を指定できます)", mention),
 		fmt.Sprintf("- `%s explain <対象>` — 実装の説明を返します", mention),
 		fmt.Sprintf("- `%s <質問>` — 質問に回答します", mention),
+		fmt.Sprintf("- `%s ignore` — この PR は以降レビューしません (質問には答えます)", mention),
 		"",
 		fmt.Sprintf("コマンドは**コメントの先頭**に書いてください。`%s` が途中にある場合は質問として扱います。", mention),
 		"",
