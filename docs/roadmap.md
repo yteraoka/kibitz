@@ -104,8 +104,8 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 
 - `internal/webhook/gitlab` — トークン検証、`merge_request` / `note` の正規化 **(完了)**
 - `internal/forge/gitlab` — discussions API、`position` によるインラインコメント、
-  suggestion 記法、`refs/merge-requests/{iid}/head` の fetch
-- self-managed GitLab (ベース URL 可変) の対応
+  suggestion 記法、`refs/merge-requests/{iid}/head` の fetch **(完了)**
+- self-managed GitLab (ベース URL 可変) の対応 **(完了)**
 
 **完了条件**: GitLab の MR で Phase 3 と同じ受け入れ条件が通る。
 

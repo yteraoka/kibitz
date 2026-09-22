@@ -209,6 +209,19 @@ type GitHubApp struct {
 	BaseURL        string // set for GitHub Enterprise Server
 }
 
+// GitLabAuth holds the credentials kibitz posts to GitLab with. GitLab has no
+// equivalent of a GitHub App installation token, so this is a long-lived
+// access token and is treated as one (docs/security.md).
+type GitLabAuth struct {
+	// BaseURL is the instance. Empty means gitlab.com.
+	BaseURL string
+	// Token is a personal, group or project access token with api scope.
+	Token Secret
+}
+
+// Configured reports whether kibitz can talk to GitLab at all.
+func (g GitLabAuth) Configured() bool { return g.Token != "" }
+
 // Vertex holds the Google Cloud settings OpenCode needs to reach Vertex AI.
 // Authentication is ADC (Workload Identity), so there is no key.
 type Vertex struct {
@@ -294,6 +307,7 @@ type Worker struct {
 	Limits           Limits
 	MCPAllowlist     []string
 	GitHub           GitHubApp
+	GitLab           GitLabAuth
 	ImplementEnabled bool
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
@@ -411,6 +425,10 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),
 			PrivateKey:     l.secret("KIBITZ_GITHUB_PRIVATE_KEY"),
 			BaseURL:        l.str("KIBITZ_GITHUB_BASE_URL", ""),
+		},
+		GitLab: GitLabAuth{
+			BaseURL: l.str("KIBITZ_GITLAB_BASE_URL", ""),
+			Token:   l.secret("KIBITZ_GITLAB_TOKEN"),
 		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),

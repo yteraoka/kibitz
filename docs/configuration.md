@@ -76,7 +76,8 @@
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
 | `KIBITZ_MCP_ALLOWLIST` | - | 有効化を許す MCP 名 (カンマ区切り) |
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
-| `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | GitLab 認証 |
+| `KIBITZ_GITLAB_BASE_URL` | `https://gitlab.com` | GitLab インスタンス。self-managed はここを変える (`/api/v4` は付けても付けなくてもよい) |
+| `KIBITZ_GITLAB_TOKEN` | - | personal / group / project access token (`api` スコープ)。**GitLab には GitHub App のインストールトークンに相当するものが無く、長命な資格情報になる** |
 | `KIBITZ_AZDO_ORG_URL` / `_TOKEN` | - | Azure DevOps 認証 |
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
