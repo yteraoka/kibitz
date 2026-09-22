@@ -1,7 +1,7 @@
 // Command kibitz-scaler sizes the worker from the queue it drains.
 //
-// A pull subscriber has no inbound traffic, so Cloud Run cannot scale it: left
-// alone it is either always running or never started. This reads the
+// A worker pool has no inbound traffic to scale on -- that is the point of it
+// -- so its instance count is set rather than derived. This reads the
 // subscription's backlog from Cloud Monitoring and writes the instance count
 // that backlog calls for, which is what lets the worker sit at zero between
 // reviews.
@@ -60,7 +60,7 @@ func realMain() error {
 	if err != nil {
 		return err
 	}
-	worker, err := scale.NewCloudRunService(ctx, cfg.Scale.ProjectID, cfg.Scale.Region, cfg.Scale.Service)
+	worker, err := scale.NewCloudRunWorkerPool(ctx, cfg.Scale.ProjectID, cfg.Scale.Region, cfg.Scale.WorkerPool)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func realMain() error {
 
 	logger.LogAttrs(ctx, slog.LevelInfo, "starting",
 		slog.String("subscription", backlog.String()),
-		slog.String("service", worker.String()),
+		slog.String("worker_pool", worker.String()),
 		slog.Int("min_instances", cfg.Scale.MinInstances),
 		slog.Int("max_instances", cfg.Scale.MaxInstances),
 		slog.Duration("idle_after", cfg.Scale.IdleAfter),

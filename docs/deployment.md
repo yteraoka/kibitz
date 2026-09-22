@@ -302,15 +302,18 @@ msg="event skipped"   published=false reason=no_keyword event_name=pull_request.
 既定ではワーカーは**キューが空なら 0 インスタンス**なので、apply 直後は何も
 動いていないのが正常。PR を 1 つ作る (あるいは手で 1 台上げる) と起動する。
 
+ワーカーは Cloud Run の**サービスではなく worker pool** なので、コマンドは
+`gcloud run worker-pools` を使う。
+
 ```bash
 # いま何台か
-gcloud run services describe kibitz-worker --region asia-northeast1 \
-  --format='value(scaling.minInstanceCount)'
+gcloud run worker-pools describe kibitz-worker --region asia-northeast1 \
+  --format="value(metadata.annotations['run.googleapis.com/manualInstanceCount'])"
 
 # 手で 1 台上げる (scaler が次の判定で戻す)
-gcloud run services update kibitz-worker --region asia-northeast1 --min-instances=1
+gcloud run worker-pools update kibitz-worker --region asia-northeast1 --instances=1
 
-gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 50
+gcloud run worker-pools logs read kibitz-worker --region asia-northeast1 --limit 50
 ```
 
 `msg=starting` に続けて `msg=listening` が出ていれば良い。
@@ -326,7 +329,7 @@ gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 50
 
 ```bash
 # 流れを追う
-gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 100 | \
+gcloud run worker-pools logs read kibitz-worker --region asia-northeast1 --limit 100 | \
   grep -E 'job started|job finished|review produced findings|job failed'
 ```
 
@@ -364,7 +367,7 @@ GitHub App の **Advanced** タブから同じ配送を **Redeliver** する。
 コメントが増えなければ重複排除が効いている。
 
 ```bash
-gcloud run services logs read kibitz-worker --region asia-northeast1 --limit 20 | \
+gcloud run worker-pools logs read kibitz-worker --region asia-northeast1 --limit 20 | \
   grep "delivery was already handled"
 ```
 
@@ -445,14 +448,17 @@ gcloud alpha monitoring channels create \
 
 ### ワーカーのオートスケール
 
-ワーカーは Pub/Sub の pull サブスクライバなので、**Cloud Run から見ると
-リクエストが 1 件も来ない**。放っておくと「常時 1 台」か「永久に 0 台」の
-どちらかにしかならないので、kibitz が両側から数を決める。
+ワーカーは Pub/Sub の pull サブスクライバなので、**リクエストが 1 件も来ない**。
+そのため Cloud Run の**サービスではなく worker pool** で動かしている
+(ingress もポートもプローブも無く、CPU は常時割り当てられる)。
+worker pool にオートスケールは無く、インスタンス数は書き込むものなので、
+放っておくと「常時 N 台」か「永久に 0 台」のどちらかにしかならない。
+その数を kibitz が両側から決める。
 
 ```
 PR 作成 ──> kibitz-server ──publish──> Pub/Sub
                   │
-                  └─ min instances を 1 に引き上げ (即時)
+                  └─ インスタンス数を 1 に引き上げ (即時)
                                           │
                                           ↓
 Cloud Scheduler ──毎分──> kibitz-scaler ──> バックログを読む
@@ -474,15 +480,19 @@ Cloud Scheduler ──毎分──> kibitz-scaler ──> バックログを読�
 - **メトリクスが読めないときは下げない。** Monitoring 障害で
   「空に見える」ことがあるので、読めなければ 1 台維持する。
 
-変更するのは**サービスレベルの** instance count で、リビジョンテンプレート側
-ではない。テンプレートを触ると新しいリビジョンが作られ、実行中のレビューが
-中断されるため。Terraform は初期値だけ設定して以降は
+変更するのは **worker pool の** instance count (`scaling.manualInstanceCount`) で、
+リビジョンテンプレート側ではない。テンプレートを触ると新しいリビジョンが作られ、
+実行中のレビューが中断されるため。Terraform は初期値だけ設定して以降は
 `lifecycle { ignore_changes = [scaling] }` で手を出さない。
+
+上限 (`worker_max_instances`) は worker pool 側には設定しない。この数を動かすのは
+kibitz だけなので、上限も数を決める側 (scaler の
+`KIBITZ_SCALE_MAX_INSTANCES`) が持っている。
 
 ```bash
 # いまの台数と、scaler が何を見て決めたか
-gcloud run services describe kibitz-worker --region asia-northeast1 \
-  --format='value(scaling.minInstanceCount)'
+gcloud run worker-pools describe kibitz-worker --region asia-northeast1 \
+  --format="value(metadata.annotations['run.googleapis.com/manualInstanceCount'])"
 gcloud run jobs executions list --job kibitz-scaler --region asia-northeast1 --limit 5
 gcloud logging read \
   'resource.type=cloud_run_job AND resource.labels.job_name=kibitz-scaler' \
@@ -490,7 +500,16 @@ gcloud logging read \
 ```
 
 常時 1 台温めておきたい場合は `worker_min_instances = 1` にする。
-オートスケール自体は動いたまま、下限だけが 1 になる。
+増減自体は動いたまま、下限だけが 1 になる。
+
+#### Cloud Run サービスからの移行
+
+以前のバージョンではワーカーも Cloud Run **サービス**だった。worker pool は
+別のリソースなので、`terraform apply` は `kibitz-worker` サービスを削除して
+worker pool を作り直す (リネームでは移せない)。ワーカーは pull サブスクライバ
+なので、切り替えの間に届いたイベントはキューに残り、ack されなかった配送は
+再配送される。作業中のレビューを落としたくない場合は、キューが空になってから
+apply する。
 
 **無駄なメッセージを減らす**のも同じ話の一部で、`trigger_keywords` を設定すると
 レビューを依頼された PR しか publish されないため、キューが空の時間が伸びて
@@ -523,7 +542,7 @@ git push origin v0.4.0
 
 1. `go vet` と `go test -race` (タグが指すコミットを誰も検証していない、という事故を防ぐ)
 2. 3 つのイメージを `linux/amd64` でビルドし、**タグと同じ名前**で Artifact Registry へ push
-3. `gcloud run services update` / `gcloud run jobs update` で 3 つを差し替え
+3. `gcloud run services update` / `worker-pools update` / `jobs update` で 3 つを差し替え
 4. 実行中のリビジョン名をジョブサマリに出す
 
 イメージに `latest` は付けない。**「どのコミットが動いているか」を言えないデプロイは
@@ -562,7 +581,7 @@ terraform output github_actions
 
 ```bash
 make push IMAGE_REPO=... TAG=v0.4.0
-gcloud run services update kibitz-worker --region asia-northeast1 \
+gcloud run worker-pools update kibitz-worker --region asia-northeast1 \
   --image .../kibitz-worker:v0.4.0
 ```
 
@@ -573,14 +592,19 @@ tfvars の `*_image` は初回の値であって、以降の実体はデプロ�
 ### ロールバック
 
 ```bash
-# 直前のリビジョンに戻す
-gcloud run services update-traffic kibitz-worker \
+# 直前のリビジョンに戻す (worker pool は「トラフィック」ではなく
+# インスタンスの割り当てを動かす)
+gcloud run worker-pools update-instance-split kibitz-worker \
+  --region asia-northeast1 --to-revisions=PREVIOUS_REVISION=100
+
+# サーバーはサービスなので従来どおり
+gcloud run services update-traffic kibitz-server \
   --region asia-northeast1 --to-revisions=PREVIOUS_REVISION=100
 ```
 
-Cloud Run のリビジョンは残るので、トラフィックを戻すのが最短。
+Cloud Run のリビジョンは残るので、割り当てを戻すのが最短。
 古いタグを再デプロイしたい場合は、そのタグのイメージを指定して
-`gcloud run services update --image` する (タグを打ち直す必要は無い)。
+`gcloud run ... update --image` する (タグを打ち直す必要は無い)。
 
 ### 止める
 
@@ -590,7 +614,7 @@ Cloud Run のリビジョンは残るので、トラフィックを戻すのが�
 
 # ワーカーを止める。scaler が次の実行で戻すので、先に止める
 gcloud scheduler jobs pause kibitz-scaler --location asia-northeast1
-gcloud run services update kibitz-worker --region asia-northeast1 --min-instances=0
+gcloud run worker-pools update kibitz-worker --region asia-northeast1 --instances=0
 
 # 再開
 gcloud scheduler jobs resume kibitz-scaler --location asia-northeast1
@@ -670,7 +694,7 @@ printf '%s' "$(cat body.json)" | \
 | Webhook が 503 | Pub/Sub へ publish できない | サーバーの SA に `pubsub.publisher` があるか |
 | コメントが二重に付く (自分に反応している) | サーバーに `KIBITZ_GITHUB_APP_ID` が渡っていない | サーバーの環境変数を確認する。ワーカー側は起動ログの `resolved the bot account` を見る |
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
-| レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカーサービスの `roles/run.developer` があるか |
+| レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカー (worker pool) の `roles/run.developer` があるか |
 | PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。**コメントの先頭に** `/kibitz review` と書けば実行される |
 | ワーカーが 1 台上がりっぱなし | scaler が失敗している、またはメトリクスが読めていない | `gcloud run jobs executions list --job kibitz-scaler`。SA に `roles/monitoring.viewer` があるか |
 | コメントしたのにレビューが走らない (回答だけ返る) | コマンドがコメントの先頭に無い | 引用や説明文の途中のメンションは質問として扱う。先頭に書く ([event-schema.md](event-schema.md#41-コマンドはコメントの先頭だけ)) |

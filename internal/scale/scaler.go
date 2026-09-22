@@ -109,7 +109,7 @@ func (s *Scaler) log() *slog.Logger {
 	return slog.Default()
 }
 
-// Waker raises the worker's floor as soon as there is something to do.
+// Waker starts the worker as soon as there is something to do.
 //
 // It exists because the backlog is a metric, and a metric is minutes behind
 // reality. Waiting for it would mean a pull request sitting unreviewed while
@@ -131,7 +131,7 @@ type Waker struct {
 	now  func() time.Time
 }
 
-// NewWaker returns a waker that keeps target at floor (at least one) instance
+// NewWaker returns a waker that keeps target at floor (at least one) instances
 // whenever it is signalled, and does not call the platform more than once per
 // cooldown.
 func NewWaker(target Target, floor int, cooldown time.Duration, logger *slog.Logger) *Waker {

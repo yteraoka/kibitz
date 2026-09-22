@@ -40,7 +40,7 @@ output "service_accounts" {
 output "worker_scaling" {
   description = "How the worker's instance count is decided. Terraform sets the starting point; kibitz-server and kibitz-scaler own it from then on."
   value = {
-    service       = google_cloud_run_v2_service.worker.name
+    worker_pool   = google_cloud_run_v2_worker_pool.worker.name
     scaler_job    = google_cloud_run_v2_job.scaler.name
     schedule      = google_cloud_scheduler_job.scaler.schedule
     min_instances = var.worker_min_instances

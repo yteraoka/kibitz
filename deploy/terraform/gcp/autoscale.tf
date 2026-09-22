@@ -1,15 +1,15 @@
 # Sizing the worker from the queue.
 #
-# Cloud Run scales on inbound requests, and a pull subscriber has none. Left to
-# the platform the worker is either always running (paid for around the clock,
-# mostly idle) or never started. kibitz supplies the missing signal from the
-# two ends:
+# A worker pool has no request-driven autoscaling: its instance count is a
+# number someone states. Left at a constant the worker is either always
+# running (paid for around the clock, mostly idle) or never started, so kibitz
+# states it from the two ends:
 #
-#   * kibitz-server raises the floor to one the moment it publishes, so a
+#   * kibitz-server sets the count to one the moment it publishes, so a
 #     review starts immediately rather than waiting for a metric;
 #   * kibitz-scaler, below, reconciles once a minute from the subscription's
-#     backlog: it adds instances while messages pile up, and returns the
-#     service to worker_min_instances once the queue has been empty for
+#     backlog: it adds instances while messages pile up, and returns the pool
+#     to worker_min_instances once the queue has been empty for
 #     worker_idle_after.
 #
 # The backlog counts unacknowledged messages as well as undelivered ones, so a
@@ -63,8 +63,8 @@ resource "google_cloud_run_v2_job" "scaler" {
           value = var.region
         }
         env {
-          name  = "KIBITZ_SCALE_WORKER_SERVICE"
-          value = google_cloud_run_v2_service.worker.name
+          name  = "KIBITZ_SCALE_WORKER_POOL"
+          value = google_cloud_run_v2_worker_pool.worker.name
         }
         env {
           name  = "KIBITZ_SCALE_MIN_INSTANCES"
@@ -96,7 +96,7 @@ resource "google_cloud_run_v2_job" "scaler" {
 
   depends_on = [
     google_project_iam_member.scaler_monitoring,
-    google_cloud_run_v2_service_iam_member.worker_scaling,
+    google_cloud_run_v2_worker_pool_iam_member.worker_scaling,
   ]
 }
 
@@ -138,21 +138,21 @@ resource "google_project_iam_member" "scaler_monitoring" {
 }
 
 # Both the scaler and the server change the worker's instance count, and
-# nothing else about it. The grant is on the one service rather than the
+# nothing else about it. The grant is on the one worker pool rather than the
 # project, so neither can touch anything else that runs here.
-resource "google_cloud_run_v2_service_iam_member" "worker_scaling" {
+resource "google_cloud_run_v2_worker_pool_iam_member" "worker_scaling" {
   for_each = {
     scaler = google_service_account.scaler.email
     server = google_service_account.server.email
   }
 
-  name     = google_cloud_run_v2_service.worker.name
-  location = google_cloud_run_v2_service.worker.location
+  name     = google_cloud_run_v2_worker_pool.worker.name
+  location = google_cloud_run_v2_worker_pool.worker.location
   role     = "roles/run.developer"
   member   = "serviceAccount:${each.value}"
 }
 
-# Updating a Cloud Run service means asserting the identity it runs as, even
+# Updating a Cloud Run resource means asserting the identity it runs as, even
 # when the update only changes a number.
 resource "google_service_account_iam_member" "worker_act_as" {
   for_each = {
