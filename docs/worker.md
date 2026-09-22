@@ -24,6 +24,9 @@ pi でも実装できる粒度に保つ。
 
 ## 2. ジョブのライフサイクル
 
+キューから投稿までを図で追うなら [review-flow.md](review-flow.md)。
+ここは各段階で何をどう決めているかを書く。
+
 ```
 [0] リポジトリ設定の読み込み
     forge.Client.ReadFile(ref, ".kibitz.yaml")
