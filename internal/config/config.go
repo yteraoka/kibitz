@@ -330,7 +330,11 @@ type Worker struct {
 	MCPAllowlist []string
 	// GuidelineFiles are the repository's own convention files, read from its
 	// default branch. Nil uses the built-in list; "off" reads none.
-	GuidelineFiles   []string
+	GuidelineFiles []string
+	// ReferenceDocs are glob patterns for the repository's decision records,
+	// indexed from the checkout so the agent knows what it can consult. Nil
+	// uses the built-in list; "off" indexes none.
+	ReferenceDocs    []string
 	GitHub           GitHubApp
 	GitLab           GitLabAuth
 	ImplementEnabled bool
@@ -451,6 +455,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		MCPServers:     l.str("KIBITZ_MCP_SERVERS", ""),
 		MCPAllowlist:   l.list("KIBITZ_MCP_ALLOWLIST", nil),
 		GuidelineFiles: l.list("KIBITZ_REPO_GUIDELINE_FILES", nil),
+		ReferenceDocs:  l.list("KIBITZ_REFERENCE_DOCS", nil),
 		GitHub: GitHubApp{
 			AppID:          l.int64("KIBITZ_GITHUB_APP_ID", 0),
 			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),

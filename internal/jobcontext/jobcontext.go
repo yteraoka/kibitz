@@ -19,6 +19,7 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/reviewer"
 )
 
 // SchemaVersion is the shape of the file. The reader refuses a version it does
@@ -45,6 +46,21 @@ type Context struct {
 	// Reviewed lists the paths the prompt carried, so a tool can say which
 	// files were already put in front of the model.
 	Reviewed []string `json:"reviewed,omitempty"`
+	// Workspace is the checkout the documents in References live in. The
+	// tools read from there rather than from this file, because a decision
+	// record is only worth reading when it turns out to be relevant and
+	// carrying every one of them here would be paying for all of them.
+	Workspace string `json:"workspace,omitempty"`
+	// References are the repository's decision records, path and title. They
+	// are also the allow list: a tool serves these paths and no others, so
+	// "read a document" never becomes "read any file".
+	References []Reference `json:"references,omitempty"`
+}
+
+// Reference is one document the agent may consult.
+type Reference struct {
+	Path  string `json:"path"`
+	Title string `json:"title,omitempty"`
 }
 
 // PR is the pull request itself.
@@ -85,8 +101,11 @@ type Comment struct {
 }
 
 // Build assembles the context from what the worker already fetched.
-func Build(ev *event.ReviewEvent, pr *event.PullRequest, all *forge.Diff, reviewed *forge.Diff, comments []forge.Comment) *Context {
-	ctx := &Context{SchemaVersion: SchemaVersion}
+func Build(ev *event.ReviewEvent, pr *event.PullRequest, all *forge.Diff, reviewed *forge.Diff, comments []forge.Comment, workspace string, references []reviewer.Reference) *Context {
+	ctx := &Context{SchemaVersion: SchemaVersion, Workspace: workspace}
+	for _, ref := range references {
+		ctx.References = append(ctx.References, Reference{Path: ref.Path, Title: ref.Title})
+	}
 	if ev != nil {
 		ctx.Platform = string(ev.Source.Platform)
 		ctx.Repository = ev.Repository.FullName
@@ -189,4 +208,26 @@ func (c *Context) WasReviewed(path string) bool {
 		}
 	}
 	return false
+}
+
+// Document resolves one of the indexed documents to a path on disk.
+//
+// Only what is in References, and only under the workspace: the index is the
+// allow list, and a path that escapes it is refused rather than cleaned up.
+func (c *Context) Document(want string) (Reference, string, bool) {
+	want = strings.TrimPrefix(strings.TrimSpace(want), "./")
+	for _, ref := range c.References {
+		if ref.Path != want {
+			continue
+		}
+		if c.Workspace == "" {
+			return Reference{}, "", false
+		}
+		full := filepath.Join(c.Workspace, filepath.FromSlash(ref.Path))
+		if !strings.HasPrefix(full, filepath.Clean(c.Workspace)+string(filepath.Separator)) {
+			return Reference{}, "", false
+		}
+		return ref, full, true
+	}
+	return Reference{}, "", false
 }

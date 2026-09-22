@@ -315,7 +315,8 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Forges:         forges,
 		Engine:         engine,
 		MCP:            mcp,
-		GuidelineFiles: guidelineFiles(cfg.GuidelineFiles),
+		GuidelineFiles: offOrList(cfg.GuidelineFiles),
+		ReferenceDocs:  offOrList(cfg.ReferenceDocs),
 		Workspace: workspace.Config{
 			Root:    cfg.WorkspaceDir,
 			Depth:   cfg.Limits.CloneDepth,
@@ -431,10 +432,10 @@ func contextBin(configured string) string {
 	return strings.TrimSpace(configured)
 }
 
-// guidelineFiles resolves the convention files to read from a repository's
-// default branch. "off" reads none, which is the way out for a deployment
-// that does not want a repository writing any part of the instructions.
-func guidelineFiles(configured []string) []string {
+// offOrList resolves a list setting that also accepts "off": nil keeps the
+// built-in default, "off" turns the feature off, anything else replaces the
+// default.
+func offOrList(configured []string) []string {
 	if len(configured) == 0 {
 		return nil // the built-in list
 	}

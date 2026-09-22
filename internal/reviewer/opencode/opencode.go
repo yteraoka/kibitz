@@ -187,7 +187,8 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	// written before the config, because the config has to name it.
 	contextPath := ""
 	if r.cfg.ContextBin != "" && req.Mode != reviewer.ModeTriage {
-		path, err := jobcontext.Build(req.Event, req.PullRequest, fullDiff(req), req.Diff, req.ExistingComments).Write(jobDir)
+		path, err := jobcontext.Build(req.Event, req.PullRequest, fullDiff(req), req.Diff,
+			req.ExistingComments, req.WorkspaceDir, req.References).Write(jobDir)
 		if err != nil {
 			return nil, fmt.Errorf("opencode: %w", err)
 		}

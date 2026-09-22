@@ -33,7 +33,7 @@ func contextFile(t *testing.T) string {
 	comments := []forge.Comment{{Author: event.Actor{Login: "alice"}, Path: "queue.go", Line: 2, Body: "ctx?"}}
 
 	dir := t.TempDir()
-	path, err := jobcontext.Build(ev, pr, all, reviewed, comments).Write(dir)
+	path, err := jobcontext.Build(ev, pr, all, reviewed, comments, dir, nil).Write(dir)
 	if err != nil {
 		t.Fatalf("writing the context: %v", err)
 	}

@@ -20,7 +20,7 @@ const maxPatchBytes = 120 << 10
 // model, and a table it can quote from is more use to it than a structure it
 // has to restate.
 func newServer(job *jobcontext.Context) *mcp.Server {
-	return &mcp.Server{
+	server := &mcp.Server{
 		Name:    "kibitz",
 		Version: version,
 		Instructions: "このプルリクエストについて kibitz が集めた事実を返します。" +
@@ -33,6 +33,13 @@ func newServer(job *jobcontext.Context) *mcp.Server {
 			commentsTool(job),
 		},
 	}
+	if len(job.References) > 0 {
+		// Only where there is something to search. A tool whose definition is
+		// sent on every call and which can only answer "there are none" is a
+		// bill with no invoice behind it.
+		server.Tools = append(server.Tools, searchDocsTool(job), getDocTool(job))
+	}
+	return server
 }
 
 func noArguments() map[string]any {

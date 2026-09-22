@@ -53,6 +53,9 @@ type ReviewJob struct {
 	// default branch and given to the agent as instructions. Nil means
 	// [DefaultGuidelineFiles]; an empty slice reads none.
 	GuidelineFiles []string
+	// ReferenceDocs are glob patterns for the repository's decision records.
+	// Nil means [DefaultReferenceDocs]; an empty slice indexes none.
+	ReferenceDocs []string
 	// MCP is the external tool servers this deployment offers. A repository
 	// enables the ones it wants by name; anything it names that is not here
 	// is reported rather than silently skipped.
@@ -253,6 +256,8 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		}
 	}()
 
+	references := j.referenceDocs(ctx, ws)
+
 	// Too large to review in one pass: a first pass decides what to read.
 	selection := j.triage(ctx, ws, ev, pr, changed, settings.Settings)
 
@@ -268,6 +273,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		Model:            settings.Model,
 		Guidelines:       settings.Guidelines,
 		Focus:            focusOf(ev, settings.Settings),
+		References:       references,
 		MCP:              settings.mcp,
 		HeadSHA:          ws.HeadSHA,
 		SinceSHA:         since,
@@ -646,6 +652,7 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		Diff:         diff,
 		Question:     ev.Comment.Body,
 		Thread:       thread,
+		References:   j.referenceDocs(ctx, ws),
 		SessionID:    j.session(ctx, ev),
 		Language:     settings.Language,
 		Model:        settings.Model,
