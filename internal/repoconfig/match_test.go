@@ -104,3 +104,46 @@ func TestPathFilterQuotesTheRest(t *testing.T) {
 		t.Error("a plus in the pattern was read as a repeat")
 	}
 }
+
+// "vendor" and "vendor/" are what everybody writes for a directory, and both
+// used to match nothing at all — silently, which is the worst way for an
+// exclusion to fail.
+func TestPathFilterExcludesDirectories(t *testing.T) {
+	filter, err := repoconfig.NewPathFilter([]string{"vendor/", "node_modules", "docs/generated/"})
+	if err != nil {
+		t.Fatalf("NewPathFilter: %v", err)
+	}
+
+	for _, path := range []string{
+		"vendor/github.com/x/y.go",
+		"vendor",
+		"node_modules/a/b.js",
+		"docs/generated/api.md",
+	} {
+		if !filter.Match(path) {
+			t.Errorf("%q was not excluded", path)
+		}
+	}
+	for _, path := range []string{
+		"cmd/vendor.go",
+		"vendored.go",
+		"docs/worker.md",
+		"my_node_modules/a.js",
+	} {
+		if filter.Match(path) {
+			t.Errorf("%q was excluded", path)
+		}
+	}
+}
+
+// The patterns a repository is shown are the ones it wrote, separator and all.
+func TestPathFilterKeepsThePatternsAsWritten(t *testing.T) {
+	filter, err := repoconfig.NewPathFilter([]string{"vendor/", " go.sum ", ""})
+	if err != nil {
+		t.Fatalf("NewPathFilter: %v", err)
+	}
+	got := filter.Patterns()
+	if len(got) != 2 || got[0] != "vendor/" || got[1] != "go.sum" {
+		t.Errorf("Patterns = %q", got)
+	}
+}
