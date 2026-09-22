@@ -117,7 +117,10 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - **受信 payload を信用せず API で PR を再取得**する経路 (署名がないため)
   **(完了 — ワーカーが元々全プラットフォームでやっている `client.PullRequest()`)**
 - `internal/forge/azuredevops` — threads API、`threadContext` によるインライン位置、
-  iterations/changes による差分取得、Entra ID / PAT 認証
+  Entra ID / PAT 認証 **(9 メソッド中 7 つ完了)**
+- **差分取得は未着手・方式未決。** Azure DevOps の REST API は**差分テキストを返さない**
+  (`GitChange` はファイル一覧のみで patch も行数も無い)。
+  blob を 2 つ取って自前で差分を作るか、ワーカーのチェックアウトから `git diff` で作るかの判断が要る
 
 **完了条件**: Azure DevOps の PR で Phase 3 と同じ受け入れ条件が通る。
 偽造 payload ではレビューが走らないことをテストで確認。
