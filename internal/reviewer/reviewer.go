@@ -5,6 +5,7 @@ package reviewer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/event"
@@ -152,6 +153,69 @@ type Reference struct {
 	Title string
 }
 
+// ToolMatches reports whether a tool the engine named is the one kibitz
+// registered as want.
+//
+// The comparison is on the trailing name rather than the whole of it, because
+// an engine namespaces a tool server's tools however it likes — opencode keys
+// them "<server>_<tool>" — and kibitz has no business knowing the scheme.
+// This is the reading half of the decision the prompt makes by naming these
+// tools unqualified (see [SearchDocsTool]): state the name, let the engine
+// address it.
+//
+// A separator is required before the suffix, so "forget_doc" is not a
+// [GetDocTool]. Where it is still wrong it errs towards matching, because an
+// undercount reads as "nobody opens these documents" and that is the reading
+// somebody acts on.
+func ToolMatches(reported, want string) bool {
+	if len(reported) < len(want) {
+		return false
+	}
+	if !strings.EqualFold(reported[len(reported)-len(want):], want) {
+		return false
+	}
+	if len(reported) == len(want) {
+		return true
+	}
+	switch reported[len(reported)-len(want)-1] {
+	case '_', '.', '/', '-', ':':
+		return true
+	}
+	return false
+}
+
+// ToolUse is what the agent did with the tools it was given.
+//
+// It answers what the token counts cannot: whether the material kibitz went
+// to the trouble of assembling was read at all. An index of decision records
+// that nothing ever opens is a line in every prompt and a tool definition in
+// every request, bought for nothing — and counting is the only way to find
+// that out.
+type ToolUse struct {
+	// Calls counts invocations by the name the engine reported, failures
+	// included, and Failed counts the ones that came back an error. The names
+	// are the engine's own: see [ToolMatches].
+	Calls  map[string]int
+	Failed map[string]int
+	// Documents are the reference documents the agent opened in full, in the
+	// order it first opened them.
+	Documents []string
+	// Searches counts searches across those documents. It is kept apart from
+	// Documents because a search answers from excerpts: a run that searched
+	// three times and opened nothing still consulted them.
+	Searches int
+}
+
+// Total counts every tool invocation, which is the signal worth having when a
+// review comes back empty.
+func (t ToolUse) Total() int {
+	n := 0
+	for _, c := range t.Calls {
+		n += c
+	}
+	return n
+}
+
 // Usage reports what a run cost.
 //
 // The token counts are kept apart rather than summed because providers bill
@@ -211,6 +275,9 @@ type Result struct {
 	// continue it.
 	SessionID string
 	Usage     Usage
+	// Tools is what the agent did with its tools, which is how the reference
+	// material earns the space it takes in the prompt.
+	Tools ToolUse
 	// Dropped counts findings removed while validating the output, which is
 	// worth knowing when a review looks thinner than expected.
 	Dropped int

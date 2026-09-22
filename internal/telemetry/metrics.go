@@ -25,6 +25,8 @@ type Metrics struct {
 	JobDuration     *prometheus.HistogramVec
 	JobsInFlight    prometheus.Gauge
 	AgentTokens     *prometheus.CounterVec
+	AgentToolCalls  *prometheus.CounterVec
+	ReferenceDocs   *prometheus.CounterVec
 	CommentsPosted  *prometheus.CounterVec
 	FindingsDropped *prometheus.CounterVec
 }
@@ -71,6 +73,14 @@ func NewMetrics() *Metrics {
 			Name: "kibitz_agent_tokens_total",
 			Help: "Tokens consumed by the agent, which is what the bill is made of.",
 		}, []string{"model", "direction"}),
+		AgentToolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_agent_tool_calls_total",
+			Help: "Tool invocations by the agent, by the name the engine reported and whether the call succeeded.",
+		}, []string{"tool", "outcome"}),
+		ReferenceDocs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_reference_docs_consulted_total",
+			Help: "Times the agent went to the repository's decision records: searched across them, or read one in full. Zero over a repository that has them means the index in every prompt is buying nothing.",
+		}, []string{"action"}),
 		CommentsPosted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kibitz_comments_posted_total",
 			Help: "Findings posted, by severity.",
@@ -84,7 +94,8 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(
 		m.WebhooksReceived, m.EventsPublished, m.PublishFailures,
 		m.JobsTotal, m.JobDuration, m.JobsInFlight,
-		m.AgentTokens, m.CommentsPosted, m.FindingsDropped,
+		m.AgentTokens, m.AgentToolCalls, m.ReferenceDocs,
+		m.CommentsPosted, m.FindingsDropped,
 	)
 	return m
 }

@@ -385,6 +385,35 @@ curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_
 ワーカーの `/metrics` は内部からのみ到達できる。Managed Prometheus に
 取り込む場合は、Cloud Run のサイドカーとして OTel collector を追加する。
 
+#### 設計文書の索引が効いているかを見る
+
+`docs/adr/` を持つリポジトリでは、索引が**毎回のプロンプトの行**と
+**毎回のリクエストのツール定義 2 つ**を消費している
+([ADR-0017](adr/0017-index-decision-records-serve-bodies-as-tools.md))。
+それが買えているものは、この 2 つのカウンタに出る。
+
+```bash
+curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_reference_docs_consulted_total
+# kibitz_reference_docs_consulted_total{action="search"} 41
+# kibitz_reference_docs_consulted_total{action="read"} 12
+```
+
+| `action` | 意味 |
+| --- | --- |
+| `search` | `search_docs` で横断検索した回数。抜粋で答えが付いた場合はここだけが増える |
+| `read` | `get_doc` で全文を読んだ**文書の数** (1 回のレビューで同じ文書は 1 つ) |
+
+**ADR を持つリポジトリをレビューしていて、どちらもずっと 0 なら索引は何も買っていない。**
+パターンを絞る (`KIBITZ_REFERENCE_DOCS`) か、`off` にするかの判断材料になる。
+
+ツールの呼び出し全体は `kibitz_agent_tool_calls_total{tool,outcome}` に出る。
+`tool` は**エンジンが報告した名前**で、opencode は MCP サーバーのツールに
+サーバー名を前置するため、kibitz 自身のツールは `kibitz_get_doc` のように見える。
+
+1 件のレビューの内訳はログのほうが速い。`review produced findings` の行に
+`reference_docs` (索引に載せた数) と `docs_read` (実際に読んだパス) が並ぶので、
+**「18 件出して 0 件読まれた」がクエリを 2 つ繋がなくても読める**。
+
 ### 配送のログ
 
 「PR を作ったのにレビューが来ない」を最初に切り分ける場所。サーバーは配送 1 件に

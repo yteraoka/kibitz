@@ -231,6 +231,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	transcript := parseEvents(stdout, r.logger)
 	result.Usage = transcript.usage
 	result.Usage.Duration = time.Since(start)
+	result.Tools = transcript.tools
 	if transcript.sessionID != "" {
 		result.SessionID = transcript.sessionID
 	}
