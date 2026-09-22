@@ -55,6 +55,7 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | ドキュメント | 内容 |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | 全体アーキテクチャ、コンポーネント、Go のインターフェース定義、ディレクトリ構成 |
+| [docs/review-flow.md](docs/review-flow.md) | Webhook から投稿までの処理の流れ (シーケンス図)、スキップの判断順序 |
 | [docs/event-schema.md](docs/event-schema.md) | 3 プラットフォームの Webhook 差異と正規化イベントスキーマ |
 | [docs/queue.md](docs/queue.md) | Pub/Sub / SQS 抽象化、順序制御、冪等性、リトライ、DLQ、Claim Check |
 | [docs/worker.md](docs/worker.md) | OpenCode のヘッドレス実行、MCP 統合、プロンプト設計、構造化出力 |
