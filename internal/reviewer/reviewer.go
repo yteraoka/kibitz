@@ -102,6 +102,10 @@ type Request struct {
 	Guidelines string
 	// HeadSHA is the commit that was actually checked out.
 	HeadSHA string
+	// SinceSHA is the commit kibitz reviewed last time, when [Request.Diff]
+	// holds only what has changed since. Empty means Diff is the whole pull
+	// request.
+	SinceSHA string
 	// Feedback is what went wrong on the previous attempt. A schema slip is
 	// usually fixed by telling the agent about it, so one retry carries the
 	// validation error back into the prompt.

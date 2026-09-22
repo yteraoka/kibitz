@@ -180,6 +180,11 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		return nil
 	}
 
+	// A second review of the same pull request looks at what was pushed since
+	// the first one. The whole diff is still what findings are checked
+	// against, so a comment can never land outside it.
+	focus, since := j.incremental(ctx, client, ref, ev, diff, pr.Source.SHA)
+
 	// Existing comments are context, not a hard requirement: failing the whole
 	// review because they could not be listed would be worse than repeating a
 	// point someone already made.
@@ -208,12 +213,13 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		WorkspaceDir:     ws.Dir,
 		Event:            ev,
 		PullRequest:      pr,
-		Diff:             diff,
+		Diff:             focus,
 		ExistingComments: kibitzExcluded(comments, ev),
 		Language:         j.Language,
 		Model:            j.Model,
 		Guidelines:       j.Guidelines,
 		HeadSHA:          ws.HeadSHA,
+		SinceSHA:         since,
 	}
 
 	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
@@ -241,6 +247,8 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "review produced findings",
 		slog.String("ref", ref.String()),
 		slog.String("head", ws.HeadSHA),
+		slog.String("since", since),
+		slog.Int("files_reviewed", len(focus.Files)),
 		slog.Int("findings", len(sanitized.Findings)),
 		slog.Int("dropped", sanitized.Dropped()),
 		slog.Int("out_of_diff", sanitized.OutOfDiff),
@@ -250,11 +258,69 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	)
 
 	j.record(ev, result, sanitized)
+	j.rememberReviewed(ctx, ev, ws.HeadSHA)
 
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
 		trace.WithAttributes(telemetry.AttrFindings.Int(len(sanitized.Findings))))
 	defer postSpan.End()
-	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA)
+	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since)
+}
+
+// incremental narrows the diff to what has been pushed since the last review,
+// and reports which commit that was.
+//
+// It returns the whole diff whenever it cannot do better: nothing reviewed
+// before, an explicit --full, a comparison the forge could not answer (the
+// usual outcome of a force push), or a comparison that came back empty. A
+// review of too much is a cost; a review of too little is a missed bug.
+func (j *ReviewJob) incremental(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, full *forge.Diff, headSHA string) (*forge.Diff, string) {
+	if headSHA == "" || hasFlag(ev, "--full") {
+		return full, ""
+	}
+
+	since := j.lastReviewed(ctx, ev)
+	if since == "" || since == headSHA {
+		return full, ""
+	}
+
+	partial, err := client.Compare(ctx, ref, since, headSHA)
+	if err != nil {
+		level := slog.LevelWarn
+		if errors.Is(err, forge.ErrNoCompare) {
+			// A rebase or a force push; reviewing everything is the answer.
+			level = slog.LevelInfo
+		}
+		j.Logger.LogAttrs(ctx, level, "could not compare with the last review; reviewing the whole diff",
+			slog.String("ref", ref.String()),
+			slog.String("since", since),
+			slog.String("error", err.Error()),
+		)
+		return full, ""
+	}
+	if len(partial.Files) == 0 {
+		return full, ""
+	}
+
+	j.Logger.LogAttrs(ctx, slog.LevelInfo, "reviewing only what is new",
+		slog.String("ref", ref.String()),
+		slog.String("since", since),
+		slog.Int("files", len(partial.Files)),
+		slog.Int("files_in_full_diff", len(full.Files)),
+	)
+	return partial, since
+}
+
+// hasFlag reports whether a command carried an argument.
+func hasFlag(ev *event.ReviewEvent, flag string) bool {
+	if ev.Command == nil {
+		return false
+	}
+	for _, arg := range ev.Command.Args {
+		if strings.EqualFold(arg, flag) {
+			return true
+		}
+	}
+	return false
 }
 
 // record reports what the run produced, which is how cost and noise are
@@ -358,7 +424,7 @@ func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, 
 
 // post writes the review back to the pull request: one summary comment that is
 // replaced on every run, plus the findings as one review.
-func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA string) error {
+func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string) error {
 	allowed, err := j.allowPost(ctx, ev)
 	if err != nil {
 		return err
@@ -372,7 +438,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		return nil
 	}
 
-	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA)); err != nil {
+	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA)); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
 	if len(sanitized.Findings) == 0 {
@@ -403,7 +469,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 			slog.String("ref", ref.String()),
 			slog.String("error", err.Error()),
 		)
-		body := j.summaryBody(result, sanitized, headSHA) + "\n\n" + renderFindingsAsText(sanitized.Findings)
+		body := j.summaryBody(result, sanitized, headSHA, sinceSHA) + "\n\n" + renderFindingsAsText(sanitized.Findings)
 		if fallbackErr := client.UpsertSummary(ctx, ref, SummaryMarker, body); fallbackErr != nil {
 			return fmt.Errorf("posting the fallback summary to %s: %w", ref, fallbackErr)
 		}
@@ -579,7 +645,7 @@ func kibitzExcluded(comments []forge.Comment, ev *event.ReviewEvent) []forge.Com
 	return out
 }
 
-func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA string) string {
+func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string) string {
 	var b strings.Builder
 
 	b.WriteString(strings.TrimSpace(result.Summary))
@@ -603,7 +669,10 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 	}
 
 	b.WriteString("\n---\n")
-	if headSHA != "" {
+	switch {
+	case headSHA != "" && sinceSHA != "":
+		fmt.Fprintf(&b, "レビュー対象: `%s`..`%s` (前回レビューからの差分)", shortSHA(sinceSHA), shortSHA(headSHA))
+	case headSHA != "":
 		fmt.Fprintf(&b, "レビュー対象: `%s`", shortSHA(headSHA))
 	}
 	if result.Usage.Duration > 0 {

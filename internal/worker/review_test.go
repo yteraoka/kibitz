@@ -26,9 +26,12 @@ type fakeForge struct {
 	prErr     error
 	reviewErr error
 
-	summaries []string
-	reviews   []forge.Review
-	replies   []string
+	summaries  []string
+	reviews    []forge.Review
+	replies    []string
+	compared   []string
+	partial    *forge.Diff
+	compareErr error
 }
 
 func (f *fakeForge) Platform() event.Platform { return event.PlatformGitHub }
@@ -41,6 +44,17 @@ func (f *fakeForge) PullRequest(context.Context, forge.PRRef) (*event.PullReques
 }
 
 func (f *fakeForge) Diff(context.Context, forge.PRRef) (*forge.Diff, error) { return f.diff, nil }
+
+func (f *fakeForge) Compare(_ context.Context, _ forge.PRRef, base, head string) (*forge.Diff, error) {
+	f.compared = append(f.compared, base+"..."+head)
+	if f.compareErr != nil {
+		return nil, f.compareErr
+	}
+	if f.partial != nil {
+		return f.partial, nil
+	}
+	return &forge.Diff{}, nil
+}
 
 func (f *fakeForge) Comments(context.Context, forge.PRRef) ([]forge.Comment, error) {
 	return f.comments, nil
@@ -774,5 +788,140 @@ func TestCloseForgetsThePullRequest(t *testing.T) {
 
 	if _, err := s.Get(context.Background(), store.IgnoreKey(closed)); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("the ignore flag survived the pull request being merged (err = %v)", err)
+	}
+}
+
+// A second review of the same pull request looks at what was pushed since the
+// first one, not at the whole thing again.
+func TestReviewIsIncrementalAfterTheFirstOne(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.partial = &forge.Diff{Files: []forge.File{
+		{Path: "queue.go", Status: forge.FileModified, Patch: "@@ -1,2 +1,3 @@\n context\n+new"},
+	}}
+	s := memory.New()
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Summary: "1 回目", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "1 回目"}},
+		{Summary: "2 回目", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "2 回目"}},
+	}}
+
+	job := newJob(t, f, e)
+	job.Store = s
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("first review: %v", err)
+	}
+	// The first review has nothing to compare against.
+	if len(f.compared) != 0 {
+		t.Fatalf("compared = %v, want none on the first review", f.compared)
+	}
+	if e.requests[0].SinceSHA != "" {
+		t.Errorf("since = %q, want empty on the first review", e.requests[0].SinceSHA)
+	}
+
+	// A push moves the head, so the second review compares.
+	f.pr.Source.SHA = "newhead"
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPRUpdated, origin))); err != nil {
+		t.Fatalf("second review: %v", err)
+	}
+	if len(f.compared) != 1 {
+		t.Fatalf("compared = %v, want one comparison", f.compared)
+	}
+	if got := e.requests[1].SinceSHA; got == "" {
+		t.Error("the second review did not say what it was measured from")
+	}
+	if got := e.requests[1].Diff; got == nil || len(got.Files) != 1 || got.Files[0].Patch != f.partial.Files[0].Patch {
+		t.Errorf("diff = %+v, want the incremental one", got)
+	}
+}
+
+// Reviewing too much is a cost; reviewing too little is a missed bug. Every
+// way of failing to narrow the diff falls back to the whole thing.
+func TestReviewFallsBackToTheWholeDiff(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*fakeForge, *event.ReviewEvent)
+	}{
+		{
+			name: "the commits cannot be compared",
+			prepare: func(f *fakeForge, _ *event.ReviewEvent) {
+				f.compareErr = forge.ErrNoCompare
+			},
+		},
+		{
+			name:    "the comparison is empty",
+			prepare: func(f *fakeForge, _ *event.ReviewEvent) { f.partial = &forge.Diff{} },
+		},
+		{
+			name: "an explicit --full",
+			prepare: func(f *fakeForge, ev *event.ReviewEvent) {
+				f.partial = &forge.Diff{Files: []forge.File{{Path: "queue.go"}}}
+				ev.Kind = event.KindCommand
+				ev.Command = &event.Command{Name: policy.CommandReview, Args: []string{"--full"}}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origin, _, _ := originRepo(t)
+			f := defaultForge()
+			s := memory.New()
+			e := &fakeEngine{results: []*reviewer.Result{
+				{Summary: "1", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "1"}},
+				{Summary: "2", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "2"}},
+			}}
+
+			job := newJob(t, f, e)
+			job.Store = s
+
+			if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+				t.Fatalf("first review: %v", err)
+			}
+
+			second := pullRequestEvent(event.KindPRUpdated, origin)
+			f.pr.Source.SHA = "newhead"
+			tc.prepare(f, second)
+
+			if err := job.Handle(context.Background(), queued(second)); err != nil {
+				t.Fatalf("second review: %v", err)
+			}
+			if got := e.requests[1].SinceSHA; got != "" {
+				t.Errorf("since = %q, want the whole diff to have been reviewed", got)
+			}
+			if got := e.requests[1].Diff; got == nil || len(got.Files) != len(f.diff.Files) {
+				t.Errorf("diff = %+v, want the whole one", got)
+			}
+		})
+	}
+}
+
+// The summary says what was actually looked at.
+func TestSummarySaysWhatWasReviewed(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.partial = &forge.Diff{Files: []forge.File{{Path: "queue.go", Patch: "@@ -1 +1,2 @@\n a\n+b"}}}
+	s := memory.New()
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Summary: "1", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "1"}},
+		{Summary: "2", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "2"}},
+	}}
+
+	job := newJob(t, f, e)
+	job.Store = s
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("first review: %v", err)
+	}
+	f.pr.Source.SHA = "newhead0000000"
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPRUpdated, origin))); err != nil {
+		t.Fatalf("second review: %v", err)
+	}
+
+	if len(f.summaries) != 2 {
+		t.Fatalf("%d summaries, want 2", len(f.summaries))
+	}
+	if !strings.Contains(f.summaries[1], "前回レビューからの差分") {
+		t.Errorf("the summary does not say it was incremental:\n%s", f.summaries[1])
 	}
 }

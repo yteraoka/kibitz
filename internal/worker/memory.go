@@ -65,6 +65,43 @@ func (j *ReviewJob) rememberSession(ctx context.Context, ev *event.ReviewEvent, 
 	}
 }
 
+// lastReviewed returns the commit kibitz last reviewed on this pull request,
+// or "" when it has not reviewed one yet.
+func (j *ReviewJob) lastReviewed(ctx context.Context, ev *event.ReviewEvent) string {
+	if j.Store == nil {
+		return ""
+	}
+
+	value, err := j.Store.Get(ctx, store.ReviewedKey(ev))
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			j.Logger.LogAttrs(ctx, slog.LevelWarn, "could not read the last reviewed commit",
+				slog.String("error", err.Error()),
+			)
+		}
+		return ""
+	}
+	return string(value)
+}
+
+// rememberReviewed records what was reviewed, which is where the next review
+// starts from.
+func (j *ReviewJob) rememberReviewed(ctx context.Context, ev *event.ReviewEvent, headSHA string) {
+	if j.Store == nil || headSHA == "" {
+		return
+	}
+
+	ttl := j.SessionTTL
+	if ttl <= 0 {
+		ttl = defaultSessionTTL
+	}
+	if err := j.Store.Put(ctx, store.ReviewedKey(ev), []byte(headSHA), ttl); err != nil {
+		j.Logger.LogAttrs(ctx, slog.LevelWarn, "could not record the reviewed commit",
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
 // forget drops everything kibitz remembers about a pull request. It runs when
 // the pull request is closed or merged: the conversation is over, and an
 // "ignore" that outlives it would silently apply to nothing.
@@ -73,7 +110,7 @@ func (j *ReviewJob) forget(ctx context.Context, ev *event.ReviewEvent) error {
 		return nil
 	}
 
-	for _, key := range []string{store.SessionKey(ev), store.IgnoreKey(ev)} {
+	for _, key := range []string{store.SessionKey(ev), store.IgnoreKey(ev), store.ReviewedKey(ev)} {
 		if err := j.Store.Delete(ctx, key); err != nil {
 			return err
 		}

@@ -80,6 +80,7 @@ func buildReviewPrompt(b *strings.Builder, req Request) {
 
 	writePullRequest(b, req)
 	writeGuidelines(b, req)
+	writeScope(b, req)
 	writeExistingComments(b, req)
 	writeDiff(b, req)
 }
@@ -184,6 +185,26 @@ func writeExistingComments(b *strings.Builder, req Request) {
 		fmt.Fprintf(b, "- (%s): %s\n", c.Author.Login, oneLine(c.Body))
 	}
 	b.WriteString(">>>\n\n")
+}
+
+// writeScope explains what the diff in the prompt actually covers, so the
+// agent does not read an incremental diff as if it were the whole change.
+func writeScope(b *strings.Builder, req Request) {
+	if req.SinceSHA == "" {
+		return
+	}
+
+	b.WriteString("## レビューの範囲\n\n")
+	fmt.Fprintf(b, "この PR は以前 `%s` の時点でレビュー済みです。以下の差分は、**そこから今回 (`%s`) までに追加された変更だけ**です。\n",
+		shortSHA(req.SinceSHA), shortSHA(req.HeadSHA))
+	b.WriteString("既にレビュー済みの部分を読み直す必要はありません。ただし、新しい変更が既存のコードと矛盾していないかは見てください。\n\n")
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 func writeDiff(b *strings.Builder, req Request) {

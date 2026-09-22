@@ -82,6 +82,7 @@ const (
 	prefixLock     = "lock"
 	prefixSession  = "session"
 	prefixIgnore   = "ignore"
+	prefixReviewed = "reviewed"
 	prefixPosts    = "posts"
 )
 
@@ -108,6 +109,12 @@ func LockKey(ev *event.ReviewEvent) string {
 // question continues the conversation instead of starting over.
 func SessionKey(ev *event.ReviewEvent) string {
 	return fmt.Sprintf("%s:%s", prefixSession, ev.Key())
+}
+
+// ReviewedKey records the commit kibitz last reviewed on a pull request, so
+// the next review can look only at what was pushed since.
+func ReviewedKey(ev *event.ReviewEvent) string {
+	return fmt.Sprintf("%s:%s", prefixReviewed, ev.Key())
 }
 
 // IgnoreKey records that kibitz was asked to stay out of a pull request.

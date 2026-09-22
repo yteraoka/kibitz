@@ -114,6 +114,11 @@ type Comment struct {
 	Line     int
 }
 
+// ErrNoCompare reports that two commits could not be compared, usually
+// because one of them no longer exists. It is not a failure: reviewing the
+// whole diff instead is correct, only more expensive.
+var ErrNoCompare = errors.New("forge: the commits could not be compared")
+
 // InlineComment is one finding to post against a line of the diff.
 type InlineComment struct {
 	Path string
@@ -156,6 +161,12 @@ type Client interface {
 
 	// Diff returns the changed files.
 	Diff(ctx context.Context, ref PRRef) (*Diff, error)
+
+	// Compare returns what changed between two commits, which is how a second
+	// review of the same pull request looks only at what is new. It returns
+	// [ErrNoCompare] when the platform cannot answer — after a force push the
+	// older commit may be gone — and the caller falls back to the whole diff.
+	Compare(ctx context.Context, ref PRRef, base, head string) (*Diff, error)
 
 	// Comments returns the existing comments, which is how kibitz avoids
 	// repeating a finding someone has already made.
