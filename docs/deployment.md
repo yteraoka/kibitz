@@ -343,16 +343,20 @@ msg="job finished"                duration=1m58s
 | 確認項目 | 確認方法 | 失敗したときの症状 |
 | --- | --- | --- |
 | モデル ID とプロバイダ | 6-4 が通る | `no provider configured` や `model not found` で失敗 |
-| OpenCode の JSON イベント形式 | `input_tokens` が 0 でない | 動くがトークン数が 0 のまま |
+| OpenCode の JSON イベント形式 | `input_tokens` が 0 でない | 動くがトークン数が 0 のまま (opencode 1.18.31 で確認済み) |
 | `--file` でのプロンプト添付 | 6-4 が通る | 指摘が的外れ、または空 |
 | `--agent` の解決 | 6-4 が通る | `unknown agent` で失敗 |
 | GitHub App のトークン発行 | 6-2 と 6-4 が通る | `401` / `404` が worker ログに出る |
 | `refs/pull/N/head` の fetch | 6-4 が通る | `git fetch` の失敗がログに出る |
 | Firestore 実装 | 同じ PR に 2 回 push しても二重投稿されない | 同じ指摘が 2 回付く |
 
-`input_tokens` が 0 のままの場合は [worker.md](worker.md) のイベント解析が
-実際の形式と合っていない。`opencode run --format json` の出力を 1 回手元で取って、
+`input_tokens` が 0 のままの場合は [worker.md](worker.md#stdout-の-json-イベント) の
+イベント解析が実際の形式と合っていない。opencode を上げたときに起きうる。
+`opencode run --format json` の出力を 1 回手元で取って、
 `internal/reviewer/opencode/events.go` の拾うキーを合わせる。
+
+トークン数は `step_finish` イベントの `part.tokens` からしか取れない。
+実際にこれを取り違えていて、v0.3.4 までトークン数が常に 0 だった。
 
 ### 6-6. 冪等性の確認
 

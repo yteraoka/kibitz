@@ -59,10 +59,7 @@ func parseEvents(stdout []byte, logger *slog.Logger) transcript {
 		if id := stringField(ev, "sessionID", "session_id", "sessionId"); id != "" {
 			t.sessionID = id
 		}
-		if in, out := usageFrom(ev); in > 0 || out > 0 {
-			t.usage.InputTokens += in
-			t.usage.OutputTokens += out
-		}
+		t.usage = t.usage.Add(usageFrom(ev))
 		if kind := stringField(ev, "type"); strings.Contains(kind, "tool") {
 			t.toolCalls++
 		}
@@ -88,21 +85,45 @@ func stringField(m map[string]any, keys ...string) string {
 	return ""
 }
 
-// usageFrom pulls token counts out of whichever shape the event uses.
-func usageFrom(ev map[string]any) (in, out int) {
-	usage, ok := ev["usage"].(map[string]any)
-	if !ok {
-		if nested, ok := ev["message"].(map[string]any); ok {
-			usage, ok = nested["usage"].(map[string]any)
-			if !ok {
-				return 0, 0
-			}
-		} else {
-			return 0, 0
-		}
+// usageFrom pulls token counts out of a step-finish event.
+//
+// `opencode run --format json` prints one object per line, each of the shape
+// {"type":…,"timestamp":…,"sessionID":…,"part":{…}}, and of those only the
+// step-finish part carries usage:
+//
+//	{"type":"step_finish","sessionID":"ses_…","part":{
+//	  "type":"step-finish","reason":"tool-calls","cost":0.0123,
+//	  "tokens":{"input":8123,"output":214,"reasoning":0,
+//	            "cache":{"read":41000,"write":0}}}}
+//
+// The counts are per step, and a run that calls tools finishes several steps,
+// so they are summed. "input" is what the model read, excluding whatever the
+// cache served; "output" excludes reasoning. Both are kept as the agent
+// reports them — see [reviewer.Usage] for why they are not added up here.
+//
+// The part type is checked so that a version which starts reporting tokens
+// somewhere else as well does not get counted twice; a version that renames
+// them degrades to no telemetry rather than a failed review.
+func usageFrom(ev map[string]any) reviewer.Usage {
+	part, ok := ev["part"].(map[string]any)
+	if !ok || stringField(part, "type") != "step-finish" {
+		return reviewer.Usage{}
 	}
-	return intField(usage, "input", "inputTokens", "input_tokens", "prompt_tokens"),
-		intField(usage, "output", "outputTokens", "output_tokens", "completion_tokens")
+	tokens, ok := part["tokens"].(map[string]any)
+	if !ok {
+		return reviewer.Usage{}
+	}
+
+	usage := reviewer.Usage{
+		InputTokens:     intField(tokens, "input"),
+		OutputTokens:    intField(tokens, "output"),
+		ReasoningTokens: intField(tokens, "reasoning"),
+	}
+	if cache, ok := tokens["cache"].(map[string]any); ok {
+		usage.CacheReadTokens = intField(cache, "read")
+		usage.CacheWriteTokens = intField(cache, "write")
+	}
+	return usage
 }
 
 func intField(m map[string]any, keys ...string) int {
@@ -120,6 +141,11 @@ func intField(m map[string]any, keys ...string) int {
 // textFrom extracts assistant text from the shapes the stream uses for it.
 func textFrom(ev map[string]any) string {
 	if part, ok := ev["part"].(map[string]any); ok {
+		// Reasoning parts carry text too, and it is not the answer: including
+		// it would put the model's thinking in the review comment.
+		if kind := stringField(part, "type"); kind != "" && kind != "text" {
+			return ""
+		}
 		if s := stringField(part, "text"); s != "" {
 			return s
 		}

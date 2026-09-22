@@ -50,6 +50,7 @@ pi でも実装できる粒度に保つ。
       添付ファイル名として食われ、"File not found: <指示>" になる)
     - タイムアウト付き context、超過時は SIGTERM → SIGKILL
     - stdout(JSON イベント) は逐次パースしてログ/メトリクスへ
+      (形式は下記「stdout の JSON イベント」)
 
 [5] 結果の取り出し
     エージェントに .kibitz/out/review.json を書かせ、ワーカーはそれを読む
@@ -64,6 +65,30 @@ pi でも実装できる粒度に保つ。
 [7] 後片付け
     ワークスペース削除、セッション ID を状態ストアへ保存、使用量を記録
 ```
+
+### stdout の JSON イベント
+
+`--format json` のとき、`opencode run` は 1 行 1 オブジェクトで次の形を出す
+(opencode 1.18.31 で確認)。
+
+```json
+{"type":"step_finish","timestamp":1758500000000,"sessionID":"ses_…","part":{
+  "id":"prt_…","type":"step-finish","reason":"tool-calls","cost":0.0123,
+  "tokens":{"input":8123,"output":214,"reasoning":0,
+            "cache":{"read":41000,"write":0}}}}
+```
+
+- `type` は `step_start` / `step_finish` / `tool_use` / `text` / `reasoning` / `error`。
+  `message.updated` のような内部イベントは JSON モードでは**出力されない**ので、
+  トークン数はメッセージ単位では取れない
+- **トークン数は `step_finish` の `part.tokens` にしか無い。** しかもステップごとの値で、
+  ツールを呼ぶレビューは複数ステップになるため**合算**する
+- `tokens.input` は**キャッシュから読んだ分を含まない**。`tokens.output` も
+  `reasoning` を含まない。単価が違うので kibitz 側も分けて持つ
+  (`reviewer.Usage`)
+- `part.cost` は opencode 自身のモデルカタログで計算した金額。カタログに無い
+  モデル (Vertex のものが多い) では 0 になるので、kibitz は使わず
+  `KIBITZ_MODEL_PRICES` で計算する
 
 ### ワークスペースの `.kibitz/`
 

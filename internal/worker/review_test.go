@@ -1097,6 +1097,48 @@ func TestSummaryReportsTokensAndCost(t *testing.T) {
 	}
 }
 
+// A re-review reads most of its prompt from the cache. Reporting the input as
+// one number makes the review look ten times more expensive than it was.
+func TestSummarySeparatesCachedTokens(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{{
+		Summary:   "見ました",
+		RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+		Usage: reviewer.Usage{
+			InputTokens:     2000,
+			CacheReadTokens: 48000,
+			OutputTokens:    900,
+			ReasoningTokens: 100,
+		},
+	}}}
+
+	prices, err := reviewer.ParsePrices([]string{"test/model=3/15/0.3"})
+	if err != nil {
+		t.Fatalf("ParsePrices: %v", err)
+	}
+
+	job := newJob(t, f, e)
+	job.Model = "test/model"
+	job.Prices = prices
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	summary := f.summaries[0]
+	if !strings.Contains(summary, "入力 50,000") || !strings.Contains(summary, "キャッシュ 48,000") {
+		t.Errorf("the summary does not separate the cached input:\n%s", summary)
+	}
+	if !strings.Contains(summary, "出力 1,000") || !strings.Contains(summary, "推論 100") {
+		t.Errorf("the summary does not report the reasoning tokens:\n%s", summary)
+	}
+	// 2000*3 + 48000*0.3 + 1000*15, per million.
+	if !strings.Contains(summary, "$0.035") {
+		t.Errorf("the summary does not price the cached input as cache:\n%s", summary)
+	}
+}
+
 // A price nobody configured is not a review that was free.
 func TestSummaryReportsTokensWithoutAPrice(t *testing.T) {
 	origin, _, _ := originRepo(t)

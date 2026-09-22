@@ -108,6 +108,49 @@ func TestParsePrices(t *testing.T) {
 	}
 }
 
+// Cached input is the bulk of what a re-review reads and a fraction of what
+// it costs, so it is priced as what it is.
+func TestParsePricesWithCacheRates(t *testing.T) {
+	prices, err := reviewer.ParsePrices([]string{
+		"anthropic/claude=3/15/0.3/3.75",
+		"vertex/gemini=1/10/0.25",
+		"plain/model=2/8",
+	})
+	if err != nil {
+		t.Fatalf("ParsePrices: %v", err)
+	}
+
+	usage := reviewer.Usage{
+		InputTokens:      1_000_000,
+		CacheReadTokens:  1_000_000,
+		CacheWriteTokens: 1_000_000,
+		OutputTokens:     1_000_000,
+		ReasoningTokens:  1_000_000,
+	}
+
+	// Reasoning is billed as output even though it is never shown.
+	cost, ok := prices.Cost("anthropic/claude", usage)
+	if !ok {
+		t.Fatal("the named model has no price")
+	}
+	if want := 3.0 + 0.3 + 3.75 + 15.0 + 15.0; cost != want {
+		t.Errorf("cost = %v, want %v", cost, want)
+	}
+
+	// An omitted cache write rate is the input rate, not free.
+	cost, _ = prices.Cost("vertex/gemini", usage)
+	if want := 1.0 + 0.25 + 1.0 + 10.0 + 10.0; cost != want {
+		t.Errorf("cost = %v, want %v", cost, want)
+	}
+
+	// Configuring no cache rates at all bills cached input as input, which is
+	// what a provider that does not discount it charges.
+	cost, _ = prices.Cost("plain/model", usage)
+	if want := 2.0 + 2.0 + 2.0 + 8.0 + 8.0; cost != want {
+		t.Errorf("cost = %v, want %v", cost, want)
+	}
+}
+
 // Saying nothing is different from saying zero: a price nobody configured is
 // not a review that was free.
 func TestPricesWithoutAnEntry(t *testing.T) {
@@ -125,7 +168,10 @@ func TestPricesWithoutAnEntry(t *testing.T) {
 }
 
 func TestParsePricesRejectsNonsense(t *testing.T) {
-	for _, entry := range []string{"no-equals", "a/b=1", "a/b=x/2", "a/b=1/y", "a/b=-1/2"} {
+	for _, entry := range []string{
+		"no-equals", "a/b=1", "a/b=x/2", "a/b=1/y", "a/b=-1/2",
+		"a/b=1/2/x", "a/b=1/2/3/-4", "a/b=1/2/3/4/5",
+	} {
 		if _, err := reviewer.ParsePrices([]string{entry}); err == nil {
 			t.Errorf("ParsePrices(%q) succeeded, want an error", entry)
 		}

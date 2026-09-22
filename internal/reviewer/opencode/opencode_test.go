@@ -118,9 +118,11 @@ cat > .kibitz/out/review.json <<'JSON'
   ]
 }
 JSON
-echo '{"type":"session.created","sessionID":"ses_123"}'
-echo '{"type":"message_update","usage":{"input":1200,"output":340}}'
-echo '{"type":"tool_execution_start","toolName":"read"}'
+echo '{"type":"step_start","timestamp":1,"sessionID":"ses_123","part":{"id":"prt_1","sessionID":"ses_123","messageID":"msg_1","type":"step-start"}}'
+echo '{"type":"tool_use","timestamp":2,"sessionID":"ses_123","part":{"id":"prt_2","type":"tool","tool":"read","state":{"status":"completed"}}}'
+echo '{"type":"step_finish","timestamp":3,"sessionID":"ses_123","part":{"id":"prt_3","type":"step-finish","reason":"tool-calls","cost":0.021,"tokens":{"input":1200,"output":340,"reasoning":20,"cache":{"read":9000,"write":500}}}}'
+echo '{"type":"step_finish","timestamp":4,"sessionID":"ses_123","part":{"id":"prt_4","type":"step-finish","reason":"stop","cost":0.004,"tokens":{"input":300,"output":60,"reasoning":0,"cache":{"read":1000,"write":0}}}}'
+echo '{"type":"text","timestamp":5,"sessionID":"ses_123","part":{"id":"prt_5","type":"text","text":"done"}}'
 `
 
 func TestRunReview(t *testing.T) {
@@ -148,8 +150,18 @@ func TestRunReview(t *testing.T) {
 	if result.SessionID != "ses_123" {
 		t.Errorf("SessionID = %q, want the one the agent reported", result.SessionID)
 	}
-	if result.Usage.InputTokens != 1200 || result.Usage.OutputTokens != 340 {
-		t.Errorf("usage = %+v", result.Usage)
+	// Every step is billed, so every step counts.
+	want := reviewer.Usage{
+		InputTokens:      1500,
+		CacheReadTokens:  10000,
+		CacheWriteTokens: 500,
+		OutputTokens:     400,
+		ReasoningTokens:  20,
+	}
+	got := result.Usage
+	got.Duration = 0
+	if got != want {
+		t.Errorf("usage = %+v, want %+v", got, want)
 	}
 	if result.Usage.Duration <= 0 {
 		t.Error("duration was not recorded")

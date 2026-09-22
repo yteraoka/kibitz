@@ -257,8 +257,8 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		return err
 	}
 	agentSpan.SetAttributes(
-		attribute.Int("kibitz.input_tokens", result.Usage.InputTokens),
-		attribute.Int("kibitz.output_tokens", result.Usage.OutputTokens),
+		attribute.Int("kibitz.input_tokens", result.Usage.Input()),
+		attribute.Int("kibitz.output_tokens", result.Usage.Output()),
 	)
 	agentSpan.End()
 
@@ -272,8 +272,9 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.Int("findings", len(sanitized.Findings)),
 		slog.Int("dropped", sanitized.Dropped()),
 		slog.Int("out_of_diff", sanitized.OutOfDiff),
-		slog.Int("input_tokens", result.Usage.InputTokens),
-		slog.Int("output_tokens", result.Usage.OutputTokens),
+		slog.Int("input_tokens", result.Usage.Input()),
+		slog.Int("cached_tokens", result.Usage.CacheReadTokens+result.Usage.CacheWriteTokens),
+		slog.Int("output_tokens", result.Usage.Output()),
 		slog.Duration("agent_duration", result.Usage.Duration),
 	)
 
@@ -365,8 +366,15 @@ func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanit
 		}
 	}
 	if model := j.Model; model != "" {
-		j.Metrics.AgentTokens.WithLabelValues(model, "input").Add(float64(result.Usage.InputTokens))
-		j.Metrics.AgentTokens.WithLabelValues(model, "output").Add(float64(result.Usage.OutputTokens))
+		for direction, n := range map[string]int{
+			"input":       result.Usage.InputTokens,
+			"cache_read":  result.Usage.CacheReadTokens,
+			"cache_write": result.Usage.CacheWriteTokens,
+			"output":      result.Usage.OutputTokens,
+			"reasoning":   result.Usage.ReasoningTokens,
+		} {
+			j.Metrics.AgentTokens.WithLabelValues(model, direction).Add(float64(n))
+		}
 	}
 }
 
@@ -611,8 +619,8 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "answered a question",
 		slog.String("ref", ref.String()),
 		slog.Int("thread_comments", len(thread)),
-		slog.Int("input_tokens", result.Usage.InputTokens),
-		slog.Int("output_tokens", result.Usage.OutputTokens),
+		slog.Int("input_tokens", result.Usage.Input()),
+		slog.Int("output_tokens", result.Usage.Output()),
 	)
 
 	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
@@ -730,10 +738,19 @@ func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage) {
 		return
 	}
 
-	fmt.Fprintf(b, "トークン: 入力 %s / 出力 %s", thousands(usage.InputTokens), thousands(usage.OutputTokens))
+	fmt.Fprintf(b, "トークン: 入力 %s", thousands(usage.Input()))
+	// Most of a re-review's input is usually cache, and at a tenth of the
+	// price: without this the input count reads as ten times the bill.
+	if cached := usage.CacheReadTokens + usage.CacheWriteTokens; cached > 0 {
+		fmt.Fprintf(b, " (うちキャッシュ %s)", thousands(cached))
+	}
+	fmt.Fprintf(b, " / 出力 %s", thousands(usage.Output()))
+	if usage.ReasoningTokens > 0 {
+		fmt.Fprintf(b, " (うち推論 %s)", thousands(usage.ReasoningTokens))
+	}
 	if cost, ok := j.Prices.Cost(j.Model, usage); ok {
-		// An estimate, and said to be one: cached input is discounted by some
-		// providers and not counted here, so this is a ceiling.
+		// An estimate, and said to be one: it is the configured rates applied
+		// to what the agent reported, not a bill.
 		fmt.Fprintf(b, " / 概算 %s", money(cost, j.currency()))
 	}
 	b.WriteString("\n")

@@ -116,10 +116,25 @@ type Request struct {
 }
 
 // Usage reports what a run cost.
+//
+// The token counts are kept apart rather than summed because providers bill
+// them apart: input served from a prompt cache is much cheaper than input the
+// model had to read, and reasoning tokens are billed as output that never
+// appears in the output. Folding them together would turn the cost estimate
+// into a number that is wrong in whichever direction the caching went.
 type Usage struct {
-	InputTokens  int
+	// InputTokens counts prompt tokens the model actually read — what the
+	// agent reports as input, which excludes anything the cache served.
+	InputTokens int
+	// CacheReadTokens counts prompt tokens served from the provider's cache,
+	// and CacheWriteTokens the ones written into it.
+	CacheReadTokens  int
+	CacheWriteTokens int
+	// OutputTokens counts the tokens of the visible reply.
 	OutputTokens int
-	Duration     time.Duration
+	// ReasoningTokens counts thinking tokens, which are billed but not shown.
+	ReasoningTokens int
+	Duration        time.Duration
 }
 
 // Add accumulates another run's usage, which is how a review that needed a
@@ -127,14 +142,25 @@ type Usage struct {
 // half anybody was watching.
 func (u Usage) Add(other Usage) Usage {
 	return Usage{
-		InputTokens:  u.InputTokens + other.InputTokens,
-		OutputTokens: u.OutputTokens + other.OutputTokens,
-		Duration:     u.Duration + other.Duration,
+		InputTokens:      u.InputTokens + other.InputTokens,
+		CacheReadTokens:  u.CacheReadTokens + other.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens + other.CacheWriteTokens,
+		OutputTokens:     u.OutputTokens + other.OutputTokens,
+		ReasoningTokens:  u.ReasoningTokens + other.ReasoningTokens,
+		Duration:         u.Duration + other.Duration,
 	}
 }
 
+// Input is every prompt token the run was billed for, cached or not.
+func (u Usage) Input() int {
+	return u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens
+}
+
+// Output is every token the model produced, shown or not.
+func (u Usage) Output() int { return u.OutputTokens + u.ReasoningTokens }
+
 // Tokens is the total of both directions.
-func (u Usage) Tokens() int { return u.InputTokens + u.OutputTokens }
+func (u Usage) Tokens() int { return u.Input() + u.Output() }
 
 // Result is what the engine produced.
 type Result struct {
