@@ -314,6 +314,10 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.Int("cached_tokens", result.Usage.CacheReadTokens+result.Usage.CacheWriteTokens),
 		slog.Int("output_tokens", result.Usage.Output()),
 		slog.Duration("agent_duration", result.Usage.Duration),
+		slog.Int("tool_calls", result.Tools.Total()),
+		slog.Int("reference_docs", len(references)),
+		slog.Int("docs_searched", result.Tools.Searches),
+		slog.Any("docs_read", result.Tools.Documents),
 	)
 
 	j.record(ev, result, sanitized, settings.Model)
@@ -413,6 +417,35 @@ func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanit
 		} {
 			j.Metrics.AgentTokens.WithLabelValues(model, direction).Add(float64(n))
 		}
+	}
+	j.recordTools(result.Tools)
+}
+
+// recordTools reports what the agent did with its tools.
+//
+// The reference document counters are the ones with a decision behind them:
+// the index costs a line of every prompt and two tool definitions of every
+// request, and a repository whose records are never opened is paying for
+// both. A zero here over a repository that has decision records is the
+// argument for narrowing the patterns, or for switching the index off.
+func (j *ReviewJob) recordTools(tools reviewer.ToolUse) {
+	if j.Metrics == nil {
+		return
+	}
+	for name, calls := range tools.Calls {
+		failed := tools.Failed[name]
+		if ok := calls - failed; ok > 0 {
+			j.Metrics.AgentToolCalls.WithLabelValues(name, "ok").Add(float64(ok))
+		}
+		if failed > 0 {
+			j.Metrics.AgentToolCalls.WithLabelValues(name, "error").Add(float64(failed))
+		}
+	}
+	if tools.Searches > 0 {
+		j.Metrics.ReferenceDocs.WithLabelValues("search").Add(float64(tools.Searches))
+	}
+	if n := len(tools.Documents); n > 0 {
+		j.Metrics.ReferenceDocs.WithLabelValues("read").Add(float64(n))
 	}
 }
 
@@ -670,7 +703,11 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		slog.Int("thread_comments", len(thread)),
 		slog.Int("input_tokens", result.Usage.Input()),
 		slog.Int("output_tokens", result.Usage.Output()),
+		slog.Int("tool_calls", result.Tools.Total()),
+		slog.Int("docs_searched", result.Tools.Searches),
+		slog.Any("docs_read", result.Tools.Documents),
 	)
+	j.recordTools(result.Tools)
 
 	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
 		return fmt.Errorf("replying on %s: %w", ref, err)

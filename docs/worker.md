@@ -105,6 +105,34 @@ pi でも実装できる粒度に保つ。
   モデル (Vertex のものが多い) では 0 になるので、kibitz は使わず
   `KIBITZ_MODEL_PRICES` で計算する
 
+#### `tool_use` — 何を使ったか
+
+ツールの呼び出しは、**終わってから** (`completed` または `error`) 1 回だけ出る。
+
+```json
+{"type":"tool_use","timestamp":1758500000644,"sessionID":"ses_…","part":{
+  "type":"tool","tool":"kibitz_get_doc","callID":"call_1",
+  "state":{"status":"completed",
+           "input":{"path":"docs/adr/0005-….md"},
+           "output":"…","metadata":{"truncated":false},
+           "time":{"start":…,"end":…}}}}
+```
+
+- **`part.tool` はエンジンが付けた名前。** opencode は MCP サーバーのツールに
+  **サーバー名と `_` を前置する**ので、kibitz 自身の `get_doc` は
+  `kibitz_get_doc` として届く (実機の 1.18.31 で確認。
+  取り込み済みの実出力が `internal/reviewer/opencode/testdata/` にある)
+- kibitz はこの名前を**そのまま記録し**、自分のツールかどうかは
+  `reviewer.ToolMatches` が**末尾一致**で判定する。
+  名前空間の付け方はエンジンの都合なので、完全修飾名を焼き込まない
+  (プロンプトが `search_docs` と修飾なしで書くのと同じ判断。
+  [ADR-0017](adr/0017-index-decision-records-serve-bodies-as-tools.md))
+- 同じ呼び出しが `running` で先に出ることがあるので、
+  **終わった状態だけを数える** (でないと二重になる)
+- `get_doc` の `input.path` から、**実際に読まれた設計文書**が分かる。
+  これが `docs_read` としてログに、`kibitz_reference_docs_consulted_total`
+  としてメトリクスに出る ([deployment.md](deployment.md#設計文書の索引が効いているかを見る))
+
 ### ワークスペースの `.kibitz/`
 
 `.kibitz/prompt.md` と `.kibitz/out/` は**ワーカーがジョブごとに作る作業ファイル**で、

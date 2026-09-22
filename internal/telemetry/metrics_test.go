@@ -30,6 +30,8 @@ func TestMetricsExposition(t *testing.T) {
 	m.CommentsPosted.WithLabelValues("github", "high").Inc()
 	m.FindingsDropped.WithLabelValues("out_of_diff").Add(2)
 	m.AgentTokens.WithLabelValues("claude-opus-5", "input").Add(1200)
+	m.AgentToolCalls.WithLabelValues("kibitz_get_doc", "ok").Add(3)
+	m.ReferenceDocs.WithLabelValues("read").Add(2)
 
 	body := scrape(t, m)
 	for _, want := range []string{
@@ -40,6 +42,8 @@ func TestMetricsExposition(t *testing.T) {
 		`kibitz_comments_posted_total{platform="github",severity="high"} 1`,
 		`kibitz_findings_dropped_total{reason="out_of_diff"} 2`,
 		`kibitz_agent_tokens_total{direction="input",model="claude-opus-5"} 1200`,
+		`kibitz_agent_tool_calls_total{outcome="ok",tool="kibitz_get_doc"} 3`,
+		`kibitz_reference_docs_consulted_total{action="read"} 2`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the exposition does not contain:\n%s", want)

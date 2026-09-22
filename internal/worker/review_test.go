@@ -1,9 +1,13 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/store"
 	"github.com/yteraoka/kibitz/internal/store/memory"
+	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
 )
@@ -1256,4 +1261,88 @@ func TestSummaryIncludesAFailedTriagePass(t *testing.T) {
 	if !strings.Contains(f.summaries[0], "入力 10,000") {
 		t.Errorf("a failed triage pass was left out of the bill:\n%s", f.summaries[0])
 	}
+}
+
+// A review that consulted the repository's decision records says so, in the
+// log line and in the counters. The index costs a line of every prompt and two
+// tool definitions of every request, and this is what shows whether it is
+// bought for nothing.
+func TestConsultedDocumentsAreRecorded(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+
+	result := reviewResult()
+	result.Tools = reviewer.ToolUse{
+		Calls:     map[string]int{"kibitz_get_doc": 2, "kibitz_search_docs": 1, "read": 4},
+		Failed:    map[string]int{"kibitz_get_doc": 1},
+		Documents: []string{"docs/adr/0005-pubsub-with-per-pr-ordering-key.md"},
+		Searches:  1,
+	}
+	e := &fakeEngine{results: []*reviewer.Result{result}}
+
+	var log bytes.Buffer
+	job := newJob(t, f, e)
+	job.Logger = slog.New(slog.NewJSONHandler(&log, nil))
+	job.Metrics = telemetry.NewMetrics()
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	for _, want := range []string{
+		`"tool_calls":7`,
+		`"docs_searched":1`,
+		`"docs_read":["docs/adr/0005-pubsub-with-per-pr-ordering-key.md"]`,
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the log does not report %s:\n%s", want, log.String())
+		}
+	}
+
+	body := scrapeMetrics(t, job.Metrics)
+	for _, want := range []string{
+		`kibitz_reference_docs_consulted_total{action="read"} 1`,
+		`kibitz_reference_docs_consulted_total{action="search"} 1`,
+		`kibitz_agent_tool_calls_total{outcome="error",tool="kibitz_get_doc"} 1`,
+		`kibitz_agent_tool_calls_total{outcome="ok",tool="kibitz_get_doc"} 1`,
+		`kibitz_agent_tool_calls_total{outcome="ok",tool="read"} 4`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the exposition does not contain:\n%s\ngot:\n%s", want, body)
+		}
+	}
+}
+
+// A repository with decision records that the agent never opened is the case
+// worth seeing: the log names how many were offered next to how many were
+// read, so "18 offered, 0 read" is legible without joining two queries.
+func TestAnUnusedIndexIsStillReported(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{reviewResult()}}
+
+	var log bytes.Buffer
+	job := newJob(t, f, e)
+	job.Logger = slog.New(slog.NewJSONHandler(&log, nil))
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	for _, want := range []string{`"reference_docs":0`, `"docs_searched":0`, `"tool_calls":0`} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the log does not report %s:\n%s", want, log.String())
+		}
+	}
+}
+
+// scrapeMetrics reads the exposition the way Prometheus would.
+func scrapeMetrics(t *testing.T, m *telemetry.Metrics) string {
+	t.Helper()
+
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("scraping metrics: status %d", rec.Code)
+	}
+	return rec.Body.String()
 }
