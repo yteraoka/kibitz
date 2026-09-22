@@ -43,6 +43,15 @@ type Config struct {
 	Review     *Review `yaml:"review"`
 	Answer     *Answer `yaml:"answer"`
 	Guidelines string  `yaml:"guidelines"`
+	MCP        *MCP    `yaml:"mcp"`
+}
+
+// MCP turns on the external tool servers a deployment has configured.
+type MCP struct {
+	// Allow names the servers to enable. A name the deployment does not
+	// offer is reported rather than applied: asking for a server nobody
+	// configured should not look the same as asking for none.
+	Allow []string `yaml:"allow"`
 }
 
 // Review holds the review settings.
@@ -122,9 +131,9 @@ var (
 			"focus", "language", "min_severity", "max_comments", "model",
 		},
 		"answer": {"enabled"},
+		"mcp":    {"allow"},
 	}
 	reserved = map[string]string{
-		"mcp":                  "Phase 7",
 		"budget":               "Phase 9",
 		"implement":            "Phase 8",
 		"review.allow_verdict": "未実装",

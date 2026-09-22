@@ -26,6 +26,9 @@ type resolved struct {
 	// that silently skipped half a pull request reads as a review that found
 	// nothing wrong with it.
 	ignored []string
+	// mcp are the external tool servers this run may use, already resolved
+	// against what the deployment offers.
+	mcp []string
 }
 
 // defaults are the settings this deployment was started with. They are what a
@@ -102,7 +105,35 @@ func (j *ReviewJob) settingsFor(ctx context.Context, client forge.Client, ref fo
 			slog.Any("notes", notes),
 		)
 	}
-	return resolved{Settings: settings, notes: notes}
+
+	enabled, refused := j.MCP.Resolve(settings.MCP)
+	if len(refused) > 0 {
+		// Named and not delivered. The repository asked for something it did
+		// not get, so it is told, in the log and on the pull request.
+		j.Logger.LogAttrs(ctx, slog.LevelWarn, "the repository asked for MCP servers this deployment does not offer",
+			slog.String("ref", ref.String()),
+			slog.Any("refused", refused),
+			slog.Any("offered", j.MCP.Names()),
+		)
+		notes = append(notes, fmt.Sprintf("`mcp.allow` の %s は、この kibitz では有効にできません",
+			strings.Join(backquoted(refused), "、")))
+	}
+	if len(enabled) > 0 {
+		j.Logger.LogAttrs(ctx, slog.LevelInfo, "MCP servers enabled for this review",
+			slog.String("ref", ref.String()),
+			slog.Any("servers", enabled),
+		)
+	}
+
+	return resolved{Settings: settings, notes: notes, mcp: enabled}
+}
+
+func backquoted(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, "`"+name+"`")
+	}
+	return out
 }
 
 // filterPaths drops the files a repository asked kibitz to leave alone.

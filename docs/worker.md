@@ -364,9 +364,38 @@ Go で実装し、ワーカーと同じイメージに同梱、ジョブごと�
 こうすることで、(a) エージェントに認証情報を露出しない、(b) すべての外部アクセスを
 ワーカー側でログ・制限できる、(c) 3 プラットフォームの差異をツール側で吸収できる。
 
-外部サービス (Jira, Sentry, Confluence, 社内ドキュメント検索など) は
-**リモート MCP または許可リストに載ったローカル MCP** として追加する。
-認証情報は Secret Manager から取得し、`mcp.<name>.environment` に注入する。
+> **`kibitz-mcp` 自体はまだ未実装** ([roadmap.md](roadmap.md) Phase 7)。
+> 現時点では、差分・PR 情報・既存コメントはプロンプトに入れて渡し、
+> リポジトリの中身はエージェントがワークスペースを直接読む。
+> どちらの経路でも Forge のトークンはエージェントに渡していない。
+
+### 外部サービスの MCP (実装済み)
+
+Jira、Sentry などは **運用側が `KIBITZ_MCP_SERVERS` で定義し、リポジトリが
+`.kibitz.yaml` の `mcp.allow` で名前を挙げたときだけ**有効になる
+([configuration.md](configuration.md#mcp-サーバー))。
+
+認証情報は `{env:NAME}` として書く。**展開は opencode 自身が行う**ので、
+kibitz が書くジョブごとの設定ファイルにはプレースホルダしか載らない。
+その変数は、そのジョブで有効になったサーバーが参照しているものだけが
+エージェントのプロセスに渡る。
+
+```jsonc
+// kibitz が生成する mcp ブロック (jira だけを有効にしたジョブ)
+"mcp": {
+  "jira": {
+    "type": "remote",
+    "url": "https://jira.example.com/mcp",
+    "headers": { "Authorization": "Bearer {env:JIRA_TOKEN}" },
+    "enabled": true
+  }
+}
+```
+
+**エージェントの環境はワーカーの環境の丸ごとコピーではない。** local な MCP
+サーバーは opencode が起動する別プロセスで opencode の環境を継承するため、
+Webhook シークレットや GitHub App の秘密鍵が渡らないよう固定リストから組み立てる
+([configuration.md](configuration.md#エージェントのプロセス環境))。
 
 ## 9. 実装モード (Phase 8、既定は無効)
 

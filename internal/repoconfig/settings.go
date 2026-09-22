@@ -27,6 +27,10 @@ type Settings struct {
 	Limits     reviewer.Limits
 	Model      string
 	Guidelines string
+	// MCP names the external tool servers this repository asked for. They are
+	// resolved against the deployment's catalog by the caller, which is where
+	// the definitions and the credentials live.
+	MCP []string
 }
 
 // Reviews reports whether an event of this kind should be reviewed.
@@ -62,6 +66,11 @@ func (c *Config) Apply(base Settings) (Settings, error) {
 	}
 	if c.Answer != nil && c.Answer.Enabled != nil {
 		out.AnswerEnabled = *c.Answer.Enabled
+	}
+	if c.MCP != nil {
+		// Replaced rather than added to: a repository that lists its servers
+		// has said which ones it wants, and an empty list turns them off.
+		out.MCP = trimAll(c.MCP.Allow)
 	}
 	if c.Review == nil {
 		return out, nil

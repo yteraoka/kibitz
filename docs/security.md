@@ -63,6 +63,12 @@ PR のタイトル・本文・差分・コメントはすべて**外部の第三
    - `opencode.json` / `.opencode/` / `AGENTS.md` は既定では**読み込まない**
    - `.kibitz.yaml` は許可されたキーのみをホワイトリストで取り込む
      (`mcp.allow` に指定できるのは、運用側のグローバル許可リストに載っているものだけ)
+   - **エージェントのプロセス環境は固定リストから組み立てる。** ワーカーの環境には
+     Webhook シークレット・GitHub App 秘密鍵・GitLab トークンが入っており、
+     local な MCP サーバー (kibitz が書いたわけではないバイナリ) は opencode の
+     環境をそのまま継承するため、丸ごと渡してはいけない。MCP の資格情報は
+     `{env:NAME}` で参照し、**有効になったサーバーが参照している変数だけ**を渡す
+     ([configuration.md](configuration.md#エージェントのプロセス環境))
    - リポジトリ設定は**常に**デフォルトブランチ側から読む (fork PR に限らない)。
      実装は `forge.Client.ReadFile` で、GitHub は ref を付けずに contents API を、
      GitLab は `ref=HEAD` を使う。どちらも「デフォルトブランチ」を意味する

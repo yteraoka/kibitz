@@ -11,6 +11,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/repoconfig"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 )
 
 func withConfig(f *fakeForge, yaml string) *fakeForge {
@@ -176,5 +177,55 @@ func forgeFile(path string) forge.File {
 		Path:   path,
 		Status: forge.FileModified,
 		Patch:  "@@ -1,2 +1,3 @@\n context\n+added\n+more",
+	}
+}
+
+// A repository turns on the servers it wants by name, and gets only what the
+// deployment offers.
+func TestMCPServersFromTheRepository(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := withConfig(defaultForge(), "mcp:\n  allow: [jira, confluence]\n")
+	e := &fakeEngine{results: []*reviewer.Result{reviewResult()}}
+
+	job := newJob(t, f, e)
+	job.MCP = opencode.Catalog{
+		"jira":   {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+		"sentry": {Type: opencode.MCPLocal, Command: []string{"sentry-mcp"}},
+	}
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	got := e.requests[0].MCP
+	if len(got) != 1 || got[0] != "jira" {
+		t.Errorf("MCP = %v, want only the one this deployment offers", got)
+	}
+	// Named and not delivered: the repository is told rather than left to
+	// wonder why the review never mentions its tickets.
+	if !strings.Contains(f.summaries[0], "confluence") {
+		t.Errorf("the summary does not name the server that was refused:\n%s", f.summaries[0])
+	}
+	// And a server the repository did not ask for stays off.
+	if strings.Contains(strings.Join(got, ","), "sentry") {
+		t.Errorf("MCP = %v, want nothing the repository did not ask for", got)
+	}
+}
+
+// Without a .kibitz.yaml nothing is enabled, however much the deployment
+// offers: tool definitions cost tokens on every call.
+func TestNoMCPWithoutTheRepositoryAsking(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{reviewResult()}}
+
+	job := newJob(t, f, e)
+	job.MCP = opencode.Catalog{"jira": {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"}}
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := e.requests[0].MCP; len(got) != 0 {
+		t.Errorf("MCP = %v, want none", got)
 	}
 }

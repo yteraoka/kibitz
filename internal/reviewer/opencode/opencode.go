@@ -8,12 +8,14 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,17 +39,97 @@ type Config struct {
 	// Env is added to the process environment, for provider credentials such
 	// as GOOGLE_CLOUD_PROJECT.
 	Env []string
+	// EnvPassthrough names further variables to copy from the worker's own
+	// environment. The agent's process is otherwise built from a fixed list
+	// rather than inherited, so that the worker's secrets stay in the worker
+	// (see [baseEnv]).
+	EnvPassthrough []string
 	// CustomProvider declares a provider OpenCode's catalog does not list.
 	CustomProvider *CustomProvider
 }
 
-// MCPServer is one entry of OpenCode's mcp configuration.
+// MCP server types.
+const (
+	MCPLocal  = "local"
+	MCPRemote = "remote"
+)
+
+// MCPServer is one entry of OpenCode's mcp configuration. The fields are the
+// ones opencode 1.18 accepts: command, cwd and environment for a local server,
+// url and headers for a remote one.
+//
+// A value of the form "{env:NAME}" anywhere in here is substituted by opencode
+// itself from its own environment, which is how a credential reaches a server
+// without ever being written to the config file. See [envRefs].
 type MCPServer struct {
 	Type        string            `json:"type"`
 	Command     []string          `json:"command,omitempty"`
-	URL         string            `json:"url,omitempty"`
+	CWD         string            `json:"cwd,omitempty"`
 	Environment map[string]string `json:"environment,omitempty"`
-	Enabled     bool              `json:"enabled"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	// OAuth is passed through to opencode unread. kibitz has no opinion on
+	// how a remote server authenticates, and refusing a shape it does not
+	// model would block a deployment over nothing.
+	OAuth     json.RawMessage `json:"oauth,omitempty"`
+	TimeoutMS int             `json:"timeout,omitempty"`
+	Enabled   bool            `json:"enabled"`
+}
+
+// Validate rejects a definition opencode would refuse, at startup rather than
+// on the first review that asks for it.
+func (m MCPServer) Validate() error {
+	switch m.Type {
+	case MCPLocal:
+		if len(m.Command) == 0 {
+			return errors.New(`a "local" server needs a command`)
+		}
+		if m.URL != "" || len(m.Headers) > 0 || len(m.OAuth) > 0 {
+			return errors.New(`a "local" server takes no url, headers or oauth`)
+		}
+	case MCPRemote:
+		if m.URL == "" {
+			return errors.New(`a "remote" server needs a url`)
+		}
+		if len(m.Command) > 0 || len(m.Environment) > 0 || m.CWD != "" {
+			return errors.New(`a "remote" server takes no command, cwd or environment`)
+		}
+	case "":
+		return errors.New(`type is required, either "local" or "remote"`)
+	default:
+		return fmt.Errorf("type %q is neither \"local\" nor \"remote\"", m.Type)
+	}
+	if m.TimeoutMS < 0 {
+		return errors.New("timeout must not be negative")
+	}
+	return nil
+}
+
+// envPlaceholder matches opencode's own substitution syntax.
+var envPlaceholder = regexp.MustCompile(`\{env:([^}]+)\}`)
+
+// envRefs returns the environment variables a server's definition refers to.
+//
+// They are what has to reach opencode's own environment for the substitution
+// to resolve, and naming them here is what keeps the rest of the worker's
+// environment — the webhook secrets, the GitHub App key — out of a process
+// kibitz did not write.
+func (m MCPServer) envRefs() []string {
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, match := range envPlaceholder.FindAllStringSubmatch(string(encoded), -1) {
+		name := strings.TrimSpace(match[1])
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
 }
 
 // Runner implements [reviewer.Engine] by invoking the CLI.
@@ -175,7 +257,7 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 
 	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
 	cmd.Dir = req.WorkspaceDir
-	cmd.Env = append(os.Environ(), r.cfg.Env...)
+	cmd.Env = r.childEnv(r.serversFor(req))
 	cmd.Env = append(cmd.Env,
 		"OPENCODE_CONFIG="+configPath,
 		// The agent must not pick up the operator's own session history.

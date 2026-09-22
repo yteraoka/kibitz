@@ -266,6 +266,12 @@ type OpenCode struct {
 	// values come from the process environment, so a credential never has to
 	// be written into kibitz's own configuration.
 	ProviderEnv []string
+	// EnvPassthrough names further environment variables to copy into the
+	// agent's process. The agent's environment is built from a fixed list
+	// rather than inherited, so that kibitz's own secrets — the webhook
+	// secrets, the GitHub App key — stay in the worker; this is the escape
+	// hatch for a deployment that needs one more variable.
+	EnvPassthrough []string
 }
 
 // Limits bounds a single review job.
@@ -301,18 +307,22 @@ type Server struct {
 
 // Worker is the kibitz-worker configuration.
 type Worker struct {
-	HealthAddr       string
-	Log              Log
-	Trace            Trace
-	ShutdownTimeout  time.Duration
-	Queue            Queue
-	State            State
-	Blob             Blob
-	Concurrency      int
-	JobTimeout       time.Duration
-	WorkspaceDir     string
-	OpenCode         OpenCode
-	Limits           Limits
+	HealthAddr      string
+	Log             Log
+	Trace           Trace
+	ShutdownTimeout time.Duration
+	Queue           Queue
+	State           State
+	Blob            Blob
+	Concurrency     int
+	JobTimeout      time.Duration
+	WorkspaceDir    string
+	OpenCode        OpenCode
+	Limits          Limits
+	// MCPServers defines the external tool servers this deployment offers, as
+	// one JSON object of name to server. MCPAllowlist narrows which of them a
+	// repository may enable; empty means all of them.
+	MCPServers       string
 	MCPAllowlist     []string
 	GitHub           GitHubApp
 	GitLab           GitLabAuth
@@ -418,10 +428,11 @@ func LoadWorker(env Lookup) (*Worker, error) {
 				MaaSProviderID: l.str("KIBITZ_VERTEX_MAAS_PROVIDER_ID", "vertex-maas"),
 				MaaSBaseURL:    l.str("KIBITZ_VERTEX_MAAS_BASE_URL", ""),
 			},
-			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
-			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
-			TriageAgent: l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
-			ProviderEnv: l.list("KIBITZ_PROVIDER_ENV", nil),
+			ReviewAgent:    l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
+			AnswerAgent:    l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
+			TriageAgent:    l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
+			ProviderEnv:    l.list("KIBITZ_PROVIDER_ENV", nil),
+			EnvPassthrough: l.list("KIBITZ_AGENT_ENV_PASSTHROUGH", nil),
 		},
 		Limits: Limits{
 			MaxComments:  l.positiveInt("KIBITZ_MAX_COMMENTS", 20),
@@ -429,6 +440,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			CloneDepth:   l.positiveInt("KIBITZ_CLONE_DEPTH", 50),
 			MinSeverity:  l.enum("KIBITZ_MIN_SEVERITY", "medium", "critical", "high", "medium", "low", "info"),
 		},
+		MCPServers:   l.str("KIBITZ_MCP_SERVERS", ""),
 		MCPAllowlist: l.list("KIBITZ_MCP_ALLOWLIST", nil),
 		GitHub: GitHubApp{
 			AppID:          l.int64("KIBITZ_GITHUB_APP_ID", 0),

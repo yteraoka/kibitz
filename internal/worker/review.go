@@ -13,6 +13,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 	"github.com/yteraoka/kibitz/internal/store"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -48,6 +49,10 @@ type ReviewJob struct {
 	// TriageModel runs the triage pass. It reads file names, not code, so a
 	// cheaper model is usually the right one. Empty means [ReviewJob.Model].
 	TriageModel string
+	// MCP is the external tool servers this deployment offers. A repository
+	// enables the ones it wants by name; anything it names that is not here
+	// is reported rather than silently skipped.
+	MCP opencode.Catalog
 	// Prices estimates what a review cost, for the summary comment. It is
 	// configured rather than known: prices differ by provider, region and
 	// contract, and they change. With none configured the summary reports
@@ -258,6 +263,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		Model:            settings.Model,
 		Guidelines:       settings.Guidelines,
 		Focus:            focusOf(ev, settings.Settings),
+		MCP:              settings.mcp,
 		HeadSHA:          ws.HeadSHA,
 		SinceSHA:         since,
 	}
@@ -639,6 +645,7 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		Language:     settings.Language,
 		Model:        settings.Model,
 		Guidelines:   settings.Guidelines,
+		MCP:          settings.mcp,
 		HeadSHA:      ws.HeadSHA,
 	})
 	if err != nil {

@@ -58,6 +58,7 @@
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
 | `KIBITZ_MODEL` | `google-vertex/gemini-3.1-pro-preview` | `provider/model` 形式。既定は Vertex AI の Gemini (申請不要) |
 | `KIBITZ_PROVIDER_ENV` | - | API キーで認証するプロバイダ用に、エージェントへ渡す環境変数名 (カンマ区切り)。例: `ZHIPU_API_KEY`。**名前だけを設定し、値は環境から読む** |
+| `KIBITZ_AGENT_ENV_PASSTHROUGH` | - | エージェントのプロセスへ追加で渡す環境変数名。**エージェントの環境は固定リストから組み立てる**ので、それ以外が必要なときの逃げ道 (下記) |
 | `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
 | `KIBITZ_MODEL_PRICES` | - | サマリコメントに概算コストを出すための単価。`モデル=入力/出力[/キャッシュ読み[/キャッシュ書き]]` を**100 万トークンあたり**でカンマ区切り。`*` は既定値。未設定ならトークン数だけを出し、金額は出さない |
 | `KIBITZ_MODEL_PRICE_CURRENCY` | `$` | 上記の単価の通貨記号 |
@@ -76,7 +77,8 @@
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
-| `KIBITZ_MCP_ALLOWLIST` | - | 有効化を許す MCP 名 (カンマ区切り) |
+| `KIBITZ_MCP_SERVERS` | - | この kibitz が提供する MCP サーバーの定義。名前 → サーバーの JSON オブジェクト (下記) |
+| `KIBITZ_MCP_ALLOWLIST` | - | そのうちリポジトリが有効化してよい名前 (カンマ区切り)。未設定なら定義したものすべて |
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
 | `KIBITZ_GITLAB_BASE_URL` | `https://gitlab.com` | GitLab インスタンス。self-managed はここを変える (`/api/v4` は付けても付けなくてもよい) |
 | `KIBITZ_GITLAB_TOKEN` | - | personal / group / project access token (`api` スコープ)。**GitLab には GitHub App のインストールトークンに相当するものが無く、長命な資格情報になる** |
@@ -155,6 +157,63 @@ KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
 - 通貨記号は `KIBITZ_MODEL_PRICE_CURRENCY` で変えられる (既定 `$`)。
   円建ての単価を入れて `$` のまま出すより、記号を合わせるほうがよい
 
+### MCP サーバー
+
+外部サービス (Jira、Sentry など) を MCP 経由でレビューに参加させる。
+**運用側が定義し、リポジトリが名前で有効化する**という二段構え。
+
+```
+KIBITZ_MCP_SERVERS='{
+  "jira":   {"type": "remote", "url": "https://jira.example.com/mcp",
+             "headers": {"Authorization": "Bearer {env:JIRA_TOKEN}"}},
+  "sentry": {"type": "local", "command": ["sentry-mcp"],
+             "environment": {"SENTRY_TOKEN": "{env:SENTRY_TOKEN}"}}
+}'
+```
+
+| 有効化の条件 | |
+| --- | --- |
+| `KIBITZ_MCP_SERVERS` に定義がある | 存在する |
+| `KIBITZ_MCP_ALLOWLIST` に名前がある (未設定なら全部) | リポジトリが要求してよい |
+| `.kibitz.yaml` の `mcp.allow` に名前がある | 実際に有効になる |
+
+**何も指定しなければ何も有効にならない。** MCP はツール定義だけで毎回トークンを
+消費するので、「使えるから載せておく」は誰も同意していない請求になる。
+
+`{env:NAME}` は **opencode 自身が展開する**。kibitz は設定ファイルに
+プレースホルダのまま書き、その変数だけをエージェントのプロセスへ渡す。
+**シークレットがディスク上の設定ファイルに書かれることはない。**
+
+- `type` は `local` (`command` 必須、`cwd` / `environment` 可) または
+  `remote` (`url` 必須、`headers` 可)。`timeout` はミリ秒
+- 定義と許可リストが食い違う (定義したのに許可リストに無い) 場合は**起動時にエラー**。
+  片方だけ直したつもりの設定ミスを黙って通さない
+- リポジトリが要求した名前をこの kibitz が提供していない場合は、
+  ログに警告を出し、**サマリコメントにもその旨を書く**。
+  頼んだのに来なかったことは、頼んだ側に伝わらないと気づけない
+- **triage パスには MCP を渡さない。** ファイル名だけ見て読む対象を選ぶパスなので、
+  ツール定義を載せたら節約するはずのものを使ってしまう
+
+### エージェントのプロセス環境
+
+エージェントの環境は**固定リストから組み立てる**。ワーカーの環境をそのまま
+渡すことはしない。
+
+ワーカーの環境には Webhook シークレット、GitHub App の秘密鍵、GitLab トークンが
+入っている。一方 **local な MCP サーバーは opencode が起動する別プロセスで、
+opencode の環境をそのまま継承する** — kibitz が書いたわけではないバイナリに
+それらを渡す理由は無い。
+
+エージェントに渡すもの:
+
+1. 基本的な変数 (`PATH` / `HOME` / `TMPDIR` / プロキシ / CA / ADC 関連など)
+2. `KIBITZ_PROVIDER_ENV` で指定したプロバイダの資格情報
+3. **有効になった MCP サーバーの定義が `{env:NAME}` で参照している変数だけ**
+4. `KIBITZ_AGENT_ENV_PASSTHROUGH` で明示的に指定した変数
+
+3 が要点で、`jira` を有効にしたジョブには `JIRA_TOKEN` が渡るが、
+`sentry` だけを有効にしたジョブには渡らない。
+
 ## 3. リポジトリ側の設定 (`.kibitz.yaml`)
 
 リポジトリの**デフォルトブランチ側から**読む。PR 側の変更は反映しない
@@ -193,6 +252,10 @@ review:
 answer:
   enabled: true
 
+# 運用側が定義し、許可リストに載せたものだけ有効になる
+mcp:
+  allow: [jira, sentry]
+
 # レビュー時に守らせたい追加ルール (プロンプトに載る)。
 # 運用側の guidelines に追記される
 guidelines: |
@@ -218,8 +281,9 @@ guidelines: |
 | `review.model` | 使うモデル |
 | `answer.enabled` | `false` で質問への回答を止める |
 | `guidelines` | 運用側の guidelines に**追記**される (置き換えではない) |
+| `mcp.allow` | 有効にする MCP サーバー名。運用側が定義し許可したものだけ ([上記](#mcp-サーバー)) |
 
-**まだ効かないキー**: `mcp` (Phase 7 の残り)、`budget` (Phase 9)、`implement` (Phase 8)、
+**まだ効かないキー**: `budget` (Phase 9)、`implement` (Phase 8)、
 `review.allow_verdict`、`answer.mention`。書いてもログとサマリに「効きません」と出るだけ。
 
 `answer.mention` をリポジトリ側で変えられないのは、メンションの判定が

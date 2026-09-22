@@ -213,3 +213,22 @@ func TestMaxCommentsOfZeroIsZero(t *testing.T) {
 		t.Errorf("Excess = %d, want the three that were held back", got.Excess)
 	}
 }
+
+// The servers a repository turns on. The names are resolved by the caller
+// against what the deployment offers; this layer only carries them.
+func TestMCPAllow(t *testing.T) {
+	if got := apply(t, "mcp:\n  allow: [jira, sentry]\n").MCP; len(got) != 2 || got[0] != "jira" {
+		t.Errorf("MCP = %v", got)
+	}
+	// Saying nothing is not the same as saying none, but an empty list is.
+	if got := apply(t, "review:\n  language: ja\n").MCP; got != nil {
+		t.Errorf("MCP = %v, want nil when the file does not mention it", got)
+	}
+	if got := apply(t, "mcp:\n  allow: []\n").MCP; len(got) != 0 {
+		t.Errorf("MCP = %v, want none", got)
+	}
+	// mcp is a key that exists now, so it must not be reported as unknown.
+	if _, notes, err := repoconfig.Parse([]byte("mcp:\n  allow: [jira]\n")); err != nil || len(notes) > 0 {
+		t.Errorf("Parse: err = %v, notes = %v", err, notes)
+	}
+}
