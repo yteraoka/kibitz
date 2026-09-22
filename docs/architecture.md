@@ -246,7 +246,7 @@ type StateStore interface {
 └── docs/
 ```
 
-Go モジュールパス: `github.com/yteraoka/kibitz`。Go 1.24 系を使用。
+Go モジュールパス: `github.com/yteraoka/kibitz`。Go 1.27 系を使用。
 
 ## 4. 主要インターフェース (抜粋)
 
