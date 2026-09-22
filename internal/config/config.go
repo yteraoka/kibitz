@@ -228,10 +228,11 @@ type OpenCode struct {
 	TriageModel   string
 	FallbackModel string
 	Vertex        Vertex
-	// ReviewAgent and AnswerAgent name the agent definitions shipped in the
+	// ReviewAgent, AnswerAgent and TriageAgent name the agent definitions shipped in the
 	// worker image. An empty value falls back to OpenCode's default agent.
 	ReviewAgent string
 	AnswerAgent string
+	TriageAgent string
 	// ProviderEnv names environment variables to forward to the agent, for
 	// providers that authenticate with an API key (ZHIPU_API_KEY for GLM,
 	// OPENROUTER_API_KEY, and so on). Only the names are configured; the
@@ -388,6 +389,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			},
 			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
+			TriageAgent: l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
 			ProviderEnv: l.list("KIBITZ_PROVIDER_ENV", nil),
 		},
 		Limits: Limits{

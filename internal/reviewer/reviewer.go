@@ -20,6 +20,9 @@ const (
 	ModeReview Mode = "review"
 	// ModeAnswer answers a question asked in a comment thread.
 	ModeAnswer Mode = "answer"
+	// ModeTriage picks which files of a very large change are worth
+	// reviewing. It reads the list of changed files, not their contents.
+	ModeTriage Mode = "triage"
 )
 
 // Severity ranks a finding. Anything below the configured threshold is left
@@ -125,6 +128,8 @@ type Result struct {
 	Findings []Finding
 	// Reply is the answer in [ModeAnswer].
 	Reply string
+	// Triage is the selection made in [ModeTriage].
+	Triage *TriageOutput
 	// SessionID identifies the conversation, so a follow-up question can
 	// continue it.
 	SessionID string
