@@ -135,6 +135,10 @@ resource "google_cloud_run_v2_service" "server" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_secret_manager_secret_iam_member.server_webhook,
     google_pubsub_topic_iam_member.server_publish,
@@ -344,7 +348,13 @@ resource "google_cloud_run_v2_service" "worker" {
   }
 
   lifecycle {
-    ignore_changes = [scaling]
+    # The release workflow deploys the image; the autoscaler writes the
+    # instance count. Terraform sets both once and then leaves them alone,
+    # because whoever applies last would otherwise undo the other.
+    ignore_changes = [
+      scaling,
+      template[0].containers[0].image,
+    ]
   }
 
   depends_on = [
