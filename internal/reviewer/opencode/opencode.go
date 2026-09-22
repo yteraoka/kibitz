@@ -290,6 +290,14 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 		"OPENCODE_CONFIG="+configPath,
 		// The agent must not pick up the operator's own session history.
 		"OPENCODE_DISABLE_AUTOUPDATE=1",
+		// opencode otherwise looks for AGENTS.md, CLAUDE.md and CONTEXT.md in
+		// the directory it runs in and loads them as instructions. That
+		// directory is the pull request's own checkout, so a branch could
+		// write the reviewer's instructions — which is the thing every other
+		// decision here is arranged to prevent. The same conventions still
+		// reach the agent, read from the default branch instead
+		// (see the worker's repoGuidelines).
+		"OPENCODE_DISABLE_PROJECT_CONFIG=1",
 	)
 
 	setupProcessGroup(cmd)

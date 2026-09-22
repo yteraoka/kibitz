@@ -326,8 +326,11 @@ type Worker struct {
 	// MCPServers defines the external tool servers this deployment offers, as
 	// one JSON object of name to server. MCPAllowlist narrows which of them a
 	// repository may enable; empty means all of them.
-	MCPServers       string
-	MCPAllowlist     []string
+	MCPServers   string
+	MCPAllowlist []string
+	// GuidelineFiles are the repository's own convention files, read from its
+	// default branch. Nil uses the built-in list; "off" reads none.
+	GuidelineFiles   []string
 	GitHub           GitHubApp
 	GitLab           GitLabAuth
 	ImplementEnabled bool
@@ -445,8 +448,9 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			CloneDepth:   l.positiveInt("KIBITZ_CLONE_DEPTH", 50),
 			MinSeverity:  l.enum("KIBITZ_MIN_SEVERITY", "medium", "critical", "high", "medium", "low", "info"),
 		},
-		MCPServers:   l.str("KIBITZ_MCP_SERVERS", ""),
-		MCPAllowlist: l.list("KIBITZ_MCP_ALLOWLIST", nil),
+		MCPServers:     l.str("KIBITZ_MCP_SERVERS", ""),
+		MCPAllowlist:   l.list("KIBITZ_MCP_ALLOWLIST", nil),
+		GuidelineFiles: l.list("KIBITZ_REPO_GUIDELINE_FILES", nil),
 		GitHub: GitHubApp{
 			AppID:          l.int64("KIBITZ_GITHUB_APP_ID", 0),
 			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),

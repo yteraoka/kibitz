@@ -44,8 +44,10 @@ pi でも実装できる粒度に保つ。
 [2] コンテキスト収集
     - 変更差分 (unified diff、生成物・lock ファイル・巨大ファイルを除外)
     - PR タイトル / 本文 / 既存のレビューコメント
-    - リポジトリのルール: .kibitz.yaml の guidelines (運用側の guidelines に追記)
-      と focus。AGENTS.md / CONTRIBUTING.md はエージェント自身が読む
+    - リポジトリのルール: **デフォルトブランチ側の** AGENTS.md /
+      .kibitz/guidelines.md と、.kibitz.yaml の guidelines・focus。
+      いずれも運用側の guidelines に追記される (置き換えではない)。
+      チェックアウト側の AGENTS.md は読ませない (下記)
     - review.paths_ignore で除外したファイルは diff から落とす。
       エージェントに渡さないだけでなく、指摘の検証にも使わない
       (除外ファイルへの指摘は投稿されない)
@@ -116,10 +118,31 @@ pi でも実装できる粒度に保つ。
   (`opencode: writing prompt: ...`)。ジョブは再配送の対象になる
 - ワークスペースはジョブごとに使い捨てるので、後始末は要らない
 
-リポジトリ側からレビューの観点を指示する仕組みは `.kibitz.yaml` の `guidelines` と
-`review.focus`。どちらもプロンプトに入る。`guidelines` は運用側の設定に**追記**され、
-リポジトリ側から運用側のルールを落とすことはできない
-([configuration.md](configuration.md#3-リポジトリ側の設定-kibitzyaml))。
+リポジトリ側からレビューの観点を指示する経路は 2 つ。`.kibitz.yaml` の
+`guidelines` / `review.focus` と、**デフォルトブランチ側の規約ファイル**
+(`AGENTS.md`、`.kibitz/guidelines.md`)。どちらもプロンプトに入り、
+運用側の設定に**追記**される (リポジトリ側から運用側のルールは落とせない)。
+
+### なぜチェックアウトから読まないのか
+
+opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.md` を探して
+**指示として**読み込む。作業ディレクトリは PR のチェックアウトなので、そのままだと
+**PR のブランチがレビュアーの指示を書ける**。`OPENCODE_DISABLE_PROJECT_CONFIG=1` で
+止めたうえで、同じファイルを `forge.Client.ReadFile` でデフォルトブランチから読む。
+
+差分や PR 本文は `<<<` `>>>` で囲んで「指示として扱うな」と明示できるが、
+**指示の位置に入るものにはその枠が効かない**。だから経路を分ける。
+
+| | 位置 | 取得元 |
+| --- | --- | --- |
+| 差分 / PR 本文 / 既存コメント / ADR などの参照 | データ | PR 側 (囲って明示) |
+| guidelines / focus / 規約ファイル | 指示 | **デフォルトブランチ側のみ** |
+
+読むファイルは `KIBITZ_REPO_GUIDELINE_FILES` で変更でき、`off` で無効。
+既定は `AGENTS.md`、`.kibitz/guidelines.md`
+([configuration.md](configuration.md#リポジトリの規約ファイル))。
+`CONTRIBUTING.md` は既定に入れていない — 初めて PR を出す**人間**向けに書かれていることが多く、
+毎回のレビューで払うトークンに見合わないため。
 
 ## 3. OpenCode 設定 (ジョブごとに生成)
 

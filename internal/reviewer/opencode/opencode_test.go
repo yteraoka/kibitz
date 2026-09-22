@@ -665,3 +665,19 @@ func TestNoContextServerWithoutABinary(t *testing.T) {
 		t.Error("a server was registered although no binary is configured")
 	}
 }
+
+// opencode otherwise loads AGENTS.md, CLAUDE.md and CONTEXT.md from the
+// directory it runs in, which is the pull request's own checkout. A branch
+// could then write the reviewer's instructions, which is the thing every other
+// decision here exists to prevent.
+func TestTheCheckoutCannotWriteTheAgentsInstructions(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.env(t)["OPENCODE_DISABLE_PROJECT_CONFIG"]; got != "1" {
+		t.Errorf("OPENCODE_DISABLE_PROJECT_CONFIG = %q, want 1", got)
+	}
+}

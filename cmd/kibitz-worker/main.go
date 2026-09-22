@@ -312,9 +312,10 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 	}, logger)
 
 	return &worker.ReviewJob{
-		Forges: forges,
-		Engine: engine,
-		MCP:    mcp,
+		Forges:         forges,
+		Engine:         engine,
+		MCP:            mcp,
+		GuidelineFiles: guidelineFiles(cfg.GuidelineFiles),
 		Workspace: workspace.Config{
 			Root:    cfg.WorkspaceDir,
 			Depth:   cfg.Limits.CloneDepth,
@@ -428,4 +429,17 @@ func contextBin(configured string) string {
 		return ""
 	}
 	return strings.TrimSpace(configured)
+}
+
+// guidelineFiles resolves the convention files to read from a repository's
+// default branch. "off" reads none, which is the way out for a deployment
+// that does not want a repository writing any part of the instructions.
+func guidelineFiles(configured []string) []string {
+	if len(configured) == 0 {
+		return nil // the built-in list
+	}
+	if len(configured) == 1 && strings.EqualFold(strings.TrimSpace(configured[0]), "off") {
+		return []string{}
+	}
+	return configured
 }

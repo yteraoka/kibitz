@@ -77,6 +77,7 @@
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
+| `KIBITZ_REPO_GUIDELINE_FILES` | `AGENTS.md,.kibitz/guidelines.md` | リポジトリの規約ファイル。**デフォルトブランチ側から**読む。`off` で無効 (下記) |
 | `KIBITZ_MCP_CONTEXT_BIN` | `kibitz-mcp` | kibitz 自身の MCP サーバーのパス。`off` で無効 |
 | `KIBITZ_MCP_SERVERS` | - | この kibitz が提供する MCP サーバーの定義。名前 → サーバーの JSON オブジェクト (下記) |
 | `KIBITZ_MCP_ALLOWLIST` | - | そのうちリポジトリが有効化してよい名前 (カンマ区切り)。未設定なら定義したものすべて |
@@ -157,6 +158,29 @@ KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
 - 単価が未設定のモデルでは**トークン数だけ**を出す。「無料だった」と「誰も設定していない」は別のこと
 - 通貨記号は `KIBITZ_MODEL_PRICE_CURRENCY` で変えられる (既定 `$`)。
   円建ての単価を入れて `$` のまま出すより、記号を合わせるほうがよい
+
+### リポジトリの規約ファイル
+
+リポジトリが自分の規約を書いたファイルを、**デフォルトブランチ側から**読んで
+guidelines に追記する。既定は `AGENTS.md` と `.kibitz/guidelines.md`。
+
+```
+KIBITZ_REPO_GUIDELINE_FILES=AGENTS.md,.kibitz/guidelines.md,docs/review-rules.md
+KIBITZ_REPO_GUIDELINE_FILES=off      # リポジトリ側から指示を一切入れない
+```
+
+優先順位は **運用側の guidelines → 規約ファイル → `.kibitz.yaml` の guidelines**。
+後のものが前のものに追記される (置き換えはしない)。
+
+- **PR 側からは読まない。** これらは**指示**としてプロンプトに入るので、
+  コミット権のある人しか書けない経路からしか入れない
+  ([security.md](security.md))。opencode 自身がチェックアウトから `AGENTS.md` を
+  読み込む挙動も `OPENCODE_DISABLE_PROJECT_CONFIG=1` で止めている
+- 1 ファイル 24 KiB で打ち切る。超えた場合はサマリコメントにその旨を書く
+  (切られた規約は適用されなかった規約なので)
+- どのファイル由来かをコメントで明示するので、レビューが引いたルールの出どころを辿れる
+- `CONTRIBUTING.md` は**既定に入れていない**。初めて PR を出す人間向けに書かれていることが多く、
+  毎回のレビューで払うトークンに見合わない。必要なら明示的に足せる
 
 ### MCP サーバー
 
