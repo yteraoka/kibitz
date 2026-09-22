@@ -5,7 +5,7 @@
 | プラットフォーム | 方式 | 実装 |
 | --- | --- | --- |
 | GitHub | HMAC-SHA256 | `hmac.New(sha256.New, secret)` で生ボディを計算し、`X-Hub-Signature-256` と `hmac.Equal` で比較 |
-| GitLab | 共有トークン | `X-Gitlab-Token` を `subtle.ConstantTimeCompare` で比較 |
+| GitLab | HMAC-SHA256 (19.0+) / 共有トークン | `webhook-signature` を検証。無ければ `X-Gitlab-Token` を `subtle.ConstantTimeCompare` で比較 |
 | Azure DevOps | Basic 認証 | Service Hooks に設定したユーザー名 / パスワードを定数時間比較。加えて固定のカスタムヘッダ値も検証 |
 
 原則:

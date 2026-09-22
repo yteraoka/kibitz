@@ -508,3 +508,26 @@ func TestLoadScaler(t *testing.T) {
 		t.Error("LoadScaler succeeded without a backend, want it rejected")
 	}
 }
+
+// GitLab 19 signs the body; older instances only send a shared token. Either
+// is enough to accept deliveries.
+func TestGitLabCredentials(t *testing.T) {
+	env := map[string]string{
+		"KIBITZ_PUBSUB_PROJECT_ID":     "kibitz-dev",
+		"KIBITZ_GITLAB_SIGNING_TOKENS": "whsec_c2VjcmV0",
+	}
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if !cfg.Webhook.Configured() {
+		t.Error("a signing token alone should be enough to accept deliveries")
+	}
+	if len(cfg.Webhook.GitLabSigningTokens) != 1 {
+		t.Errorf("signing tokens = %v", cfg.Webhook.GitLabSigningTokens)
+	}
+	if got := cfg.Webhook.GitLabSigningTokens[0].String(); got != config.Redacted {
+		t.Errorf("a signing token rendered as %q", got)
+	}
+}

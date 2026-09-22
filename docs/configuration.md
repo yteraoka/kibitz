@@ -21,7 +21,8 @@
 | `KIBITZ_BLOBSTORE_BUCKET` | - | Claim Check 用バケット |
 | `KIBITZ_CLAIM_CHECK_THRESHOLD` | `65536` | この byte 数を超える生 payload は退避 |
 | `KIBITZ_GITHUB_WEBHOOK_SECRETS` | - | カンマ区切り (ローテーション用) |
-| `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | 同上 |
+| `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | GitLab の共有トークン (`X-Gitlab-Token`)。カンマ区切り |
+| `KIBITZ_GITLAB_SIGNING_TOKENS` | - | GitLab 19.0+ の署名トークン (`whsec_...`)。**body まで検証できるのでこちらを推奨**。両方設定した場合、署名が来ていれば署名を検証する |
 | `KIBITZ_AZDO_BASIC_USER` / `_PASSWORDS` | - | Azure DevOps Service Hooks の Basic 認証 |
 | `KIBITZ_GITHUB_APP_ID` | - | 自分の発言を判別するための GitHub App id。**秘密情報ではない** (App の設定 URL に含まれる数字)。GitHub がコメントに付ける `performed_via_github_app.id` と突き合わせる |
 | `KIBITZ_BOT_LOGINS` | - | 追加で無視したいアカウント名 (カンマ区切り)。通常は不要 — App id での判別が効かないイベント (レビューコメントなど) の保険 |

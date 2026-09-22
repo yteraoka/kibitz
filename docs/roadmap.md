@@ -102,7 +102,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 
 ## Phase 4: GitLab 対応 (目安 1 週)
 
-- `internal/webhook/gitlab` — トークン検証、`merge_request` / `note` の正規化
+- `internal/webhook/gitlab` — トークン検証、`merge_request` / `note` の正規化 **(完了)**
 - `internal/forge/gitlab` — discussions API、`position` によるインラインコメント、
   suggestion 記法、`refs/merge-requests/{iid}/head` の fetch
 - self-managed GitLab (ベース URL 可変) の対応
