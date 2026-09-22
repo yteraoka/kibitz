@@ -2,6 +2,7 @@ package gitlab_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -418,5 +419,57 @@ func TestCloneAuth(t *testing.T) {
 	}
 	if cred.Username != "oauth2" || cred.Token != token {
 		t.Errorf("credential = %+v", cred)
+	}
+}
+
+// GitLab wants the whole path in one URL segment and a ref it will not infer,
+// and documents "HEAD" as the way to name the default branch — which is the
+// only branch these settings may come from.
+func TestReadFile(t *testing.T) {
+	f := newFake(t)
+	f.handle("/api/v4/projects/yteraoka%2Fkibitz/repository/files/.kibitz.yaml", http.StatusOK,
+		map[string]any{
+			"encoding": "base64",
+			"size":     11,
+			"content":  base64.StdEncoding.EncodeToString([]byte("version: 1\n")),
+		})
+
+	got, err := f.client(t).ReadFile(context.Background(), ref, ".kibitz.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "version: 1\n" {
+		t.Errorf("ReadFile = %q", got)
+	}
+	if q := f.lastRequest().Query; q != "ref=HEAD" {
+		t.Errorf("query = %q, want ref=HEAD", q)
+	}
+}
+
+func TestReadFileReportsAMissingFile(t *testing.T) {
+	f := newFake(t)
+	f.handle("/api/v4/projects/yteraoka%2Fkibitz/repository/files/.kibitz.yaml", http.StatusNotFound,
+		map[string]any{"message": "404 File Not Found"})
+
+	_, err := f.client(t).ReadFile(context.Background(), ref, ".kibitz.yaml")
+	if !errors.Is(err, forge.ErrFileNotFound) {
+		t.Errorf("err = %v, want ErrFileNotFound", err)
+	}
+}
+
+// A nested path goes in as one segment with its separators encoded. Routing
+// it is the assertion: a path split across segments reaches a different
+// endpoint, which is how this went wrong the obvious way.
+func TestReadFileEncodesTheWholePath(t *testing.T) {
+	f := newFake(t)
+	f.handle("/api/v4/projects/yteraoka%2Fkibitz/repository/files/docs%2Fa.yaml", http.StatusOK,
+		map[string]any{"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("x"))})
+
+	got, err := f.client(t).ReadFile(context.Background(), ref, "docs/a.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "x" {
+		t.Errorf("ReadFile = %q", got)
 	}
 }

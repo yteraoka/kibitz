@@ -32,6 +32,12 @@ type fakeForge struct {
 	compared   []string
 	partial    *forge.Diff
 	compareErr error
+
+	// files are served by ReadFile, keyed by path. A path that is absent
+	// reads as a repository without that file.
+	files     map[string]string
+	fileErr   error
+	filesRead []string
 }
 
 func (f *fakeForge) Platform() event.Platform { return event.PlatformGitHub }
@@ -76,6 +82,18 @@ func (f *fakeForge) UpsertSummary(_ context.Context, _ forge.PRRef, _, body stri
 func (f *fakeForge) ReplyToThread(_ context.Context, _ forge.PRRef, _, body string) error {
 	f.replies = append(f.replies, body)
 	return nil
+}
+
+func (f *fakeForge) ReadFile(_ context.Context, _ forge.PRRef, path string) ([]byte, error) {
+	f.filesRead = append(f.filesRead, path)
+	if f.fileErr != nil {
+		return nil, f.fileErr
+	}
+	body, ok := f.files[path]
+	if !ok {
+		return nil, forge.ErrFileNotFound
+	}
+	return []byte(body), nil
 }
 
 func (f *fakeForge) CloneAuth(context.Context, forge.PRRef) (forge.CloneCredential, error) {

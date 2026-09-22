@@ -135,15 +135,18 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 毎回プロンプトに入れる ([worker.md](worker.md#セッションは-あれば得をする-もの))。
 
 **完了条件**: 指摘に対して「なぜ?」と返信すると文脈を踏まえた回答が返る。
-`/kibitz review --focus security` が期待通り動く。
+`/kibitz review --focus security` が期待通り動く (`--focus` の実装は Phase 7)。
 
 ## Phase 7: 外部サービス / MCP 統合 (目安 1〜2 週)
 
-- `kibitz-mcp` の実装と同梱 (**MCP サーバーとしても単体 CLI としても動く**ように作る。
-  エンジンを pi に差し替えても再利用できるようにするため)
-- ジョブごとの `opencode.json` 生成における MCP の有効化・シークレット注入
-- グローバル許可リストと `.kibitz.yaml` の `mcp.allow` の突き合わせ
-- `.kibitz.yaml` のパーサと設定マージ
+| 項目 | 状態 |
+| --- | --- |
+| `.kibitz.yaml` のパーサと設定マージ | 完了 |
+| `forge.Client.ReadFile` (デフォルトブランチからの読み取り、GitHub / GitLab) | 完了 |
+| `review.focus` とコマンドの `--focus` | 完了 |
+| `kibitz-mcp` の実装と同梱 (**MCP サーバーとしても単体 CLI としても動く**ように作る。エンジンを pi に差し替えても再利用できるようにするため) | 未 |
+| ジョブごとの `opencode.json` 生成における MCP の有効化・シークレット注入 | 未 |
+| グローバル許可リストと `.kibitz.yaml` の `mcp.allow` の突き合わせ | 未 |
 
 **完了条件**: Jira / Sentry などの MCP を有効にしたリポジトリで、
 レビュー内に関連チケットや既知の障害情報が反映される。

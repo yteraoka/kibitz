@@ -114,6 +114,11 @@ type Comment struct {
 	Line     int
 }
 
+// ErrFileNotFound reports that a repository has no such file. It is not a
+// failure: a repository without a .kibitz.yaml is a repository that runs on
+// the deployment's defaults.
+var ErrFileNotFound = errors.New("forge: the file does not exist")
+
 // ErrNoCompare reports that two commits could not be compared, usually
 // because one of them no longer exists. It is not a failure: reviewing the
 // whole diff instead is correct, only more expensive.
@@ -183,6 +188,15 @@ type Client interface {
 
 	// ReplyToThread answers an existing discussion.
 	ReplyToThread(ctx context.Context, ref PRRef, threadID, body string) error
+
+	// ReadFile returns the contents of a file on the repository's default
+	// branch. It returns [ErrFileNotFound] when there is no such file, which
+	// is the ordinary case for a repository that keeps no kibitz settings.
+	//
+	// The default branch, and not the pull request, is the point: settings
+	// read from the branch under review would let anyone who can open a pull
+	// request decide how it gets reviewed (docs/security.md).
+	ReadFile(ctx context.Context, ref PRRef, path string) ([]byte, error)
 
 	// CloneAuth returns a short-lived credential for fetching the code.
 	CloneAuth(ctx context.Context, ref PRRef) (CloneCredential, error)

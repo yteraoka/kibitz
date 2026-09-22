@@ -25,6 +25,13 @@ pi でも実装できる粒度に保つ。
 ## 2. ジョブのライフサイクル
 
 ```
+[0] リポジトリ設定の読み込み
+    forge.Client.ReadFile(ref, ".kibitz.yaml")
+    - **デフォルトブランチ側**から読む (PR 側は読まない)
+    - 無ければ環境変数の設定だけで動く。読めない/壊れていても既定値で続行し、
+      その旨をサマリコメントに書く
+    - ここで review.enabled / triggers / skip_draft を見て、走らせないなら即終了
+
 [1] ワークスペース準備
     git init && git remote add origin <clone_url with token>
     git fetch --depth=<N> origin <pr_head_ref> <base_ref>
@@ -34,8 +41,11 @@ pi でも実装できる粒度に保つ。
 [2] コンテキスト収集
     - 変更差分 (unified diff、生成物・lock ファイル・巨大ファイルを除外)
     - PR タイトル / 本文 / 既存のレビューコメント
-    - リポジトリのルール: AGENTS.md, CONTRIBUTING.md, .kibitz.yaml の guidelines
-      (Phase 7。現時点では読み込んでいない)
+    - リポジトリのルール: .kibitz.yaml の guidelines (運用側の guidelines に追記)
+      と focus。AGENTS.md / CONTRIBUTING.md はエージェント自身が読む
+    - review.paths_ignore で除外したファイルは diff から落とす。
+      エージェントに渡さないだけでなく、指摘の検証にも使わない
+      (除外ファイルへの指摘は投稿されない)
     - 前回レビュー済み SHA (増分レビュー時)
 
 [3] OpenCode 設定の生成 (ジョブごとの一時ファイル)
@@ -103,8 +113,10 @@ pi でも実装できる粒度に保つ。
   (`opencode: writing prompt: ...`)。ジョブは再配送の対象になる
 - ワークスペースはジョブごとに使い捨てるので、後始末は要らない
 
-リポジトリ側からレビューの観点を指示する仕組み (`.kibitz.yaml` の `guidelines`) は
-Phase 7。現時点では、プロンプトに入るリポジトリ固有の情報は無い。
+リポジトリ側からレビューの観点を指示する仕組みは `.kibitz.yaml` の `guidelines` と
+`review.focus`。どちらもプロンプトに入る。`guidelines` は運用側の設定に**追記**され、
+リポジトリ側から運用側のルールを落とすことはできない
+([configuration.md](configuration.md#3-リポジトリ側の設定-kibitzyaml))。
 
 ## 3. OpenCode 設定 (ジョブごとに生成)
 
