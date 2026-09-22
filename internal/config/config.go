@@ -221,11 +221,19 @@ type Vertex struct {
 
 // OpenCode configures how the worker drives the agent engine.
 type OpenCode struct {
-	Bin           string
-	Mode          string
-	ServerURL     string // used when Mode is attach
-	Model         string
-	TriageModel   string
+	Bin         string
+	Mode        string
+	ServerURL   string // used when Mode is attach
+	Model       string
+	TriageModel string
+	// ModelPrices is what each model costs, as "model=input/output" per
+	// million tokens, so the review summary can say what it spent. kibitz
+	// does not know prices: they differ by provider, region and contract,
+	// and they change.
+	ModelPrices []string
+	// PriceCurrency is the symbol the estimate is written with. It follows
+	// the prices; a dollar sign in front of a yen figure is worse than none.
+	PriceCurrency string
 	FallbackModel string
 	Vertex        Vertex
 	// ReviewAgent and AnswerAgent name the agent definitions shipped in the
@@ -379,6 +387,8 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			ServerURL:     l.str("KIBITZ_OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
 			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-3.1-pro-preview"),
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
+			ModelPrices:   l.list("KIBITZ_MODEL_PRICES", nil),
+			PriceCurrency: l.str("KIBITZ_MODEL_PRICE_CURRENCY", "$"),
 			FallbackModel: l.str("KIBITZ_MODEL_FALLBACK", ""),
 			Vertex: Vertex{
 				ProjectID:      l.str("GOOGLE_CLOUD_PROJECT", ""),

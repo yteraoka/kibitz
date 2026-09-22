@@ -119,6 +119,20 @@ type Usage struct {
 	Duration     time.Duration
 }
 
+// Add accumulates another run's usage, which is how a review that needed a
+// triage pass first reports what the whole thing cost rather than only the
+// half anybody was watching.
+func (u Usage) Add(other Usage) Usage {
+	return Usage{
+		InputTokens:  u.InputTokens + other.InputTokens,
+		OutputTokens: u.OutputTokens + other.OutputTokens,
+		Duration:     u.Duration + other.Duration,
+	}
+}
+
+// Tokens is the total of both directions.
+func (u Usage) Tokens() int { return u.InputTokens + u.OutputTokens }
+
 // Result is what the engine produced.
 type Result struct {
 	Summary  string

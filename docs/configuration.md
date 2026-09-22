@@ -58,6 +58,8 @@
 | `KIBITZ_MODEL` | `google-vertex/gemini-3.1-pro-preview` | `provider/model` 形式。既定は Vertex AI の Gemini (申請不要) |
 | `KIBITZ_PROVIDER_ENV` | - | API キーで認証するプロバイダ用に、エージェントへ渡す環境変数名 (カンマ区切り)。例: `ZHIPU_API_KEY`。**名前だけを設定し、値は環境から読む** |
 | `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
+| `KIBITZ_MODEL_PRICES` | - | サマリコメントに概算コストを出すための単価。`モデル=入力/出力` を**100 万トークンあたり**でカンマ区切り。`*` は既定値。未設定ならトークン数だけを出し、金額は出さない |
+| `KIBITZ_MODEL_PRICE_CURRENCY` | `$` | 上記の単価の通貨記号 |
 | `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替 |
 | `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
 | `VERTEX_LOCATION` | `global` | Vertex AI のリージョン。データ所在地要件があれば `asia-northeast1` 等を指定 |
@@ -118,7 +120,27 @@ Cloud Run ジョブとして Cloud Scheduler から毎分起動する
 必要な権限は `roles/monitoring.viewer` と、**ワーカーサービスに対する**
 `roles/run.developer`。プロジェクト全体の権限は要らない。
 
-## 3. リポジトリ設定 `.kibitz.yaml`
+### コストの概算について
+
+kibitz は**単価を知らない**。プロバイダ・リージョン・契約で違い、しかも変わるため、
+コード側に持たせていない。設定した場合だけ金額を出す。
+
+```
+KIBITZ_MODEL_PRICES=google-vertex/gemini-3.1-pro-preview=1.25/10,*=2/8
+```
+
+サマリコメントの末尾はこうなる。
+
+```
+レビュー対象: `3f7a1c2` / 所要 1m58s
+トークン: 入力 123,456 / 出力 7,890 / 概算 $0.233
+```
+
+- **金額は上限**として読む。キャッシュされた入力を割り引くプロバイダでは実際はこれより安い
+  (エージェントの出力からキャッシュ分を取得していないため)
+- 単価が未設定のモデルでは**トークン数だけ**を出す。「無料だった」と「誰も設定していない」は別のこと
+- 通貨記号は `KIBITZ_MODEL_PRICE_CURRENCY` で変えられる (既定 `$`)。
+  円建ての単価を入れて `$` のまま出すより、記号を合わせるほうがよい
 
 > **未実装 (Phase 7)。** パーサと設定マージはまだ無いので、いまリポジトリに
 > `.kibitz.yaml` を置いても**何も起きない**。現時点の挙動は環境変数だけで決まる

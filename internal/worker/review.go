@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,15 @@ type ReviewJob struct {
 	Language   string
 	Guidelines string
 	Model      string
+	// Prices estimates what a review cost, for the summary comment. It is
+	// configured rather than known: prices differ by provider, region and
+	// contract, and they change. With none configured the summary reports
+	// tokens and says nothing about money.
+	Prices reviewer.Prices
+	// Currency is the symbol the estimate is written with. It follows
+	// whatever the prices were given in, because printing a dollar sign in
+	// front of a yen figure is worse than printing nothing.
+	Currency string
 	// Mention is how a comment addresses kibitz. It is only used to write the
 	// help text, which would otherwise tell people to use a token this
 	// deployment does not answer to.
@@ -679,6 +689,67 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 		fmt.Fprintf(&b, " / 所要 %s", result.Usage.Duration.Round(time.Second))
 	}
 	b.WriteString("\n")
+	j.writeUsage(&b, result.Usage)
+	return b.String()
+}
+
+// writeUsage reports what the review consumed, and what that costs where
+// anybody has said what it costs.
+//
+// It is in the comment rather than only in the metrics because the person
+// deciding whether a bot is worth having is the one reading its comments, and
+// "this took 40,000 tokens" is the number that decision turns on.
+func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage) {
+	if usage.Tokens() == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "トークン: 入力 %s / 出力 %s", thousands(usage.InputTokens), thousands(usage.OutputTokens))
+	if cost, ok := j.Prices.Cost(j.Model, usage); ok {
+		// An estimate, and said to be one: cached input is discounted by some
+		// providers and not counted here, so this is a ceiling.
+		fmt.Fprintf(b, " / 概算 %s", money(cost, j.currency()))
+	}
+	b.WriteString("\n")
+}
+
+// currency falls back to the one most model prices are quoted in.
+func (j *ReviewJob) currency() string {
+	if j.Currency == "" {
+		return "$"
+	}
+	return j.Currency
+}
+
+// money renders a cost with enough digits to be worth printing. A review that
+// cost a fifth of a cent should not read as "0.00".
+func money(amount float64, currency string) string {
+	switch {
+	case amount >= 100:
+		return fmt.Sprintf("%s%.0f", currency, amount)
+	case amount >= 1:
+		return fmt.Sprintf("%s%.2f", currency, amount)
+	case amount >= 0.01:
+		return fmt.Sprintf("%s%.3f", currency, amount)
+	default:
+		return fmt.Sprintf("%s%.4f", currency, amount)
+	}
+}
+
+// thousands groups a count so that six figures can be read at a glance.
+func thousands(n int) string {
+	s := strconv.Itoa(n)
+	if n < 0 {
+		return s
+	}
+
+	var b strings.Builder
+	for i, digit := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(digit)
+	}
 	return b.String()
 }
 

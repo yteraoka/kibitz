@@ -925,3 +925,82 @@ func TestSummarySaysWhatWasReviewed(t *testing.T) {
 		t.Errorf("the summary does not say it was incremental:\n%s", f.summaries[1])
 	}
 }
+
+// The person deciding whether the bot is worth having is the one reading its
+// comments, so what it spent goes in the comment.
+func TestSummaryReportsTokensAndCost(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{{
+		Summary:   "見ました",
+		RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+		Usage:     reviewer.Usage{InputTokens: 123456, OutputTokens: 7890},
+	}}}
+
+	prices, err := reviewer.ParsePrices([]string{"test/model=1.25/10"})
+	if err != nil {
+		t.Fatalf("ParsePrices: %v", err)
+	}
+
+	job := newJob(t, f, e)
+	job.Model = "test/model"
+	job.Prices = prices
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d summaries, want 1", len(f.summaries))
+	}
+
+	summary := f.summaries[0]
+	// Grouped, because six figures are not readable otherwise.
+	if !strings.Contains(summary, "入力 123,456") || !strings.Contains(summary, "出力 7,890") {
+		t.Errorf("the summary does not report the tokens:\n%s", summary)
+	}
+	// 123456/1e6*1.25 + 7890/1e6*10 = 0.23332
+	if !strings.Contains(summary, "$0.233") {
+		t.Errorf("the summary does not report the cost:\n%s", summary)
+	}
+}
+
+// A price nobody configured is not a review that was free.
+func TestSummaryReportsTokensWithoutAPrice(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{{
+		Summary:   "見ました",
+		RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+		Usage:     reviewer.Usage{InputTokens: 1000, OutputTokens: 100},
+	}}}
+
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	summary := f.summaries[0]
+	if !strings.Contains(summary, "入力 1,000") {
+		t.Errorf("the summary does not report the tokens:\n%s", summary)
+	}
+	if strings.Contains(summary, "概算") || strings.Contains(summary, "$") {
+		t.Errorf("the summary invented a cost:\n%s", summary)
+	}
+}
+
+// An agent that reported nothing is not an agent that used nothing, and a
+// line of zeroes is worse than no line.
+func TestSummaryOmitsUsageWhenNoneWasReported(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{{
+		Summary:   "見ました",
+		RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+	}}}
+
+	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if strings.Contains(f.summaries[0], "トークン") {
+		t.Errorf("the summary reports usage nobody measured:\n%s", f.summaries[0])
+	}
+}
