@@ -169,7 +169,8 @@ sequenceDiagram
     opt closed かつ未マージ
         Note over J: ここで終了
     end
-    J->>F: ReadFile .kibitz.yaml、デフォルトブランチから
+    J->>F: ReadFile AGENTS.md / .kibitz/guidelines.md / .kibitz.yaml
+    Note over J: すべて**デフォルトブランチ側**から。<br/>指示の位置に入るものは PR 側から読まない
     Note over J: review.enabled / triggers / skip_draft で<br/>走らせるかを決める
     J->>S: ignore されていないか
     J->>S: この SHA は既にレビュー済みか

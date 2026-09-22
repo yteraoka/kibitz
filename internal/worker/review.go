@@ -49,6 +49,10 @@ type ReviewJob struct {
 	// TriageModel runs the triage pass. It reads file names, not code, so a
 	// cheaper model is usually the right one. Empty means [ReviewJob.Model].
 	TriageModel string
+	// GuidelineFiles are the repository's own convention files, read from its
+	// default branch and given to the agent as instructions. Nil means
+	// [DefaultGuidelineFiles]; an empty slice reads none.
+	GuidelineFiles []string
 	// MCP is the external tool servers this deployment offers. A repository
 	// enables the ones it wants by name; anything it names that is not here
 	// is reported rather than silently skipped.

@@ -3,6 +3,7 @@ package worker_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,8 +30,8 @@ func TestSettingsAreReadFromTheDefaultBranch(t *testing.T) {
 	if err := newJob(t, f, e).Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if len(f.filesRead) == 0 || f.filesRead[0] != repoconfig.Path {
-		t.Fatalf("files read = %v, want %s", f.filesRead, repoconfig.Path)
+	if !slices.Contains(f.filesRead, repoconfig.Path) {
+		t.Fatalf("files read = %v, want %s among them", f.filesRead, repoconfig.Path)
 	}
 	if got := e.requests[0].Language; got != "English" {
 		t.Errorf("Language = %q, want the repository's", got)

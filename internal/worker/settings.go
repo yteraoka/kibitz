@@ -62,26 +62,32 @@ func (j *ReviewJob) defaults() repoconfig.Settings {
 func (j *ReviewJob) settingsFor(ctx context.Context, client forge.Client, ref forge.PRRef) resolved {
 	base := j.defaults()
 
+	// The repository's own conventions, from its default branch. They sit
+	// between the deployment's rules and .kibitz.yaml's, so a repository adds
+	// to what the operator said and .kibitz.yaml has the last word.
+	conventions, notes := j.repoGuidelines(ctx, client, ref)
+	base.Guidelines = joinGuidelines(base.Guidelines, conventions)
+
 	data, err := client.ReadFile(ctx, ref, repoconfig.Path)
 	switch {
 	case errors.Is(err, forge.ErrFileNotFound):
-		return resolved{Settings: base}
+		return resolved{Settings: base, notes: notes}
 	case errors.Is(err, forge.ErrNotSupported):
 		// A platform kibitz cannot read files from is not a misconfigured
 		// repository, and saying so on every pull request would be noise.
-		return resolved{Settings: base}
+		return resolved{Settings: base, notes: notes}
 	case err != nil:
 		j.Logger.LogAttrs(ctx, slog.LevelWarn, "could not read the repository settings",
 			slog.String("ref", ref.String()),
 			slog.String("path", repoconfig.Path),
 			slog.String("error", err.Error()),
 		)
-		return resolved{Settings: base, notes: []string{
-			repoconfig.Path + " を読めなかったため、既定の設定でレビューしました",
-		}}
+		return resolved{Settings: base, notes: append(notes,
+			repoconfig.Path+" を読めなかったため、既定の設定でレビューしました")}
 	}
 
-	cfg, notes, err := repoconfig.Parse(data)
+	cfg, parseNotes, err := repoconfig.Parse(data)
+	notes = append(notes, parseNotes...)
 	if err != nil {
 		j.Logger.LogAttrs(ctx, slog.LevelWarn, "the repository settings are not usable",
 			slog.String("ref", ref.String()),
@@ -99,10 +105,12 @@ func (j *ReviewJob) settingsFor(ctx context.Context, client forge.Client, ref fo
 		return resolved{Settings: base, notes: append(notes, err.Error())}
 	}
 
-	if len(notes) > 0 {
+	if len(parseNotes) > 0 {
+		// Only the keys: a guideline file that could not be read was already
+		// logged where it was read, with its own message.
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "the repository settings have keys kibitz ignored",
 			slog.String("ref", ref.String()),
-			slog.Any("notes", notes),
+			slog.Any("notes", parseNotes),
 		)
 	}
 
