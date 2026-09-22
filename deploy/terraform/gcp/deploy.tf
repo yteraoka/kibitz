@@ -102,3 +102,32 @@ resource "google_service_account_iam_member" "deployer_act_as" {
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
+
+# Watching the deployment finish.
+#
+# A worker pool only exists in the Cloud Run v2 API, so updating one returns a
+# long-running operation and gcloud polls it until the revision is ready. That
+# operation is not a child of the worker pool: it lives at
+# projects/PROJECT/locations/REGION/operations/ID, where the per-resource
+# grants above do not reach, and the poll fails with
+#
+#   Permission 'run.operations.get' denied
+#
+# after the update itself has already been accepted. Services and jobs do not
+# hit this because gcloud still deploys those through the v1 API, which reports
+# progress on the resource instead.
+#
+# roles/run.viewer would cover it, but it also reads every other Cloud Run
+# resource in the project. This is the one permission the poll needs.
+resource "google_project_iam_custom_role" "run_operation_reader" {
+  role_id     = "${replace(var.name_prefix, "-", "_")}_run_operation_reader"
+  title       = "kibitz release pipeline: read Cloud Run operations"
+  description = "Poll the long-running operation a worker pool update returns."
+  permissions = ["run.operations.get"]
+}
+
+resource "google_project_iam_member" "deployer_operations" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.run_operation_reader.id
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
