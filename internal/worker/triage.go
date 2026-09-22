@@ -84,8 +84,8 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		slog.Int("selected", len(selected.Files)),
 		slog.Int("skipped", len(skipped)),
 		slog.Int("lines", selected.Lines()),
-		slog.Int("input_tokens", result.Usage.InputTokens),
-		slog.Int("output_tokens", result.Usage.OutputTokens),
+		slog.Int("input_tokens", result.Usage.Input()),
+		slog.Int("output_tokens", result.Usage.Output()),
 	)
 	return triaged{Diff: selected, Skipped: skipped, Notes: result.Triage.Notes, Usage: result.Usage}
 }
