@@ -532,7 +532,10 @@ git push origin v0.4.0
 #### 初回だけ必要な設定
 
 認証は **Workload Identity Federation** で、サービスアカウントキーは作らない。
-Terraform が作るので、`terraform apply` のあと出力をリポジトリ変数に入れる。
+プール自体は既存のもの (既定では `github-pool`) を**参照するだけ**で、Terraform は
+作らない。別の id を使っているなら `workload_identity_pool_id` で指定する。
+プールの中に作られる provider と「このリポジトリのタグだけ」という条件が kibitz の
+持ち物で、`terraform apply` のあと出力をリポジトリ変数に入れる。
 
 ```bash
 terraform output github_actions
@@ -545,7 +548,7 @@ terraform output github_actions
 | --- | --- |
 | `GCP_PROJECT_ID` | プロジェクト ID |
 | `GCP_REGION` | リージョン |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/.../providers/github` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/.../workloadIdentityPools/github-pool/providers/kibitz-github` |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | `kibitz-deployer@...` |
 | `GCP_IMAGE_REPOSITORY` | `REGION-docker.pkg.dev/PROJECT/kibitz` |
 

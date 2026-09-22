@@ -9,17 +9,17 @@
 # workflow on a branch — including one a pull request introduced — cannot
 # exchange a token at all, so it cannot deploy.
 
-resource "google_iam_workload_identity_pool" "github" {
-  workload_identity_pool_id = "${var.name_prefix}-github"
-  display_name              = "GitHub Actions"
-  description               = "Federated identities for ${var.github_repository}"
-
-  depends_on = [google_project_service.required]
+# The pool already exists in the project and is shared with whatever else
+# federates into it, so Terraform reads it rather than owning it. Only the
+# provider below belongs to kibitz, and its condition is what narrows who may
+# exchange a token.
+data "google_iam_workload_identity_pool" "github" {
+  workload_identity_pool_id = var.workload_identity_pool_id
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
-  workload_identity_pool_provider_id = "github"
+  workload_identity_pool_id          = data.google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "${var.name_prefix}-github"
   display_name                       = "GitHub OIDC"
 
   attribute_mapping = {
@@ -37,6 +37,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_service_account" "deployer" {
@@ -49,7 +51,7 @@ resource "google_service_account_iam_member" "deployer_federated" {
   role               = "roles/iam.workloadIdentityUser"
   member = format(
     "principalSet://iam.googleapis.com/%s/attribute.repository/%s",
-    google_iam_workload_identity_pool.github.name,
+    data.google_iam_workload_identity_pool.github.name,
     var.github_repository,
   )
 }
