@@ -606,6 +606,15 @@ terraform output github_actions
 このリポジトリの**タグからしか**トークンを交換できない。ブランチ上のワークフローは
 —— Pull Request が持ち込んだものも含めて —— デプロイできない。
 
+デプロイ用 SA の権限はリソース単位 (Artifact Registry への push と、server /
+worker pool / scaler job それぞれの `roles/run.developer`) だが、1 つだけ
+プロジェクト単位のものがある。worker pool の更新は long-running operation を返し、
+gcloud はそれを polling する。operation は worker pool の子リソースではなく
+`projects/PROJECT/locations/REGION/operations/ID` にいるので、リソース単位の権限では
+読めず、`run.operations.get` だけを持つカスタムロールを Terraform が付けている。
+これが無いと**更新自体は通ったあとで** `Permission 'run.operations.get' denied` で
+ジョブだけが落ちる。
+
 #### 手で push する場合
 
 ```bash

@@ -36,6 +36,13 @@ otherwise undo the other. `terraform output github_actions` prints what that
 workflow needs; none of it is secret, so it goes in repository variables
 rather than secrets.
 
+The deploy service account's grants are per resource -- push to this Artifact
+Registry repository, and `roles/run.developer` on the server, the worker pool
+and the scaler job -- with one exception. Updating a worker pool returns a
+long-running operation that gcloud polls, and that operation is not a child of
+the pool, so reading it takes a project-level permission: a custom role holding
+`run.operations.get` and nothing else.
+
 The workflow authenticates with Workload Identity Federation, so no service
 account key exists to leak. The pool is an existing one that Terraform only
 reads (`workload_identity_pool_id`, `github-pool` by default), so it can be
