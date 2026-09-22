@@ -155,7 +155,19 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "pull request is closed; skipping", slog.String("ref", ref.String()))
 		return nil
 	}
-	if pr.Draft && j.SkipDraft && ev.Kind != event.KindCommand {
+
+	// The repository's own settings, read from its default branch. They can
+	// turn a review off, narrow it, or say nothing at all.
+	settings := j.settingsFor(ctx, client, ref)
+
+	if !settings.Reviews(ev.Kind) {
+		j.Logger.LogAttrs(ctx, slog.LevelInfo, "the repository's settings do not ask for this review; skipping",
+			slog.String("ref", ref.String()),
+			slog.String("kind", string(ev.Kind)),
+		)
+		return nil
+	}
+	if pr.Draft && settings.SkipDraft && ev.Kind != event.KindCommand {
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "pull request is a draft; skipping", slog.String("ref", ref.String()))
 		return nil
 	}
@@ -191,6 +203,14 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	if err != nil {
 		return fmt.Errorf("fetching the diff of %s: %w", ref, err)
 	}
+	diff, ignored := filterPaths(diff, settings.PathsIgnore)
+	settings.ignored = ignored
+	if len(ignored) > 0 {
+		j.Logger.LogAttrs(ctx, slog.LevelInfo, "files excluded by the repository's settings",
+			slog.String("ref", ref.String()),
+			slog.Int("files", len(ignored)),
+		)
+	}
 	if len(diff.Files) == 0 {
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "nothing to review", slog.String("ref", ref.String()))
 		return nil
@@ -199,7 +219,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	// A second review of the same pull request looks at what was pushed since
 	// the first one. The whole diff is still what findings are checked
 	// against, so a comment can never land outside it.
-	focus, since := j.incremental(ctx, client, ref, ev, diff, pr.Source.SHA)
+	changed, since := j.incremental(ctx, client, ref, ev, diff, pr.Source.SHA)
 
 	// Existing comments are context, not a hard requirement: failing the whole
 	// review because they could not be listed would be worse than repeating a
@@ -225,7 +245,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	}()
 
 	// Too large to review in one pass: a first pass decides what to read.
-	selection := j.triage(ctx, ws, ev, pr, focus)
+	selection := j.triage(ctx, ws, ev, pr, changed, settings.Settings)
 
 	req := reviewer.Request{
 		Mode:             reviewer.ModeReview,
@@ -234,15 +254,16 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		PullRequest:      pr,
 		Diff:             selection.Diff,
 		ExistingComments: kibitzExcluded(comments, ev),
-		Language:         j.Language,
-		Model:            j.Model,
-		Guidelines:       j.Guidelines,
+		Language:         settings.Language,
+		Model:            settings.Model,
+		Guidelines:       settings.Guidelines,
+		Focus:            focusOf(ev, settings.Settings),
 		HeadSHA:          ws.HeadSHA,
 		SinceSHA:         since,
 	}
 
 	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
-		trace.WithAttributes(attribute.String("kibitz.model", j.Model)))
+		trace.WithAttributes(attribute.String("kibitz.model", settings.Model)))
 	result, err := j.runWithRetry(agentCtx, req)
 	if result != nil {
 		// A review starts fresh — its job is to look at the code, not to be
@@ -262,7 +283,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	)
 	agentSpan.End()
 
-	sanitized := reviewer.Sanitize(result.RawOutput, reviewer.NewPositions(diff), j.Limits)
+	sanitized := reviewer.Sanitize(result.RawOutput, reviewer.NewPositions(diff), settings.Limits)
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "review produced findings",
 		slog.String("ref", ref.String()),
 		slog.String("head", ws.HeadSHA),
@@ -278,13 +299,13 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.Duration("agent_duration", result.Usage.Duration),
 	)
 
-	j.record(ev, result, sanitized)
+	j.record(ev, result, sanitized, settings.Model)
 	j.rememberReviewed(ctx, ev, ws.HeadSHA)
 
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
 		trace.WithAttributes(telemetry.AttrFindings.Int(len(sanitized.Findings))))
 	defer postSpan.End()
-	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since, selection)
+	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since, selection, settings)
 }
 
 // incremental narrows the diff to what has been pushed since the last review,
@@ -346,7 +367,7 @@ func hasFlag(ev *event.ReviewEvent, flag string) bool {
 
 // record reports what the run produced, which is how cost and noise are
 // tracked over time.
-func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized) {
+func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, model string) {
 	if j.Metrics == nil {
 		return
 	}
@@ -365,7 +386,7 @@ func (j *ReviewJob) record(ev *event.ReviewEvent, result *reviewer.Result, sanit
 			j.Metrics.FindingsDropped.WithLabelValues(reason).Add(float64(n))
 		}
 	}
-	if model := j.Model; model != "" {
+	if model != "" {
 		for direction, n := range map[string]int{
 			"input":       result.Usage.InputTokens,
 			"cache_read":  result.Usage.CacheReadTokens,
@@ -452,7 +473,7 @@ func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, 
 
 // post writes the review back to the pull request: one summary comment that is
 // replaced on every run, plus the findings as one review.
-func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged) error {
+func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged, settings resolved) error {
 	allowed, err := j.allowPost(ctx, ev)
 	if err != nil {
 		return err
@@ -466,7 +487,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		return nil
 	}
 
-	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection)); err != nil {
+	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings)); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
 	if len(sanitized.Findings) == 0 {
@@ -497,7 +518,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 			slog.String("ref", ref.String()),
 			slog.String("error", err.Error()),
 		)
-		body := j.summaryBody(result, sanitized, headSHA, sinceSHA, selection) + "\n\n" + renderFindingsAsText(sanitized.Findings)
+		body := j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings) + "\n\n" + renderFindingsAsText(sanitized.Findings)
 		if fallbackErr := client.UpsertSummary(ctx, ref, SummaryMarker, body); fallbackErr != nil {
 			return fmt.Errorf("posting the fallback summary to %s: %w", ref, fallbackErr)
 		}
@@ -574,10 +595,19 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", ref, err)
 	}
+	settings := j.settingsFor(ctx, client, ref)
+	if !settings.AnswerEnabled {
+		j.Logger.LogAttrs(ctx, slog.LevelInfo, "the repository's settings turn answers off; skipping",
+			slog.String("ref", ref.String()),
+		)
+		return nil
+	}
+
 	diff, err := client.Diff(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("fetching the diff of %s: %w", ref, err)
 	}
+	diff, _ = filterPaths(diff, settings.PathsIgnore)
 
 	// A reply of "why?" is answerable only with what it is replying to. That
 	// is context, not a requirement: an answer without the thread is worse
@@ -606,9 +636,9 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		Question:     ev.Comment.Body,
 		Thread:       thread,
 		SessionID:    j.session(ctx, ev),
-		Language:     j.Language,
-		Model:        j.Model,
-		Guidelines:   j.Guidelines,
+		Language:     settings.Language,
+		Model:        settings.Model,
+		Guidelines:   settings.Guidelines,
 		HeadSHA:      ws.HeadSHA,
 	})
 	if err != nil {
@@ -673,7 +703,7 @@ func kibitzExcluded(comments []forge.Comment, ev *event.ReviewEvent) []forge.Com
 	return out
 }
 
-func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged) string {
+func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged, settings resolved) string {
 	var b strings.Builder
 
 	b.WriteString(strings.TrimSpace(result.Summary))
@@ -723,7 +753,8 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 	b.WriteString("\n")
 	// A review that needed a triage pass paid for two runs, and both are its
 	// bill.
-	j.writeUsage(&b, result.Usage.Add(selection.Usage))
+	j.writeUsage(&b, result.Usage.Add(selection.Usage), settings.Model)
+	writeSettingsNotes(&b, settings)
 	return b.String()
 }
 
@@ -733,7 +764,7 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 // It is in the comment rather than only in the metrics because the person
 // deciding whether a bot is worth having is the one reading its comments, and
 // "this took 40,000 tokens" is the number that decision turns on.
-func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage) {
+func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage, model string) {
 	if usage.Tokens() == 0 {
 		return
 	}
@@ -748,7 +779,7 @@ func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage) {
 	if usage.ReasoningTokens > 0 {
 		fmt.Fprintf(b, " (うち推論 %s)", thousands(usage.ReasoningTokens))
 	}
-	if cost, ok := j.Prices.Cost(j.Model, usage); ok {
+	if cost, ok := j.Prices.Cost(model, usage); ok {
 		// An estimate, and said to be one: it is the configured rates applied
 		// to what the agent reported, not a bill.
 		fmt.Fprintf(b, " / 概算 %s", money(cost, j.currency()))

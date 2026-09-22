@@ -130,10 +130,11 @@ publish する条件 (サーバー):
 
 実行する条件 (ワーカー、.kibitz.yaml 読み込み後):
   - review.enabled / answer.enabled
-  - draft PR は skip (設定で変更可)
+  - review.triggers にその kind が含まれる (未指定なら全部)
+  - draft PR は skip (review.skip_draft で変更可)
   - 変更ファイルがすべて paths_ignore に該当するなら skip
   - 同一 (PR, head_sha, kind) が処理済みなら skip
-  - リポジトリの月次トークン予算を超えていないか
+  - リポジトリの月次トークン予算を超えていないか (Phase 9、未実装)
 ```
 
 ### 3.1 キーワードによる publish の絞り込み

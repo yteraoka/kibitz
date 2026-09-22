@@ -103,6 +103,11 @@ type Request struct {
 	Model    string
 	// Guidelines are the repository's own review rules.
 	Guidelines string
+	// Focus narrows what the review looks for. It comes from the repository's
+	// settings or from the command that asked for the review, and it adds an
+	// emphasis rather than replacing the standard criteria: a review asked to
+	// focus on security is still expected to report the crash it walked past.
+	Focus []string
 	// HeadSHA is the commit that was actually checked out.
 	HeadSHA string
 	// SinceSHA is the commit kibitz reviewed last time, when [Request.Diff]

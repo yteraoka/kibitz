@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -270,4 +271,47 @@ func (c *Client) diffRefs(ctx context.Context, ref forge.PRRef, headSHA string) 
 // documentation uses.
 func (c *Client) CloneAuth(context.Context, forge.PRRef) (forge.CloneCredential, error) {
 	return forge.CloneCredential{Username: "oauth2", Token: c.token}, nil
+}
+
+// maxFileBytes caps what [Client.ReadFile] will accept. The only file kibitz
+// reads this way is its own settings.
+const maxFileBytes = 256 << 10
+
+// ReadFile implements [forge.Client].
+//
+// GitLab requires a ref, and documents "HEAD" as the way to say "whatever the
+// default branch is" — which is the branch the settings have to come from.
+// The whole path goes in one URL segment, so its separators are encoded too.
+func (c *Client) ReadFile(ctx context.Context, ref forge.PRRef, path string) ([]byte, error) {
+	var file struct {
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+		Size     int    `json:"size"`
+	}
+	endpoint := fmt.Sprintf("%s/repository/files/%s?ref=HEAD", projectPath(ref), escapeFilePath(path))
+	if err := c.do(ctx, http.MethodGet, endpoint, nil, &file); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return nil, forge.ErrFileNotFound
+		}
+		return nil, err
+	}
+	if file.Size > maxFileBytes {
+		return nil, fmt.Errorf("gitlab: %s is %d bytes, over the %d byte limit", path, file.Size, maxFileBytes)
+	}
+	if file.Encoding != "base64" {
+		return nil, fmt.Errorf("gitlab: %s came back %s-encoded, which kibitz cannot read", path, file.Encoding)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(file.Content), ""))
+	if err != nil {
+		return nil, fmt.Errorf("gitlab: decoding %s: %w", path, err)
+	}
+	return decoded, nil
+}
+
+// escapeFilePath encodes a path as one URL segment, separators included,
+// which is the form the files API asks for.
+func escapeFilePath(path string) string {
+	return strings.ReplaceAll(url.PathEscape(path), "/", "%2F")
 }

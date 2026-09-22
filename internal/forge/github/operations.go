@@ -286,3 +286,57 @@ func startSide(cm forge.InlineComment) string {
 	}
 	return ""
 }
+
+// maxFileBytes caps what [Client.ReadFile] will accept. The only file kibitz
+// reads this way is its own settings, and a settings file measured in
+// megabytes is a mistake rather than a configuration.
+const maxFileBytes = 256 << 10
+
+// ReadFile implements [forge.Client]. Leaving the ref off is what makes this
+// the default branch: GitHub resolves the contents endpoint against it, which
+// is exactly the branch the settings must come from.
+func (c *Client) ReadFile(ctx context.Context, ref forge.PRRef, path string) ([]byte, error) {
+	var file struct {
+		Type     string `json:"type"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+		Size     int    `json:"size"`
+	}
+	endpoint := repoPath(ref, "/contents/"+escapePath(path))
+	if err := c.do(ctx, http.MethodGet, endpoint, nil, &file); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return nil, forge.ErrFileNotFound
+		}
+		return nil, err
+	}
+	if file.Type != "file" {
+		return nil, fmt.Errorf("github: %s is a %s, not a file", path, file.Type)
+	}
+	if file.Size > maxFileBytes {
+		return nil, fmt.Errorf("github: %s is %d bytes, over the %d byte limit", path, file.Size, maxFileBytes)
+	}
+	// Over a megabyte GitHub returns the metadata with the content left out,
+	// which would otherwise decode to an empty file and read as "no settings".
+	if file.Encoding != "base64" {
+		return nil, fmt.Errorf("github: %s came back %s-encoded, which means it is too large to read this way", path, file.Encoding)
+	}
+
+	// The API wraps the base64 at 60 columns, which base64.StdEncoding will
+	// not accept.
+	decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(file.Content), ""))
+	if err != nil {
+		return nil, fmt.Errorf("github: decoding %s: %w", path, err)
+	}
+	return decoded, nil
+}
+
+// escapePath encodes each segment of a path for use in a URL path, leaving
+// the separators alone.
+func escapePath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
+}

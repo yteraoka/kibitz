@@ -6,6 +6,7 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/repoconfig"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -34,7 +35,7 @@ type triaged struct {
 // Returning the diff unchanged is always a valid outcome. Reviewing too much
 // wastes tokens; reviewing too little loses findings, so every failure here
 // falls back to the whole thing.
-func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *event.ReviewEvent, pr *event.PullRequest, diff *forge.Diff) triaged {
+func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *event.ReviewEvent, pr *event.PullRequest, diff *forge.Diff, settings repoconfig.Settings) triaged {
 	if j.MaxDiffLines <= 0 || diff == nil {
 		return triaged{Diff: diff}
 	}
@@ -53,7 +54,7 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 
 	model := j.TriageModel
 	if model == "" {
-		model = j.Model
+		model = settings.Model
 	}
 
 	result, err := j.Engine.Run(ctx, reviewer.Request{
@@ -62,7 +63,7 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		Event:        ev,
 		PullRequest:  pr,
 		Diff:         diff,
-		Language:     j.Language,
+		Language:     settings.Language,
 		Model:        model,
 		HeadSHA:      ws.HeadSHA,
 	})

@@ -155,11 +155,15 @@ KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
 - 通貨記号は `KIBITZ_MODEL_PRICE_CURRENCY` で変えられる (既定 `$`)。
   円建ての単価を入れて `$` のまま出すより、記号を合わせるほうがよい
 
-> **未実装 (Phase 7)。** パーサと設定マージはまだ無いので、いまリポジトリに
-> `.kibitz.yaml` を置いても**何も起きない**。現時点の挙動は環境変数だけで決まる
-> ([roadmap.md](roadmap.md))。以下はその設計。
+## 3. リポジトリ側の設定 (`.kibitz.yaml`)
 
-リポジトリのデフォルトブランチ側から読む (PR 側の変更は反映しない — [security.md](security.md))。
+リポジトリの**デフォルトブランチ側から**読む。PR 側の変更は反映しない
+([security.md](security.md)) — PR を開いた人が、その PR のレビューのされ方を
+決められてしまうため。
+
+ファイルが無ければ環境変数の設定だけで動く。読めない・壊れているときも
+**レビューは実行する** (既定値で)。設定ファイルの誤字でレビューが止まるほうが
+困るため。ただしサマリコメントにその旨を書く。
 
 ```yaml
 version: 1
@@ -182,47 +186,75 @@ review:
   language: ja
   # 投稿する最小 severity
   min_severity: medium
+  # 運用側の設定より小さくするときだけ効く
   max_comments: 15
-  # 承認 / 変更要求を出すか (既定 false)
-  allow_verdict: false
   model: google-vertex/gemini-3.1-pro-preview
 
 answer:
   enabled: true
-  mention: "/kibitz"
 
-# レビュー時に守らせたい追加ルール (プロンプトに載る)
+# レビュー時に守らせたい追加ルール (プロンプトに載る)。
+# 運用側の guidelines に追記される
 guidelines: |
   - エラーは必ず呼び出し元にラップして返すこと (fmt.Errorf("...: %w", err))
   - 新しい公開 API には doc コメントを付けること
-
-# 運用側の許可リストに載っているものだけ有効になる
-mcp:
-  allow: [jira, sentry]
-
-budget:
-  monthly_tokens: 20000000
-
-# Phase 8 で追加予定。既定は無効
-implement:
-  enabled: false
-  # 実装を指示できるユーザー (これ以外の指示は無視する)
-  allowed_actors: [yteraoka]
-  # 触ってよい範囲
-  paths_allow: ["internal/**", "cmd/**"]
-  # 実行を許すコマンド
-  commands_allow: ["go build ./...", "go test ./...", "golangci-lint run"]
-  branch_prefix: "kibitz/"
-  # 常に draft PR として作る
-  draft: true
 ```
+
+### 効くキーと、まだ効かないキー
+
+**効くキー** (これ以外は取り込まない):
+
+| キー | 効果 |
+| --- | --- |
+| `version` | スキーマ版。`1` のみ。これより大きいと**ファイル全体を拒否**する (黙って一部だけ効くよりよい) |
+| `review.enabled` | `false` でレビューを止める。アンインストールせずに黙らせる手段 |
+| `review.triggers` | `pr_opened` / `pr_updated` / `pr_ready_for_review` / `pr_review_requested` / `command`。未指定は全部 |
+| `review.skip_draft` | draft の間はレビューしない |
+| `review.paths_ignore` | 除外するファイル。下記の glob |
+| `review.focus` | 重点的に見る観点。プロンプトに載る |
+| `review.language` | 出力言語 |
+| `review.min_severity` | 投稿する最小 severity |
+| `review.max_comments` | 投稿数の上限。**運用側の値より小さくするときだけ効く** |
+| `review.model` | 使うモデル |
+| `answer.enabled` | `false` で質問への回答を止める |
+| `guidelines` | 運用側の guidelines に**追記**される (置き換えではない) |
+
+**まだ効かないキー**: `mcp` (Phase 7 の残り)、`budget` (Phase 9)、`implement` (Phase 8)、
+`review.allow_verdict`、`answer.mention`。書いてもログとサマリに「効きません」と出るだけ。
+
+`answer.mention` をリポジトリ側で変えられないのは、メンションの判定が
+**publish 前のサーバー側**で行われ、そこでは `.kibitz.yaml` を読んでいないため。
+リポジトリごとに変えても、そもそもイベントがキューに載らない。
+
+### `paths_ignore` の glob
+
+`.gitignore` や CI の設定で書くのと同じ書き方。
+
+| 記法 | 意味 |
+| --- | --- |
+| `*` | パス区切り (`/`) を跨がない任意の文字列 |
+| `**` | 任意個のセグメント |
+| `?` | 区切り以外の 1 文字 |
+
+`**/` で始まるパターンはルート直下にも当たる (`**/*.md` は `README.md` にも当たる)。
+`a/**/b` は `a/b` にも当たる。先頭の `/` は書かない (常にリポジトリルートからの相対)。
+
+除外したファイルは**エージェントに渡さない**だけでなく、指摘の検証にも使わない。
+エージェントが何らかの方法で読んで指摘してきても投稿されない。
 
 設定の優先順位 (後が優先):
 
 ```
 1. kibitz のビルトイン既定値
 2. 運用側のグローバル設定 (環境変数 / 管理用 YAML)
-3. 組織 / グループ単位の設定 (任意。管理用ストアに保持)
+3. 組織 / グループ単位の設定 (未実装。管理用ストアに保持する予定)
 4. リポジトリの .kibitz.yaml (許可されたキーのみ)
 5. PR コメントのコマンド引数 (その実行にのみ適用)
 ```
+
+ただし一方通行にしている箇所が 2 つある。`guidelines` は**追記**
+(運用側のルールをリポジトリ側から落とせないように)、`max_comments` は
+**小さくする方向にだけ**効く (1 つの PR がコメントで埋まるのを防ぐのは運用側の判断)。
+
+5 の例: `/kibitz review --focus security,performance` と書くと、その 1 回だけ
+`review.focus` を上書きする。

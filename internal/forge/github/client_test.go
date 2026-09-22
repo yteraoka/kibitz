@@ -562,3 +562,51 @@ func TestBotLoginFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestReadFileReadsTheDefaultBranch(t *testing.T) {
+	f := newFakeGitHub(t)
+	// The API wraps its base64 at 60 columns, which a strict decoder rejects.
+	encoded := base64.StdEncoding.EncodeToString([]byte("version: 1\nreview:\n  language: ja\n"))
+	f.handle("GET /repos/yteraoka/kibitz/contents/.kibitz.yaml", http.StatusOK, map[string]any{
+		"type": "file", "encoding": "base64", "size": 33,
+		"content": encoded[:8] + "\n" + encoded[8:],
+	})
+
+	got, err := f.client(t).ReadFile(context.Background(), ref, ".kibitz.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if want := "version: 1\nreview:\n  language: ja\n"; string(got) != want {
+		t.Errorf("ReadFile = %q, want %q", got, want)
+	}
+	// No ref: that is what makes GitHub answer from the default branch, and
+	// the default branch is the only one these settings may come from.
+	if q := f.lastRequest().Query; q != "" {
+		t.Errorf("query = %q, want none so that the default branch answers", q)
+	}
+}
+
+// A repository without a settings file is the ordinary case, not a failure.
+func TestReadFileReportsAMissingFile(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handle("GET /repos/yteraoka/kibitz/contents/.kibitz.yaml", http.StatusNotFound,
+		map[string]any{"message": "Not Found"})
+
+	_, err := f.client(t).ReadFile(context.Background(), ref, ".kibitz.yaml")
+	if !errors.Is(err, forge.ErrFileNotFound) {
+		t.Errorf("err = %v, want ErrFileNotFound", err)
+	}
+}
+
+// Over a megabyte GitHub answers with the metadata and no content, which would
+// otherwise decode to an empty file and read as "no settings at all".
+func TestReadFileRefusesWhatItCannotDecode(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handle("GET /repos/yteraoka/kibitz/contents/big.yaml", http.StatusOK, map[string]any{
+		"type": "file", "encoding": "none", "content": "", "size": 2 << 20,
+	})
+
+	if _, err := f.client(t).ReadFile(context.Background(), ref, "big.yaml"); err == nil {
+		t.Error("a file too large to read came back as empty")
+	}
+}
