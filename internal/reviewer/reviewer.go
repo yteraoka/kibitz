@@ -88,6 +88,11 @@ type Request struct {
 	ExistingComments []forge.Comment
 	// Question is the comment being answered in [ModeAnswer].
 	Question string
+	// Thread is the conversation the question belongs to, oldest first, with
+	// the question itself left out. It includes kibitz's own writing: a reply
+	// of "why?" under a finding is answerable only if the finding is there
+	// too.
+	Thread []forge.Comment
 	// SessionID continues an earlier conversation about this pull request.
 	SessionID string
 	// Language is the language findings are written in.

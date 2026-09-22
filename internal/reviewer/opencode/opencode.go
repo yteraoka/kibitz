@@ -96,6 +96,17 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 
 	start := time.Now()
 	stdout, err := r.exec(ctx, configPath, req)
+	if err != nil && req.SessionID != "" && isMissingSession(err) {
+		// The session lives in the agent's own storage, inside a container
+		// that is disposable. Losing it is ordinary, not a failure: the
+		// prompt carries the context it needs, so the run is simply repeated
+		// without it.
+		r.logger.LogAttrs(ctx, slog.LevelInfo, "the stored session is gone; starting a new one",
+			slog.String("session_id", req.SessionID),
+		)
+		req.SessionID = ""
+		stdout, err = r.exec(ctx, configPath, req)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +184,12 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 		return nil, fmt.Errorf("opencode: %w: %s", err, detail)
 	}
 	return stdout, nil
+}
+
+// isMissingSession reports whether opencode refused because the session id it
+// was given no longer exists.
+func isMissingSession(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "session not found")
 }
 
 // args builds the command line. It is separate so that the invocation can be

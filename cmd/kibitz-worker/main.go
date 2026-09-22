@@ -299,6 +299,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:           cfg.OpenCode.Model,
 		Mention:         cfg.Mention,
 		SkipDraft:       cfg.SkipDraft,
+		SessionTTL:      cfg.SessionTTL,
 		Store:           state,
 		MaxPostsPerHour: cfg.MaxPostsPerHour,
 		Metrics:         metrics,

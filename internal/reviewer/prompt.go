@@ -99,6 +99,7 @@ func buildAnswerPrompt(b *strings.Builder, req Request) {
 
 	writePullRequest(b, req)
 	writeGuidelines(b, req)
+	writeThread(b, req)
 
 	if req.Question != "" {
 		b.WriteString("## 質問\n\n<<<\n")
@@ -106,6 +107,32 @@ func buildAnswerPrompt(b *strings.Builder, req Request) {
 		b.WriteString("\n>>>\n\n")
 	}
 	writeDiff(b, req)
+}
+
+// writeThread gives the question its conversation. "なぜ?" means nothing on
+// its own; what it refers to is the comment above it, which is often one of
+// kibitz's own findings.
+func writeThread(b *strings.Builder, req Request) {
+	if len(req.Thread) == 0 {
+		return
+	}
+
+	b.WriteString("## これまでのやり取り\n\n")
+	b.WriteString("古い順です。`kibitz` と書かれているものは、あなた自身の過去の発言です。\n\n")
+	for _, c := range req.Thread {
+		author := c.Author.Login
+		if author == "" {
+			author = "unknown"
+		}
+		if c.Path != "" {
+			fmt.Fprintf(b, "### %s (%s:%d)\n\n", author, c.Path, c.Line)
+		} else {
+			fmt.Fprintf(b, "### %s\n\n", author)
+		}
+		b.WriteString("<<<\n")
+		b.WriteString(strings.TrimSpace(c.Body))
+		b.WriteString("\n>>>\n\n")
+	}
 }
 
 func writePullRequest(b *strings.Builder, req Request) {

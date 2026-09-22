@@ -171,7 +171,7 @@ publish されなかったイベントは HTTP 204、メトリクス
 /kibitz review --full              # 増分ではなく全体
 /kibitz explain internal/queue/sqs/subscriber.go:88
 /kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)
-/kibitz ignore                     # この PR では以降レビューしない
+/kibitz ignore                     # この PR では以降レビューしない (質問への回答は続く)
 /kibitz help
 
 # Phase 8 (Issue 上で使用、既定は無効)

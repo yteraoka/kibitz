@@ -81,6 +81,7 @@ const (
 	prefixJob      = "job"
 	prefixLock     = "lock"
 	prefixSession  = "session"
+	prefixIgnore   = "ignore"
 	prefixPosts    = "posts"
 )
 
@@ -107,6 +108,11 @@ func LockKey(ev *event.ReviewEvent) string {
 // question continues the conversation instead of starting over.
 func SessionKey(ev *event.ReviewEvent) string {
 	return fmt.Sprintf("%s:%s", prefixSession, ev.Key())
+}
+
+// IgnoreKey records that kibitz was asked to stay out of a pull request.
+func IgnoreKey(ev *event.ReviewEvent) string {
+	return fmt.Sprintf("%s:%s", prefixIgnore, ev.Key())
 }
 
 // PostsKey counts what kibitz has posted to one pull request within an hour,
