@@ -1,6 +1,11 @@
 module github.com/yteraoka/kibitz
 
-go 1.25.0
+// The patch version is deliberately left off. actions/setup-go installs
+// exactly what this directive says, so pinning a patch here pins CI to a
+// toolchain that stops receiving security fixes, and govulncheck then reports
+// every standard library fix released since. Without a patch, CI and the
+// golang:1.27 image the Dockerfiles build with both track the latest one.
+go 1.27
 
 require (
 	cloud.google.com/go/firestore v1.25.0

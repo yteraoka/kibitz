@@ -19,6 +19,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	githubforge "github.com/yteraoka/kibitz/internal/forge/github"
+	gitlabforge "github.com/yteraoka/kibitz/internal/forge/gitlab"
 	"github.com/yteraoka/kibitz/internal/httpx"
 	"github.com/yteraoka/kibitz/internal/queue"
 	"github.com/yteraoka/kibitz/internal/queue/memory"
@@ -261,13 +262,23 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		}
 		forges[event.PlatformGitHub] = client
 	}
+	if cfg.GitLab.Configured() {
+		client, err := gitlabforge.New(gitlabforge.Config{
+			BaseURL: cfg.GitLab.BaseURL,
+			Token:   cfg.GitLab.Token.Reveal(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		forges[event.PlatformGitLab] = client
+	}
 	if len(forges) == 0 {
 		// Without a client the worker would acknowledge every event while
 		// doing nothing, which looks healthy and reviews nothing. The
 		// in-memory queue is the one exception: nothing can arrive on it, so
 		// the local stack is allowed to come up unconfigured.
 		if cfg.Queue.Backend != config.QueueMemory {
-			return nil, fmt.Errorf("no forge credentials configured; set KIBITZ_GITHUB_APP_ID, KIBITZ_GITHUB_INSTALLATION_ID and KIBITZ_GITHUB_PRIVATE_KEY")
+			return nil, fmt.Errorf("no forge credentials configured; set KIBITZ_GITHUB_APP_ID, KIBITZ_GITHUB_INSTALLATION_ID and KIBITZ_GITHUB_PRIVATE_KEY, or KIBITZ_GITLAB_TOKEN")
 		}
 		logger.LogAttrs(context.Background(), slog.LevelWarn,
 			"no forge credentials configured; the worker will not be able to review anything")
@@ -283,6 +294,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:          cfg.OpenCode.Model,
 		ReviewAgent:    cfg.OpenCode.ReviewAgent,
 		AnswerAgent:    cfg.OpenCode.AnswerAgent,
+		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
 		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
@@ -295,6 +307,8 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 			Depth:   cfg.Limits.CloneDepth,
 			Timeout: 5 * time.Minute,
 		},
+		MaxDiffLines: cfg.Limits.MaxDiffLines,
+		TriageModel:  cfg.OpenCode.TriageModel,
 		Limits: reviewer.Limits{
 			MaxComments: cfg.Limits.MaxComments,
 			MinSeverity: reviewer.Severity(cfg.Limits.MinSeverity),

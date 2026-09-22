@@ -85,6 +85,17 @@
       datasourceTemplate: 'github-releases',
     },
     {
+      // govulncheck is pinned the same way and for the same reason: the
+      // Makefile runs it locally, CI runs it in the vuln job, and a scan that
+      // disagrees with the one that gates the pull request is not much use.
+      customType: 'regex',
+      description: 'govulncheck, pinned identically in the Makefile and in CI',
+      managerFilePatterns: ['Makefile', '.github/workflows/ci.yml'],
+      matchStrings: ['GOVULNCHECK_VERSION\\s*\\??[:=]\\s*(?<currentValue>v\\S+)'],
+      depNameTemplate: 'golang.org/x/vuln',
+      datasourceTemplate: 'go',
+    },
+    {
       // Dockerfile.worker explains why opencode is pinned rather than taken
       // as "latest": the agent's behaviour is part of kibitz's output, so it
       // should change in a reviewed commit. That is exactly what this is.

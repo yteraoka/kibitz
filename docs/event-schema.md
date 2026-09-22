@@ -5,9 +5,9 @@
 | 項目 | GitHub | GitLab | Azure DevOps |
 | --- | --- | --- | --- |
 | 用語 | Pull Request | Merge Request | Pull Request |
-| 検証方式 | HMAC-SHA256 (`X-Hub-Signature-256: sha256=...`) | 共有トークン一致 (`X-Gitlab-Token`) | Basic 認証 + 任意のカスタムヘッダ (HMAC なし) |
+| 検証方式 | HMAC-SHA256 (`X-Hub-Signature-256: sha256=...`) | HMAC-SHA256 (`webhook-signature`、GitLab 19.0+)。古い版は共有トークン一致 (`X-Gitlab-Token`) | Basic 認証 + 任意のカスタムヘッダ (HMAC なし) |
 | イベント種別 | `X-GitHub-Event` ヘッダ | `X-Gitlab-Event` ヘッダ + body の `object_kind` | body の `eventType` |
-| 配送 ID | `X-GitHub-Delivery` | `X-Gitlab-Event-UUID` | body の `id` |
+| 配送 ID | `X-GitHub-Delivery` | `webhook-id` (= `Idempotency-Key`)。再送で同じ値 | body の `id` |
 | PR 作成 | `pull_request` / `action=opened` | `merge_request` / `action=open` | `git.pullrequest.created` |
 | PR 更新 (push) | `pull_request` / `action=synchronize` | `merge_request` / `action=update` (`oldrev` あり) | `git.pullrequest.updated` |
 | PR 本文コメント | `issue_comment` / `action=created` | `note` / `noteable_type=MergeRequest` | `ms.vss-code.git-pullrequest-comment-event` |
@@ -22,6 +22,12 @@
 - **Azure DevOps の PR コメント通知には diff 位置が薄い。** 補完のため worker 側で API から thread を取り直す。
 - **GitLab の `note` は MR 以外 (Issue, Commit, Snippet) にも飛ぶ。** `object_attributes.noteable_type` で絞る。
 - **GitHub は Webhook を自動再送しない。** publish に失敗して 5xx を返しても救済されないため、サーバー内で数回リトライしてから諦める。
+- **GitLab の `update` は何でも来る。** push・説明文の編集・ラベル・レビュアー・draft 解除が
+  すべて `action=update` で届く。`oldrev` の有無と `changes` の中身で見分ける
+  ([3.2](#32-gitlab-の-merge_request-アクション))。
+- **GitLab の配送 ID に `X-Gitlab-Event-UUID` を使わない。** 再帰的な Webhook
+  (Webhook が引き起こした Webhook) は同じ値を共有するため、別のイベントが同一配送に
+  見えてしまう。再送で不変なのは `webhook-id` (= `Idempotency-Key`) のほう。
 
 ## 2. 正規化イベント (`event.ReviewEvent`)
 
@@ -159,6 +165,28 @@ publish されなかったイベントは HTTP 204、メトリクス
 ([deployment.md](deployment.md#配送のログ))。
 キューにメッセージが載らないので、ワーカーも起きない ([deployment.md](deployment.md) の
 オートスケール)。
+
+### 3.2 GitLab の `merge_request` アクション
+
+GitLab は 1 つの `action=update` に多くのことを詰め込むので、`object_attributes` と
+`changes` を見て判断する。
+
+| GitLab | 条件 | kibitz の kind |
+| --- | --- | --- |
+| `open` / `reopen` | - | `pr.opened` |
+| `update` | `oldrev` がある | `pr.updated` (GitHub の `synchronize` 相当) |
+| `update` | `changes.draft` が true→false | `pr.ready_for_review` |
+| `update` | `changes.reviewers` が増えている | `pr.review_requested` |
+| `update` | 上記以外 (タイトル・ラベル・マイルストーン) | 無視 |
+| `merge` | - | `pr.merged` |
+| `close` | - | `pr.closed` |
+| `approval` / `approved` / `unapproval` / `unapproved` | - | 無視 |
+
+`note` イベントは `object_attributes.noteable_type == "MergeRequest"` のものだけを
+扱う (Issue・Commit・Snippet にも同じイベントが飛ぶ)。`system: true` の note は
+GitLab 自身が書いたもの (「説明を変更しました」など) なので無視する。
+`position` があれば差分上のコメント、無ければ MR 全体へのコメント。
+返信先は `discussion_id` (GitLab はスレッドを discussion と呼ぶ)。
 
 ## 4. コマンド構文
 

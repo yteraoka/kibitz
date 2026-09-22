@@ -1,0 +1,74 @@
+{
+  "object_kind": "note",
+  "event_type": "note",
+  "user": {
+    "id": 1001,
+    "name": "Yoshihiro Teraoka",
+    "username": "yteraoka"
+  },
+  "project_id": 42,
+  "project": {
+    "id": 42,
+    "name": "kibitz",
+    "web_url": "https://gitlab.example.com/yteraoka/kibitz",
+    "git_ssh_url": "git@gitlab.example.com:yteraoka/kibitz.git",
+    "git_http_url": "https://gitlab.example.com/yteraoka/kibitz.git",
+    "namespace": "yteraoka",
+    "visibility_level": 0,
+    "path_with_namespace": "yteraoka/kibitz",
+    "default_branch": "main"
+  },
+  "object_attributes": {
+    "id": 1244,
+    "note": "/kibitz review",
+    "noteable_type": "MergeRequest",
+    "author_id": 1001,
+    "noteable_id": 93,
+    "system": false,
+    "action": "create",
+    "created_at": "2026-09-19 10:25:00 UTC",
+    "discussion_id": "d7a0e5b1c2f34567",
+    "url": "https://gitlab.example.com/yteraoka/kibitz/-/merge_requests/16#note_1244"
+  },
+  "merge_request": {
+    "id": 93,
+    "iid": 16,
+    "author_id": 1001,
+    "title": "Add the SQS subscriber",
+    "description": "キューの実装を追加します。",
+    "draft": false,
+    "state": "opened",
+    "source_branch": "feature/sqs",
+    "target_branch": "main",
+    "source_project_id": 42,
+    "target_project_id": 42,
+    "created_at": "2026-09-19 10:00:00 UTC",
+    "updated_at": "2026-09-19 10:05:00 UTC",
+    "url": "https://gitlab.example.com/yteraoka/kibitz/-/merge_requests/16",
+    "last_commit": {
+      "id": "3f7a1c2b9d4e5f60718293a4b5c6d7e8f9012345"
+    },
+    "source": {
+      "id": 42,
+      "name": "kibitz",
+      "web_url": "https://gitlab.example.com/yteraoka/kibitz",
+      "git_ssh_url": "git@gitlab.example.com:yteraoka/kibitz.git",
+      "git_http_url": "https://gitlab.example.com/yteraoka/kibitz.git",
+      "namespace": "yteraoka",
+      "visibility_level": 0,
+      "path_with_namespace": "yteraoka/kibitz",
+      "default_branch": "main"
+    },
+    "target": {
+      "id": 42,
+      "name": "kibitz",
+      "web_url": "https://gitlab.example.com/yteraoka/kibitz",
+      "git_ssh_url": "git@gitlab.example.com:yteraoka/kibitz.git",
+      "git_http_url": "https://gitlab.example.com/yteraoka/kibitz.git",
+      "namespace": "yteraoka",
+      "visibility_level": 0,
+      "path_with_namespace": "yteraoka/kibitz",
+      "default_branch": "main"
+    }
+  }
+}

@@ -24,6 +24,8 @@ func BuildPrompt(req Request) string {
 	switch req.Mode {
 	case ModeAnswer:
 		buildAnswerPrompt(&b, req)
+	case ModeTriage:
+		buildTriagePrompt(&b, req)
 	default:
 		buildReviewPrompt(&b, req)
 	}
@@ -133,6 +135,56 @@ func writeThread(b *strings.Builder, req Request) {
 		b.WriteString("<<<\n")
 		b.WriteString(strings.TrimSpace(c.Body))
 		b.WriteString("\n>>>\n\n")
+	}
+}
+
+// buildTriagePrompt asks which files are worth reviewing. It deliberately
+// carries the file list and not the patches: the whole point is that the diff
+// is too large to put in front of a model, so the thing that decides what to
+// read must not read it all first.
+func buildTriagePrompt(b *strings.Builder, req Request) {
+	b.WriteString("# 依頼\n\n")
+	fmt.Fprintf(b, "変更が大きすぎるため、全体をレビューできません。以下の変更ファイル一覧から、**レビューする価値が高い順に選んで** `%s` に JSON で書き出してください。\n\n", TriageOutputPath)
+
+	b.WriteString("## 選び方\n\n")
+	b.WriteString("- 壊れたときの影響が大きいもの、正しさやセキュリティに関わるものを優先する\n")
+	b.WriteString("- 生成物、ロックファイル、vendor、スナップショット、大量の定型的な変更は後回しにする\n")
+	b.WriteString("- ファイルの中身を読む必要はない。名前と変更量から判断してよい\n")
+	b.WriteString("- 判断に迷うものは含める。見落とすより読みすぎるほうがよい\n\n")
+
+	b.WriteString("## 出力の契約\n\n")
+	fmt.Fprintf(b, "`%s` に次の形式で書き出します。それ以外のファイルは変更しないでください。\n\n", TriageOutputPath)
+	b.WriteString("```json\n")
+	fmt.Fprintf(b, `{
+  "schema_version": %d,
+  "paths": ["internal/queue/sqs/subscriber.go", "internal/store/dynamodb/store.go"],
+  "notes": "生成物とロックファイルを除外しました"
+}
+`, OutputSchemaVersion)
+	b.WriteString("```\n\n")
+
+	writePullRequest(b, req)
+	writeFileList(b, req)
+}
+
+// writeFileList describes the change without quoting it.
+func writeFileList(b *strings.Builder, req Request) {
+	if req.Diff == nil || len(req.Diff.Files) == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "## 変更ファイル (%d 件, %d 行)\n\n", len(req.Diff.Files), req.Diff.Lines())
+	b.WriteString("| ファイル | 状態 | +/- |\n| --- | --- | --- |\n")
+	for _, f := range req.Diff.Files {
+		path := f.Path
+		if f.PreviousPath != "" {
+			path = f.PreviousPath + " -> " + f.Path
+		}
+		fmt.Fprintf(b, "| `%s` | %s | +%d/-%d |\n", path, f.Status, f.Additions, f.Deletions)
+	}
+	b.WriteString("\n")
+	if req.Diff.Truncated {
+		b.WriteString("_この一覧は打ち切られています。実際の変更ファイルはこれより多いです。_\n\n")
 	}
 }
 

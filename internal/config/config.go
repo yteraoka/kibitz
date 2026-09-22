@@ -154,8 +154,13 @@ func (s Scale) Enabled() bool { return s.Backend == ScaleCloudRun }
 // Webhook holds the credentials used to verify inbound webhooks. Each platform
 // accepts a list so secrets can be rotated without downtime.
 type Webhook struct {
-	GitHubSecrets        []Secret
-	GitLabTokens         []Secret
+	GitHubSecrets []Secret
+	// GitLabTokens are the shared secrets GitLab sends in X-Gitlab-Token.
+	// They say who sent a delivery and nothing about what it contains.
+	GitLabTokens []Secret
+	// GitLabSigningTokens verify the HMAC GitLab 19 and later send, which
+	// does cover the body. Prefer them where the instance is new enough.
+	GitLabSigningTokens  []Secret
 	AzureDevOpsUser      string
 	AzureDevOpsPasswords []Secret
 }
@@ -164,7 +169,8 @@ type Webhook struct {
 // with no webhook credentials at all would accept nothing, which is always a
 // misconfiguration.
 func (w Webhook) Configured() bool {
-	return len(w.GitHubSecrets) > 0 || len(w.GitLabTokens) > 0 || len(w.AzureDevOpsPasswords) > 0
+	return len(w.GitHubSecrets) > 0 || len(w.GitLabTokens) > 0 ||
+		len(w.GitLabSigningTokens) > 0 || len(w.AzureDevOpsPasswords) > 0
 }
 
 // Policy holds the trigger rules the server applies before publishing.
@@ -203,6 +209,19 @@ type GitHubApp struct {
 	BaseURL        string // set for GitHub Enterprise Server
 }
 
+// GitLabAuth holds the credentials kibitz posts to GitLab with. GitLab has no
+// equivalent of a GitHub App installation token, so this is a long-lived
+// access token and is treated as one (docs/security.md).
+type GitLabAuth struct {
+	// BaseURL is the instance. Empty means gitlab.com.
+	BaseURL string
+	// Token is a personal, group or project access token with api scope.
+	Token Secret
+}
+
+// Configured reports whether kibitz can talk to GitLab at all.
+func (g GitLabAuth) Configured() bool { return g.Token != "" }
+
 // Vertex holds the Google Cloud settings OpenCode needs to reach Vertex AI.
 // Authentication is ADC (Workload Identity), so there is no key.
 type Vertex struct {
@@ -236,10 +255,11 @@ type OpenCode struct {
 	PriceCurrency string
 	FallbackModel string
 	Vertex        Vertex
-	// ReviewAgent and AnswerAgent name the agent definitions shipped in the
+	// ReviewAgent, AnswerAgent and TriageAgent name the agent definitions shipped in the
 	// worker image. An empty value falls back to OpenCode's default agent.
 	ReviewAgent string
 	AnswerAgent string
+	TriageAgent string
 	// ProviderEnv names environment variables to forward to the agent, for
 	// providers that authenticate with an API key (ZHIPU_API_KEY for GLM,
 	// OPENROUTER_API_KEY, and so on). Only the names are configured; the
@@ -295,6 +315,7 @@ type Worker struct {
 	Limits           Limits
 	MCPAllowlist     []string
 	GitHub           GitHubApp
+	GitLab           GitLabAuth
 	ImplementEnabled bool
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
@@ -336,6 +357,7 @@ func LoadServer(env Lookup) (*Server, error) {
 		Webhook: Webhook{
 			GitHubSecrets:        l.secrets("KIBITZ_GITHUB_WEBHOOK_SECRETS"),
 			GitLabTokens:         l.secrets("KIBITZ_GITLAB_WEBHOOK_TOKENS"),
+			GitLabSigningTokens:  l.secrets("KIBITZ_GITLAB_SIGNING_TOKENS"),
 			AzureDevOpsUser:      l.str("KIBITZ_AZDO_BASIC_USER", ""),
 			AzureDevOpsPasswords: l.secrets("KIBITZ_AZDO_BASIC_PASSWORDS"),
 		},
@@ -398,6 +420,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			},
 			ReviewAgent: l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent: l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
+			TriageAgent: l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
 			ProviderEnv: l.list("KIBITZ_PROVIDER_ENV", nil),
 		},
 		Limits: Limits{
@@ -412,6 +435,10 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),
 			PrivateKey:     l.secret("KIBITZ_GITHUB_PRIVATE_KEY"),
 			BaseURL:        l.str("KIBITZ_GITHUB_BASE_URL", ""),
+		},
+		GitLab: GitLabAuth{
+			BaseURL: l.str("KIBITZ_GITLAB_BASE_URL", ""),
+			Token:   l.secret("KIBITZ_GITLAB_TOKEN"),
 		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),

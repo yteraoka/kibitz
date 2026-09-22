@@ -1,6 +1,6 @@
 # kibitz-server: receives webhooks and publishes normalized events.
 # It touches no repositories and runs no agent, so it ships on distroless.
-FROM golang:1.25 AS build
+FROM golang:1.27 AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./

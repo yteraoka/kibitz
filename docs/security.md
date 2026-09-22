@@ -5,7 +5,7 @@
 | プラットフォーム | 方式 | 実装 |
 | --- | --- | --- |
 | GitHub | HMAC-SHA256 | `hmac.New(sha256.New, secret)` で生ボディを計算し、`X-Hub-Signature-256` と `hmac.Equal` で比較 |
-| GitLab | 共有トークン | `X-Gitlab-Token` を `subtle.ConstantTimeCompare` で比較 |
+| GitLab | HMAC-SHA256 (19.0+) / 共有トークン | `webhook-signature` を検証。無ければ `X-Gitlab-Token` を `subtle.ConstantTimeCompare` で比較 |
 | Azure DevOps | Basic 認証 | Service Hooks に設定したユーザー名 / パスワードを定数時間比較。加えて固定のカスタムヘッダ値も検証 |
 
 原則:
@@ -69,6 +69,19 @@ PR のタイトル・本文・差分・コメントはすべて**外部の第三
    - モデルの利用予算を別枠にする
    - メンテナが `/kibitz review` とコメントの先頭に明示したときだけ実行する
    という縮退モードで動かす。
+
+### GitLab のトークン
+
+GitHub App は 1 時間で失効するインストールトークンを都度発行するが、**GitLab には
+それに相当する仕組みが無い**。`KIBITZ_GITLAB_TOKEN` は長命な資格情報なので、
+扱いを一段厳しくする。
+
+- **project access token を使う** (personal access token ではなく)。
+  スコープは `api`、ロールは Developer で足りる
+- 有効期限を設定し、ローテーションを運用に組み込む
+- Secret Manager に置き、環境変数へは起動時にだけ渡す
+- クローンは `oauth2:<token>@host` の形で行う。GitLab が自ら文書化している方法で、
+  ユーザー名側は無視される
 
 ## 3.1 メンション名と通知
 

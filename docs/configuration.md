@@ -21,7 +21,8 @@
 | `KIBITZ_BLOBSTORE_BUCKET` | - | Claim Check 用バケット |
 | `KIBITZ_CLAIM_CHECK_THRESHOLD` | `65536` | この byte 数を超える生 payload は退避 |
 | `KIBITZ_GITHUB_WEBHOOK_SECRETS` | - | カンマ区切り (ローテーション用) |
-| `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | 同上 |
+| `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | GitLab の共有トークン (`X-Gitlab-Token`)。カンマ区切り |
+| `KIBITZ_GITLAB_SIGNING_TOKENS` | - | GitLab 19.0+ の署名トークン (`whsec_...`)。**body まで検証できるのでこちらを推奨**。両方設定した場合、署名が来ていれば署名を検証する |
 | `KIBITZ_AZDO_BASIC_USER` / `_PASSWORDS` | - | Azure DevOps Service Hooks の Basic 認証 |
 | `KIBITZ_GITHUB_APP_ID` | - | 自分の発言を判別するための GitHub App id。**秘密情報ではない** (App の設定 URL に含まれる数字)。GitHub がコメントに付ける `performed_via_github_app.id` と突き合わせる |
 | `KIBITZ_BOT_LOGINS` | - | 追加で無視したいアカウント名 (カンマ区切り)。通常は不要 — App id での判別が効かないイベント (レビューコメントなど) の保険 |
@@ -73,10 +74,12 @@
 | `KIBITZ_MENTION` | `/kibitz` | ヘルプ本文に出す呼びかた。サーバーと同じ値にする (判定はサーバー側で行う) |
 | `KIBITZ_OPENCODE_REVIEW_AGENT` | `kibitz-review` | レビュー用エージェント定義名 |
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
-| `KIBITZ_MAX_DIFF_LINES` | `10000` | 超過時は triage モード |
+| `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
+| `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
 | `KIBITZ_MCP_ALLOWLIST` | - | 有効化を許す MCP 名 (カンマ区切り) |
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
-| `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | GitLab 認証 |
+| `KIBITZ_GITLAB_BASE_URL` | `https://gitlab.com` | GitLab インスタンス。self-managed はここを変える (`/api/v4` は付けても付けなくてもよい) |
+| `KIBITZ_GITLAB_TOKEN` | - | personal / group / project access token (`api` スコープ)。**GitLab には GitHub App のインストールトークンに相当するものが無く、長命な資格情報になる** |
 | `KIBITZ_AZDO_ORG_URL` / `_TOKEN` | - | Azure DevOps 認証 |
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
@@ -136,6 +139,8 @@ KIBITZ_MODEL_PRICES=google-vertex/gemini-3.1-pro-preview=1.25/10,*=2/8
 トークン: 入力 123,456 / 出力 7,890 / 概算 $0.233
 ```
 
+- **triage パスの分も合算する。** 巨大 PR では選抜と本レビューで 2 回モデルを呼ぶので、
+  片方だけ報告すると過少申告になる (失敗した triage の分も含む)
 - **金額は上限**として読む。キャッシュされた入力を割り引くプロバイダでは実際はこれより安い
   (エージェントの出力からキャッシュ分を取得していないため)
 - 単価が未設定のモデルでは**トークン数だけ**を出す。「無料だった」と「誰も設定していない」は別のこと

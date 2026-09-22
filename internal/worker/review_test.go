@@ -926,6 +926,139 @@ func TestSummarySaysWhatWasReviewed(t *testing.T) {
 	}
 }
 
+// bigDiff is a change too large to put in front of a model in one go.
+func bigDiff(files int) *forge.Diff {
+	d := &forge.Diff{}
+	for i := range files {
+		d.Files = append(d.Files, forge.File{
+			Path:      fmt.Sprintf("file%02d.go", i),
+			Status:    forge.FileModified,
+			Additions: 100,
+			Patch:     "@@ -1 +1,2 @@\n a\n+b",
+		})
+	}
+	return d
+}
+
+func TestTriageNarrowsAVeryLargeChange(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.diff = bigDiff(20)
+
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Triage: &reviewer.TriageOutput{
+			SchemaVersion: 1,
+			Paths:         []string{"file01.go", "file07.go"},
+			Notes:         "生成物を除外しました",
+		}},
+		{Summary: "見ました", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"}},
+	}}
+
+	job := newJob(t, f, e)
+	job.MaxDiffLines = 100
+	job.TriageModel = "cheap/model"
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if len(e.requests) != 2 {
+		t.Fatalf("%d engine runs, want a triage pass and a review", len(e.requests))
+	}
+	if e.requests[0].Mode != reviewer.ModeTriage {
+		t.Errorf("first run mode = %s, want triage", e.requests[0].Mode)
+	}
+	if e.requests[0].Model != "cheap/model" {
+		t.Errorf("triage model = %q, want the cheap one", e.requests[0].Model)
+	}
+
+	reviewed := e.requests[1].Diff
+	if reviewed == nil || len(reviewed.Files) != 2 {
+		t.Fatalf("reviewed diff = %+v, want the two selected files", reviewed)
+	}
+	if reviewed.Files[0].Path != "file01.go" || reviewed.Files[1].Path != "file07.go" {
+		t.Errorf("reviewed = %+v, want the selection in diff order", reviewed.Files)
+	}
+
+	// The author is told what was not read.
+	if len(f.summaries) != 1 {
+		t.Fatalf("%d summaries, want 1", len(f.summaries))
+	}
+	for _, want := range []string{"未レビュー", "生成物を除外しました", "file02.go"} {
+		if !strings.Contains(f.summaries[0], want) {
+			t.Errorf("the summary does not mention %q:\n%s", want, f.summaries[0])
+		}
+	}
+}
+
+// A change that fits is reviewed whole, with no triage pass at all.
+func TestTriageIsSkippedForAnOrdinaryChange(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{
+		{Summary: "見ました", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"}},
+	}}
+
+	job := newJob(t, f, e)
+	job.MaxDiffLines = 10000
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(e.requests) != 1 || e.requests[0].Mode != reviewer.ModeReview {
+		t.Fatalf("runs = %+v, want one review and no triage", e.requests)
+	}
+	if strings.Contains(f.summaries[0], "未レビュー") {
+		t.Errorf("the summary claims files were skipped:\n%s", f.summaries[0])
+	}
+}
+
+// Reviewing too much wastes tokens; reviewing too little loses findings, so
+// every way triage can fail falls back to the whole change.
+func TestTriageFallsBackToTheWholeChange(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *reviewer.Result
+		err    error
+	}{
+		{name: "the triage pass failed", err: errors.New("the agent died")},
+		{name: "it produced no selection", result: &reviewer.Result{}},
+		{
+			name:   "it selected files that are not in the diff",
+			result: &reviewer.Result{Triage: &reviewer.TriageOutput{SchemaVersion: 1, Paths: []string{"invented.go"}}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origin, _, _ := originRepo(t)
+			f := defaultForge()
+			f.diff = bigDiff(20)
+
+			e := &fakeEngine{
+				results: []*reviewer.Result{tc.result, {Summary: "見ました", RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"}}},
+				errs:    []error{tc.err},
+			}
+
+			job := newJob(t, f, e)
+			job.MaxDiffLines = 100
+
+			if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if len(e.requests) != 2 {
+				t.Fatalf("%d engine runs, want the review to have run anyway", len(e.requests))
+			}
+			if got := e.requests[1].Diff; got == nil || len(got.Files) != 20 {
+				t.Errorf("reviewed %d files, want the whole change", len(got.Files))
+			}
+			if strings.Contains(f.summaries[0], "未レビュー") {
+				t.Errorf("the summary claims files were skipped:\n%s", f.summaries[0])
+			}
+		})
+	}
+}
+
 // The person deciding whether the bot is worth having is the one reading its
 // comments, so what it spent goes in the comment.
 func TestSummaryReportsTokensAndCost(t *testing.T) {
@@ -1002,5 +1135,65 @@ func TestSummaryOmitsUsageWhenNoneWasReported(t *testing.T) {
 	}
 	if strings.Contains(f.summaries[0], "トークン") {
 		t.Errorf("the summary reports usage nobody measured:\n%s", f.summaries[0])
+	}
+}
+
+// A review that needed a triage pass paid for two runs, and reporting only
+// the second one understates the bill.
+func TestSummaryIncludesTheTriagePass(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.diff = bigDiff(20)
+
+	e := &fakeEngine{results: []*reviewer.Result{
+		{
+			Triage: &reviewer.TriageOutput{SchemaVersion: 1, Paths: []string{"file01.go"}},
+			Usage:  reviewer.Usage{InputTokens: 2000, OutputTokens: 100},
+		},
+		{
+			Summary:   "見ました",
+			RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+			Usage:     reviewer.Usage{InputTokens: 8000, OutputTokens: 400},
+		},
+	}}
+
+	job := newJob(t, f, e)
+	job.MaxDiffLines = 100
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	summary := f.summaries[0]
+	if !strings.Contains(summary, "入力 10,000") || !strings.Contains(summary, "出力 500") {
+		t.Errorf("the summary does not add up both passes:\n%s", summary)
+	}
+}
+
+// Even a triage pass that failed spent what it spent before failing.
+func TestSummaryIncludesAFailedTriagePass(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := defaultForge()
+	f.diff = bigDiff(20)
+
+	e := &fakeEngine{
+		results: []*reviewer.Result{
+			{Usage: reviewer.Usage{InputTokens: 2000}},
+			{
+				Summary:   "見ました",
+				RawOutput: &reviewer.Output{SchemaVersion: 1, Summary: "見ました"},
+				Usage:     reviewer.Usage{InputTokens: 8000},
+			},
+		},
+	}
+
+	job := newJob(t, f, e)
+	job.MaxDiffLines = 100
+
+	if err := job.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !strings.Contains(f.summaries[0], "入力 10,000") {
+		t.Errorf("a failed triage pass was left out of the bill:\n%s", f.summaries[0])
 	}
 }
