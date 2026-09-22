@@ -154,8 +154,13 @@ func (s Scale) Enabled() bool { return s.Backend == ScaleCloudRun }
 // Webhook holds the credentials used to verify inbound webhooks. Each platform
 // accepts a list so secrets can be rotated without downtime.
 type Webhook struct {
-	GitHubSecrets        []Secret
-	GitLabTokens         []Secret
+	GitHubSecrets []Secret
+	// GitLabTokens are the shared secrets GitLab sends in X-Gitlab-Token.
+	// They say who sent a delivery and nothing about what it contains.
+	GitLabTokens []Secret
+	// GitLabSigningTokens verify the HMAC GitLab 19 and later send, which
+	// does cover the body. Prefer them where the instance is new enough.
+	GitLabSigningTokens  []Secret
 	AzureDevOpsUser      string
 	AzureDevOpsPasswords []Secret
 }
@@ -164,7 +169,8 @@ type Webhook struct {
 // with no webhook credentials at all would accept nothing, which is always a
 // misconfiguration.
 func (w Webhook) Configured() bool {
-	return len(w.GitHubSecrets) > 0 || len(w.GitLabTokens) > 0 || len(w.AzureDevOpsPasswords) > 0
+	return len(w.GitHubSecrets) > 0 || len(w.GitLabTokens) > 0 ||
+		len(w.GitLabSigningTokens) > 0 || len(w.AzureDevOpsPasswords) > 0
 }
 
 // Policy holds the trigger rules the server applies before publishing.
@@ -329,6 +335,7 @@ func LoadServer(env Lookup) (*Server, error) {
 		Webhook: Webhook{
 			GitHubSecrets:        l.secrets("KIBITZ_GITHUB_WEBHOOK_SECRETS"),
 			GitLabTokens:         l.secrets("KIBITZ_GITLAB_WEBHOOK_TOKENS"),
+			GitLabSigningTokens:  l.secrets("KIBITZ_GITLAB_SIGNING_TOKENS"),
 			AzureDevOpsUser:      l.str("KIBITZ_AZDO_BASIC_USER", ""),
 			AzureDevOpsPasswords: l.secrets("KIBITZ_AZDO_BASIC_PASSWORDS"),
 		},

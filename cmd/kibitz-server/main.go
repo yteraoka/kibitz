@@ -25,6 +25,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/webhook"
 	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
+	gitlabhook "github.com/yteraoka/kibitz/internal/webhook/gitlab"
 )
 
 // version is set at build time with -ldflags.
@@ -147,7 +148,14 @@ func realMain() error {
 		logger,
 		receiverOpts...,
 	))
-	// GitLab lands in Phase 4 and Azure DevOps in Phase 5.
+	mux.Handle("POST /webhook/gitlab", webhook.NewReceiver(
+		gitlabhook.New(reveal(cfg.Webhook.GitLabTokens), reveal(cfg.Webhook.GitLabSigningTokens)),
+		publisher,
+		triggers,
+		logger,
+		receiverOpts...,
+	))
+	// Azure DevOps lands in Phase 5.
 
 	handler := httpx.Chain(mux,
 		httpx.RequestID,
