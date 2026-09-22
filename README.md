@@ -61,6 +61,7 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | [docs/event-schema.md](docs/event-schema.md) | 3 プラットフォームの Webhook 差異と正規化イベントスキーマ |
 | [docs/queue.md](docs/queue.md) | Pub/Sub / SQS 抽象化、順序制御、冪等性、リトライ、DLQ、Claim Check |
 | [docs/worker.md](docs/worker.md) | OpenCode のヘッドレス実行、MCP 統合、プロンプト設計、構造化出力 |
+| [docs/triage.md](docs/triage.md) | 大きすぎる変更を絞るトリアージ。3 つの diff の使い分け、全体に戻る経路 |
 | [docs/agent-engine.md](docs/agent-engine.md) | エージェントエンジンの選定 (OpenCode / pi の比較と決定) |
 | [docs/security.md](docs/security.md) | 署名検証、シークレット管理、プロンプトインジェクション、fork PR の扱い |
 | [docs/configuration.md](docs/configuration.md) | サーバー / ワーカーの環境変数、リポジトリ設定 `.kibitz.yaml` |
