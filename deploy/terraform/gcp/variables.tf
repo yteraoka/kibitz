@@ -27,6 +27,17 @@ variable "github_repository" {
   default     = "yteraoka/kibitz"
 }
 
+variable "workload_identity_pool_id" {
+  description = <<-EOT
+    An existing Workload Identity Pool to put the GitHub provider in. Terraform
+    reads this pool rather than creating it, so it can be shared with whatever
+    else federates into the project; only the provider and its condition belong
+    to kibitz.
+  EOT
+  type        = string
+  default     = "github-pool"
+}
+
 variable "server_image" {
   description = <<-EOT
     Image for kibitz-server, e.g. REGION-docker.pkg.dev/PROJECT/kibitz/kibitz-server:v1.

@@ -6,6 +6,11 @@ server_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-server:v
 worker_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-worker:v0.1.0"
 scaler_image = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-scaler:v0.1.0"
 
+# GitHub Actions からデプロイするための Workload Identity プール。既存のものを
+# 参照するだけで、Terraform は作らない。プール内に作られる provider だけが
+# kibitz のもので、「このリポジトリの tag だけ」という条件はそちらに付く。
+workload_identity_pool_id = "github-pool"
+
 # From the GitHub App's settings page.
 github_app_id          = "123456"
 github_installation_id = "7890123"

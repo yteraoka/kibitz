@@ -36,8 +36,12 @@ workflow needs; none of it is secret, so it goes in repository variables
 rather than secrets.
 
 The workflow authenticates with Workload Identity Federation, so no service
-account key exists to leak. What may use it is this repository, and only on a
-tag: a workflow on a branch cannot exchange a token at all.
+account key exists to leak. The pool is an existing one that Terraform only
+reads (`workload_identity_pool_id`, `github-pool` by default), so it can be
+shared with anything else federating into the project; the provider inside it
+is kibitz's, and its condition is what narrows access. What may use it is this
+repository, and only on a tag: a workflow on a branch cannot exchange a token
+at all.
 
 ## Who owns the worker's instance count
 
