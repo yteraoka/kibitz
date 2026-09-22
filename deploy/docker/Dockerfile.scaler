@@ -1,7 +1,7 @@
 # kibitz-scaler: sizes the worker from the queue backlog.
 # It reads Cloud Monitoring and writes a Cloud Run instance count, nothing
 # else, so it ships on distroless like the server.
-FROM golang:1.25 AS build
+FROM golang:1.27 AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./

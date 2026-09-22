@@ -182,7 +182,10 @@ type gitRunner struct {
 func (g gitRunner) command(ctx context.Context, args ...string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(ctx, g.timeout)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// gosec's G204 fires on the variable arguments. The binary is the literal
+	// "git", every caller in this package passes a fixed subcommand first, and
+	// the arguments are handed to exec rather than to a shell.
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: fixed binary, no shell
 	cmd.Dir = g.dir
 	cmd.Env = append(os.Environ(),
 		// Never stop for credentials: a prompt in a worker is a hung job.
