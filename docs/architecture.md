@@ -10,6 +10,10 @@
 | ワーカーの書き込み | **当面はコメント投稿のみ。** 将来 Issue 起点の実装モードを追加 (Phase 8) |
 | エージェントエンジン | **OpenCode** ([agent-engine.md](agent-engine.md)) |
 
+この表の各行が**なぜそう決まったか**、および何を検討して捨てたかは
+[adr/](adr/) にある ([0002](adr/0002-gcp-first-single-tenant.md) /
+[0003](adr/0003-opencode-as-agent-engine.md))。
+
 単一組織前提でも、Webhook シークレットやトークンの取り扱いは
 [security.md](security.md) の方針を崩さない (将来の分離コストを下げるため)。
 
