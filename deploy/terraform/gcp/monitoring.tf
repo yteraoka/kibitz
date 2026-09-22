@@ -75,7 +75,7 @@ resource "google_monitoring_alert_policy" "backlog" {
       "Events are arriving faster than they are being reviewed, or the worker",
       "is down. Check the worker's logs and whether it is holding a lock it",
       "cannot release:",
-      "  gcloud run services logs read ${var.name_prefix}-worker --region ${var.region}",
+      "  gcloud run worker-pools logs read ${var.name_prefix}-worker --region ${var.region}",
     ])
   }
 }
@@ -158,7 +158,7 @@ resource "google_monitoring_alert_policy" "scaler_failures" {
       "  gcloud run jobs executions list --job ${var.name_prefix}-scaler --region ${var.region}",
       "",
       "The usual causes are a missing role (it needs roles/monitoring.viewer",
-      "and roles/run.developer on the worker service) and a subscription name",
+      "and roles/run.developer on the worker pool) and a subscription name",
       "that does not match the one it is watching.",
     ])
   }

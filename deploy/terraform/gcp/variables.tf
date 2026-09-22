@@ -195,7 +195,7 @@ variable "worker_concurrency" {
 }
 
 variable "worker_max_instances" {
-  description = "Upper bound on worker instances. This is the real cap on model spend."
+  description = "Upper bound on worker instances, enforced by kibitz-scaler rather than by the worker pool, which has no autoscaling to bound. This is the real cap on model spend."
   type        = number
   default     = 3
 }

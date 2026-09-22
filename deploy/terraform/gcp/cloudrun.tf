@@ -99,7 +99,7 @@ resource "google_cloud_run_v2_service" "server" {
         value = var.region
       }
       env {
-        name  = "KIBITZ_SCALE_WORKER_SERVICE"
+        name  = "KIBITZ_SCALE_WORKER_POOL"
         value = "${var.name_prefix}-worker"
       }
       # Cloud Run exposes a single port, so /metrics rides on the main
@@ -142,7 +142,7 @@ resource "google_cloud_run_v2_service" "server" {
   depends_on = [
     google_secret_manager_secret_iam_member.server_webhook,
     google_pubsub_topic_iam_member.server_publish,
-    google_cloud_run_v2_service_iam_member.worker_scaling,
+    google_cloud_run_v2_worker_pool_iam_member.worker_scaling,
     google_service_account_iam_member.worker_act_as,
   ]
 }
@@ -156,49 +156,34 @@ resource "google_cloud_run_v2_service_iam_member" "server_public" {
   member   = "allUsers"
 }
 
-# The worker pulls from the subscription, so it has no inbound traffic for
-# Cloud Run to scale on. kibitz supplies the missing signal itself: the server
-# starts it when it publishes, and kibitz-scaler sizes it from the backlog and
-# returns it to zero once the queue has been empty for a while. See
-# autoscale.tf and docs/deployment.md.
-resource "google_cloud_run_v2_service" "worker" {
+# The worker pulls from the subscription, so it never receives a request. A
+# worker pool is the resource for exactly that: no ingress, no ports, no
+# probes, and the CPU allocated for as long as the instance exists. The binary
+# still serves /healthz and /metrics on its default address, because the same
+# image runs under `docker compose`, but nothing here reaches them.
+#
+# What a worker pool does not have is autoscaling, so kibitz decides the count
+# itself: the server starts the pool when it publishes, and kibitz-scaler
+# sizes it from the backlog and returns it to zero once the queue has been
+# empty for a while. See autoscale.tf and docs/deployment.md.
+resource "google_cloud_run_v2_worker_pool" "worker" {
   name     = "${var.name_prefix}-worker"
   location = var.region
   labels   = var.labels
 
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
   deletion_protection = false
 
   template {
     service_account = google_service_account.worker.email
 
-    # A review runs for minutes after the last request, so the instance must
-    # not be frozen between requests.
-    max_instance_request_concurrency = 1
-
-    # The revision template's floor stays at zero. The count that actually
-    # applies is the service-level one below, which is the only one that can
-    # be changed without rolling a new revision (and interrupting a review).
-    scaling {
-      min_instance_count = 0
-      max_instance_count = var.worker_max_instances
-    }
-
     containers {
       image = var.worker_image
-
-      ports {
-        container_port = 8081
-      }
 
       resources {
         limits = {
           cpu    = "1"
           memory = "2Gi"
         }
-        # Without this the CPU is throttled between requests and the pull
-        # subscriber stops making progress.
-        cpu_idle = false
       }
 
       env {
@@ -224,10 +209,6 @@ resource "google_cloud_run_v2_service" "worker" {
       env {
         name  = "KIBITZ_FIRESTORE_PROJECT_ID"
         value = var.project_id
-      }
-      env {
-        name  = "KIBITZ_WORKER_HEALTH_ADDR"
-        value = ":8081"
       }
       env {
         name  = "KIBITZ_LOG_LEVEL"
@@ -320,15 +301,6 @@ resource "google_cloud_run_v2_service" "worker" {
         name       = "workspace"
         mount_path = "/var/tmp/kibitz"
       }
-
-      startup_probe {
-        http_get {
-          path = "/healthz"
-          port = 8081
-        }
-        failure_threshold = 10
-        period_seconds    = 3
-      }
     }
 
     volumes {
@@ -340,11 +312,14 @@ resource "google_cloud_run_v2_service" "worker" {
     }
   }
 
-  # Service-level scaling is what the server and the scaler write at runtime.
+  # The instance count is what the server and the scaler write at runtime; a
+  # worker pool takes it directly rather than inferring it from traffic.
   # Terraform sets the starting point and then leaves it alone: the two would
-  # otherwise undo each other on every apply.
+  # otherwise undo each other on every apply. worker_max_instances is not set
+  # here at all, because nothing but kibitz moves this number -- the scaler is
+  # what holds it to that cap.
   scaling {
-    min_instance_count = var.worker_min_instances
+    manual_instance_count = var.worker_min_instances
   }
 
   lifecycle {

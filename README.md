@@ -45,7 +45,7 @@ AI による **コードレビュー** と **問い合わせへの回答** を�
 
 - **kibitz-server**: Webhook 受信専用。ステートレスで、検証・正規化・publish だけを行い高速に応答する。
 - **kibitz-worker**: キューを subscribe し、[OpenCode](https://opencode.ai) をヘッドレス実行してレビュー本文を生成、各プラットフォームの API に投稿する。MCP サーバー経由で外部サービス (Issue トラッカー、ドキュメント検索、Sentry など) を参照できる。
-- **kibitz-scaler**: キューの滞留数からワーカーの台数を決める。**レビューが無い間は 0 インスタンス**で、溜まれば増える。pull 購読にはスケールの根拠になるリクエストが無いため、これを別に用意している ([deployment.md](docs/deployment.md#ワーカーのオートスケール))。
+- **kibitz-scaler**: キューの滞留数からワーカーの台数を決める。**レビューが無い間は 0 インスタンス**で、溜まれば増える。ワーカーはリクエストを受けないので Cloud Run の **worker pool** として動かしており、worker pool にはオートスケールが無い (台数は書き込むもの) ため、これを別に用意している ([deployment.md](docs/deployment.md#ワーカーのオートスケール))。
 
 いずれも Go で実装し、キュー・ストレージ・Forge API はすべてインターフェースで抽象化して
 GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれでも同じコードパスで動かす。

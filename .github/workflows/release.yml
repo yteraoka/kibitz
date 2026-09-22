@@ -108,12 +108,17 @@ jobs:
           repo="${{ vars.GCP_IMAGE_REPOSITORY }}"
           region="${{ vars.GCP_REGION }}"
 
-          for service in server worker; do
-            gcloud run services update "kibitz-${service}" \
-              --region "$region" \
-              --image "${repo}/kibitz-${service}:${IMAGE_TAG}" \
-              --quiet
-          done
+          gcloud run services update kibitz-server \
+            --region "$region" \
+            --image "${repo}/kibitz-server:${IMAGE_TAG}" \
+            --quiet
+
+          # The worker is a worker pool, not a service: it has no ingress and
+          # no request-driven scaling, so it has its own command surface.
+          gcloud run worker-pools update kibitz-worker \
+            --region "$region" \
+            --image "${repo}/kibitz-worker:${IMAGE_TAG}" \
+            --quiet
 
           gcloud run jobs update kibitz-scaler \
             --region "$region" \
@@ -127,10 +132,12 @@ jobs:
             echo
             echo "| Component | Revision |"
             echo "| --- | --- |"
-            for service in server worker; do
-              revision=$(gcloud run services describe "kibitz-${service}" \
-                --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
-              echo "| kibitz-${service} | \`${revision}\` |"
-            done
+            server_revision=$(gcloud run services describe kibitz-server \
+              --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
+            echo "| kibitz-server | \`${server_revision}\` |"
+
+            worker_revision=$(gcloud run worker-pools describe kibitz-worker \
+              --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
+            echo "| kibitz-worker | \`${worker_revision}\` |"
             echo "| kibitz-scaler | job updated |"
           } >> "$GITHUB_STEP_SUMMARY"

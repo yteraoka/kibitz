@@ -124,10 +124,10 @@ type State struct {
 type Scale struct {
 	// Backend is "cloudrun", or "none" to leave the instance count alone.
 	Backend string
-	// ProjectID, Region and Service address the worker service.
-	ProjectID string
-	Region    string
-	Service   string
+	// ProjectID, Region and WorkerPool address the worker pool.
+	ProjectID  string
+	Region     string
+	WorkerPool string
 	// MinInstances is where an idle queue lands. Zero is the point; set 1 to
 	// keep the worker warm and still have it scale out under load.
 	MinInstances int
@@ -464,7 +464,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 }
 
 // Scaler is the kibitz-scaler configuration. It is a small tool with a small
-// configuration: which queue to watch, and which service to size from it.
+// configuration: which queue to watch, and which worker pool to size from it.
 type Scaler struct {
 	Log   Log
 	Trace Trace
@@ -545,7 +545,7 @@ func loadScale(l *loader) Scale {
 		Backend:             l.enum("KIBITZ_SCALE_BACKEND", ScaleNone, ScaleNone, ScaleCloudRun),
 		ProjectID:           l.str("KIBITZ_SCALE_PROJECT_ID", l.str("KIBITZ_PUBSUB_PROJECT_ID", "")),
 		Region:              l.str("KIBITZ_SCALE_REGION", ""),
-		Service:             l.str("KIBITZ_SCALE_WORKER_SERVICE", ""),
+		WorkerPool:          l.str("KIBITZ_SCALE_WORKER_POOL", ""),
 		MinInstances:        l.int("KIBITZ_SCALE_MIN_INSTANCES", 0),
 		MaxInstances:        l.positiveInt("KIBITZ_SCALE_MAX_INSTANCES", 3),
 		MessagesPerInstance: l.positiveInt("KIBITZ_SCALE_MESSAGES_PER_INSTANCE", 2),
@@ -556,7 +556,7 @@ func loadScale(l *loader) Scale {
 
 	if s.Backend == ScaleCloudRun {
 		l.requireIf(true, "KIBITZ_SCALE_REGION", s.Region, "when KIBITZ_SCALE_BACKEND is cloudrun")
-		l.requireIf(true, "KIBITZ_SCALE_WORKER_SERVICE", s.Service, "when KIBITZ_SCALE_BACKEND is cloudrun")
+		l.requireIf(true, "KIBITZ_SCALE_WORKER_POOL", s.WorkerPool, "when KIBITZ_SCALE_BACKEND is cloudrun")
 		l.requireIf(true, "KIBITZ_SCALE_PROJECT_ID", s.ProjectID, "when KIBITZ_SCALE_BACKEND is cloudrun")
 	}
 	if s.MinInstances < 0 {

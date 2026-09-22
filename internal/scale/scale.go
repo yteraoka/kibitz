@@ -1,10 +1,10 @@
 // Package scale keeps the worker's instance count in step with the queue.
 //
 // A pull subscriber has no inbound traffic, so the serverless platforms it
-// runs on cannot size it themselves: left alone they either keep one instance
-// running forever or scale it away and leave the queue unattended. The
-// backlog is the missing signal, and this package is what turns it into an
-// instance count.
+// runs on cannot size it themselves: a Cloud Run worker pool has no
+// request-driven autoscaling at all, and asks for the instance count to be
+// stated. The backlog is where that number comes from, and this package is
+// what turns one into the other.
 //
 // Two paths use it, and they answer different questions:
 //
@@ -57,8 +57,8 @@ const (
 
 // Policy turns a backlog into the number of instances the worker should have.
 type Policy struct {
-	// Min is the floor an idle queue falls back to. Zero is the point of the
-	// exercise; an operator who would rather keep the worker warm sets 1.
+	// Min is where an idle queue lands. Zero is the point of the exercise;
+	// an operator who would rather keep the worker warm sets 1.
 	Min int
 	// Max caps the fan-out.
 	Max int
@@ -124,10 +124,10 @@ func (p Policy) Desired(b Backlog) (int, Reason) {
 	return p.Min, ReasonIdle
 }
 
-// Target is the thing whose instance floor is read and written: a Cloud Run
-// service in production, a fake in tests.
+// Target is the thing whose instance count is read and written: a Cloud Run
+// worker pool in production, a fake in tests.
 type Target interface {
-	// Instances reports the floor currently configured.
+	// Instances reports the count currently configured.
 	Instances(ctx context.Context) (int, error)
 	// SetInstances changes it. It is expected to be idempotent.
 	SetInstances(ctx context.Context, n int) error
