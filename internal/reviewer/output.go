@@ -83,8 +83,13 @@ func (e *OutputError) Error() string {
 func (e *OutputError) Unwrap() error { return e.Err }
 
 // Limits bound what is posted back to the pull request.
+// DefaultMaxComments is the cap a caller with no opinion uses. It is not what
+// a zero means: see [Sanitize].
+const DefaultMaxComments = 20
+
 type Limits struct {
-	// MaxComments caps how many findings are posted. The most serious survive.
+	// MaxComments caps how many findings are posted. The most serious
+	// survive. Zero posts none of them.
 	MaxComments int
 	// MinSeverity drops anything less serious.
 	MinSeverity Severity
@@ -119,8 +124,15 @@ func Sanitize(out *Output, positions *Positions, limits Limits) Sanitized {
 	if out == nil {
 		return result
 	}
-	if limits.MaxComments <= 0 {
-		limits.MaxComments = 20
+	// A cap of zero is a cap of zero: it is how a repository asks for the
+	// summary without the inline comments, and reading it as "unset" would
+	// turn the lowest setting there is into the highest. Callers that have no
+	// cap in mind pass [DefaultMaxComments].
+	//
+	// MaxBodyBytes has no such reading — nobody wants a finding truncated to
+	// nothing — so it keeps its fallback.
+	if limits.MaxComments < 0 {
+		limits.MaxComments = 0
 	}
 	if limits.MaxBodyBytes <= 0 {
 		limits.MaxBodyBytes = 4000

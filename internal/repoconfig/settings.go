@@ -91,12 +91,15 @@ func (c *Config) Apply(base Settings) (Settings, error) {
 	if severity := strings.TrimSpace(r.MinSeverity); severity != "" {
 		out.Limits.MinSeverity = reviewer.Severity(severity)
 	}
-	if r.MaxComments != nil {
-		// Only downwards. The cap is there to keep one pull request from
-		// being buried in comments, and that is the deployment's call.
-		if *r.MaxComments < out.Limits.MaxComments || out.Limits.MaxComments == 0 {
-			out.Limits.MaxComments = *r.MaxComments
-		}
+	if r.MaxComments != nil && *r.MaxComments < out.Limits.MaxComments {
+		// Only downwards, with no exception for zero. The cap keeps one pull
+		// request from being buried in comments and that is the deployment's
+		// call; a repository asking for zero is asking for the summary alone,
+		// which is downwards.
+		//
+		// The base has to be a real cap for this to hold, which is why the
+		// caller resolves an unset one before getting here.
+		out.Limits.MaxComments = *r.MaxComments
 	}
 	if len(r.Focus) > 0 {
 		out.Focus = trimAll(r.Focus)
