@@ -35,6 +35,11 @@ type Config struct {
 	BotLogins []string
 	// AllowedRepos are wildcard patterns matched against "owner/name".
 	AllowedRepos []string
+	// AppID is kibitz's own forge app id. Where the payload says which app
+	// performed an action, this is what recognizes kibitz's own writing —
+	// exactly, and without anyone having to write down what the account is
+	// called. The id is not a secret; it is in the app's settings URL.
+	AppID string
 	// Mention is the handle that addresses kibitz in a comment.
 	Mention string
 	// Keywords gate pull request events: when set, a pull request is only
@@ -52,6 +57,7 @@ type Config struct {
 
 // Engine evaluates events against a [Config].
 type Engine struct {
+	appID        string
 	botLogins    map[string]bool
 	allowedRepos []string
 	mention      string
@@ -75,6 +81,7 @@ func New(cfg Config) *Engine {
 	}
 
 	return &Engine{
+		appID:        strings.TrimSpace(cfg.AppID),
 		botLogins:    bots,
 		allowedRepos: cfg.AllowedRepos,
 		mention:      cfg.Mention,
@@ -102,6 +109,11 @@ func (e *Engine) Evaluate(ev *event.ReviewEvent, now time.Time) Decision {
 	// Never react to our own comments: that is how a bot ends up talking to
 	// itself until someone notices the bill.
 	if e.isSelf(ev.Actor) {
+		return Decision{Reason: ReasonSelfAuthored}
+	}
+	// The comment carries its own author, and on GitHub it is the only place
+	// the app that wrote it is named.
+	if ev.Comment != nil && e.isSelf(ev.Comment.Author) {
 		return Decision{Reason: ReasonSelfAuthored}
 	}
 
@@ -168,7 +180,15 @@ func (e *Engine) wanted(ev *event.ReviewEvent) bool {
 }
 
 // isSelf reports whether the actor is kibitz itself.
+//
+// The app id is the reliable half: it survives renaming the app and needs no
+// configuration. The login list is the other half, for the events that do not
+// name an app — GitHub reports one on an issue comment but not on a review
+// comment.
 func (e *Engine) isSelf(a event.Actor) bool {
+	if e.appID != "" && a.AppID == e.appID {
+		return true
+	}
 	if a.Login == "" {
 		return false
 	}

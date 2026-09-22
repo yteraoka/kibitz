@@ -510,3 +510,76 @@ func TestStripCodePreservesLineCount(t *testing.T) {
 		t.Errorf("stripped body has %d lines, want %d", got, want)
 	}
 }
+
+// The app id is what makes the self check reliable: it needs no account name
+// to be configured, and it survives the app being renamed.
+func TestEvaluateRecognizesItselfByAppID(t *testing.T) {
+	// No bot logins at all: the id is the only thing to go on.
+	e := policy.New(policy.Config{
+		AppID:        "123456",
+		AllowedRepos: []string{"*"},
+		Mention:      policy.DefaultMention,
+	})
+
+	ev := commentEvent("/kibitz review")
+	ev.Actor = event.Actor{Login: "renamed-kibitz[bot]", IsBot: true}
+	ev.Comment.Author = event.Actor{Login: "renamed-kibitz[bot]", IsBot: true, AppID: "123456"}
+
+	d := e.Evaluate(ev, now)
+	if d.Publish {
+		t.Errorf("decision = %+v, want it dropped", d)
+	}
+	if d.Reason != policy.ReasonSelfAuthored {
+		t.Errorf("reason = %q, want %q", d.Reason, policy.ReasonSelfAuthored)
+	}
+}
+
+// Another app's comment is another app's comment.
+func TestEvaluateOtherAppsAreNotSelf(t *testing.T) {
+	e := policy.New(policy.Config{
+		AppID:        "123456",
+		AllowedRepos: []string{"*"},
+		Mention:      policy.DefaultMention,
+	})
+
+	ev := commentEvent("/kibitz review")
+	ev.Actor = event.Actor{Login: "renovate[bot]", IsBot: true}
+	ev.Comment.Author = event.Actor{Login: "renovate[bot]", IsBot: true, AppID: "999"}
+
+	if d := e.Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want another app's comment published", d)
+	}
+}
+
+// Review comments carry no app, so the login list still has to work.
+func TestEvaluateFallsBackToTheLoginWithoutAnAppID(t *testing.T) {
+	e := policy.New(policy.Config{
+		AppID:        "123456",
+		BotLogins:    []string{"kibitz[bot]"},
+		AllowedRepos: []string{"*"},
+		Mention:      policy.DefaultMention,
+	})
+
+	ev := commentEvent("/kibitz review")
+	ev.Actor = event.Actor{Login: "kibitz[bot]", IsBot: true}
+	ev.Comment.Author = event.Actor{Login: "kibitz[bot]", IsBot: true}
+
+	if d := e.Evaluate(ev, now); d.Reason != policy.ReasonSelfAuthored {
+		t.Errorf("reason = %q, want %q", d.Reason, policy.ReasonSelfAuthored)
+	}
+}
+
+// Configuring nothing at all is a deployment with no loop protection on the
+// server, which is worth failing loudly about in a test rather than in
+// production.
+func TestEvaluateWithoutAnyIdentityDoesNotDropItsOwnComments(t *testing.T) {
+	e := policy.New(policy.Config{AllowedRepos: []string{"*"}, Mention: policy.DefaultMention})
+
+	ev := commentEvent("/kibitz review")
+	ev.Actor = event.Actor{Login: "kibitz[bot]", IsBot: true}
+	ev.Comment.Author = event.Actor{Login: "kibitz[bot]", IsBot: true, AppID: "123456"}
+
+	if d := e.Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v; with neither an app id nor a login there is nothing to match on", d)
+	}
+}

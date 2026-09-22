@@ -102,6 +102,7 @@ func realMain() error {
 	}()
 
 	triggers := policy.New(policy.Config{
+		AppID:        cfg.Policy.AppID,
 		BotLogins:    cfg.Policy.BotLogins,
 		AllowedRepos: cfg.Policy.AllowedRepos,
 		Mention:      cfg.Policy.Mention,

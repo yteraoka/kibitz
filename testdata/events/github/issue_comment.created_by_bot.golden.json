@@ -42,7 +42,9 @@
     "author": {
       "id": "2002",
       "login": "kibitz[bot]",
-      "is_bot": true
+      "is_bot": true,
+      "app_id": "123456",
+      "app_slug": "kibitz"
     },
     "url": "https://github.com/yteraoka/kibitz/pull/42#issuecomment-555000113"
   },

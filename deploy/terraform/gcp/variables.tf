@@ -141,8 +141,17 @@ variable "trigger_keywords" {
 }
 
 variable "bot_logins" {
-  description = "Accounts kibitz posts as. Events they author are dropped so the bot never answers itself."
+  description = <<-EOT
+    Extra accounts kibitz posts as, whose events are dropped so the bot never
+    answers itself.
+
+    Normally empty. The server recognizes kibitz's own comments by the app id
+    GitHub reports on them, and the worker asks GitHub what the app posts as.
+    Set this only to name an account neither of those covers — an account kept
+    after renaming the app, say.
+  EOT
   type        = list(string)
+  default     = []
 }
 
 variable "github_app_id" {

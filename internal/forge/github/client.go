@@ -107,6 +107,18 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
+// BotLogin reports the account this app posts as, which GitHub derives from
+// the app's slug. Asking is better than being told: a hand-written value that
+// is wrong makes kibitz answer its own comments, and nothing about that is
+// visible until it happens.
+func (c *Client) BotLogin(ctx context.Context) (string, error) {
+	slug, err := c.auth.appSlug(ctx)
+	if err != nil {
+		return "", err
+	}
+	return slug + "[bot]", nil
+}
+
 // Platform implements [forge.Client].
 func (c *Client) Platform() event.Platform { return event.PlatformGitHub }
 

@@ -25,6 +25,18 @@ func (u user) normalize() event.Actor {
 	return a
 }
 
+// actor names who wrote the comment, and which app did it on their behalf
+// when GitHub says so. Only issue comments carry that; a review comment does
+// not, which is why the app is recorded rather than relied on alone.
+func (c comment) actor() event.Actor {
+	a := c.User.normalize()
+	if c.PerformedVia != nil && c.PerformedVia.ID != 0 {
+		a.AppID = strconv.FormatInt(c.PerformedVia.ID, 10)
+		a.AppSlug = c.PerformedVia.Slug
+	}
+	return a
+}
+
 type repository struct {
 	ID            int64  `json:"id"`
 	Name          string `json:"name"`
@@ -142,16 +154,26 @@ func (i issue) normalize() *event.PullRequest {
 	return pr
 }
 
+// githubApp is the app that performed an action, which GitHub reports on an
+// issue comment. It is the only self-identifying thing in a webhook payload:
+// the id is stable across renames, so kibitz can recognize its own comments
+// from the delivery alone, with no credentials and no API call.
+type githubApp struct {
+	ID   int64  `json:"id"`
+	Slug string `json:"slug"`
+}
+
 type comment struct {
-	ID           int64     `json:"id"`
-	Body         string    `json:"body"`
-	User         user      `json:"user"`
-	HTMLURL      string    `json:"html_url"`
-	CreatedAt    time.Time `json:"created_at"`
-	Path         string    `json:"path"`
-	Line         int       `json:"line"`
-	OriginalLine int       `json:"original_line"`
-	InReplyToID  int64     `json:"in_reply_to_id"`
+	ID           int64      `json:"id"`
+	Body         string     `json:"body"`
+	User         user       `json:"user"`
+	PerformedVia *githubApp `json:"performed_via_github_app"`
+	HTMLURL      string     `json:"html_url"`
+	CreatedAt    time.Time  `json:"created_at"`
+	Path         string     `json:"path"`
+	Line         int        `json:"line"`
+	OriginalLine int        `json:"original_line"`
+	InReplyToID  int64      `json:"in_reply_to_id"`
 }
 
 type pullRequestPayload struct {

@@ -64,6 +64,15 @@ resource "google_cloud_run_v2_service" "server" {
         name  = "KIBITZ_BOT_LOGINS"
         value = join(",", var.bot_logins)
       }
+      # Not a secret: it is the number in the app's settings URL. It is how
+      # the server recognizes comments kibitz itself wrote, which GitHub
+      # attributes to the app that made them. Matching on that rather than on
+      # an account name means nothing to keep in step and nothing that breaks
+      # when the app is renamed.
+      env {
+        name  = "KIBITZ_GITHUB_APP_ID"
+        value = var.github_app_id
+      }
       env {
         name  = "KIBITZ_MENTION"
         value = var.mention

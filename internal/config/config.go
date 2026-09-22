@@ -169,8 +169,14 @@ func (w Webhook) Configured() bool {
 
 // Policy holds the trigger rules the server applies before publishing.
 type Policy struct {
+	// AppID is kibitz's own GitHub App id. Where a payload names the app that
+	// acted, it is what recognizes kibitz's own writing — no account name to
+	// keep in step, and nothing that breaks when the app is renamed. It is not
+	// a secret: it is the number in the app's settings URL.
+	AppID string
 	// BotLogins are the accounts kibitz itself posts as. Events they author are
-	// dropped so the bot never reacts to its own comments.
+	// dropped so the bot never reacts to its own comments. With AppID set this
+	// is a fallback, for the events GitHub does not attribute to an app.
 	BotLogins []string
 	// AllowedRepos are glob patterns matched against "owner/name".
 	AllowedRepos []string
@@ -296,7 +302,9 @@ type Worker struct {
 	MaxDeliveries int
 	// MaxPostsPerHour caps what kibitz writes to one pull request per hour.
 	MaxPostsPerHour int
-	// BotLogins are kibitz's own accounts, used as the second loop check.
+	// BotLogins are kibitz's own accounts, used as the second loop check. It
+	// is optional: the worker asks GitHub what the app posts as, and anything
+	// configured is added to what it learns.
 	BotLogins []string
 }
 
@@ -321,6 +329,7 @@ func LoadServer(env Lookup) (*Server, error) {
 			AzureDevOpsPasswords: l.secrets("KIBITZ_AZDO_BASIC_PASSWORDS"),
 		},
 		Policy: Policy{
+			AppID:        l.str("KIBITZ_GITHUB_APP_ID", ""),
 			BotLogins:    l.list("KIBITZ_BOT_LOGINS", nil),
 			AllowedRepos: l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
 			Mention:      l.str("KIBITZ_MENTION", policy.DefaultMention),
