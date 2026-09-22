@@ -77,6 +77,7 @@
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
+| `KIBITZ_REFERENCE_DOCS` | `docs/adr/**/*.md,docs/decisions/**/*.md,adr/**/*.md` | 設計文書 (ADR) の場所。索引をプロンプトに載せ、本文はツールで読ませる。`off` で無効 (下記) |
 | `KIBITZ_REPO_GUIDELINE_FILES` | `AGENTS.md,.kibitz/guidelines.md` | リポジトリの規約ファイル。**デフォルトブランチ側から**読む。`off` で無効 (下記) |
 | `KIBITZ_MCP_CONTEXT_BIN` | `kibitz-mcp` | kibitz 自身の MCP サーバーのパス。`off` で無効 |
 | `KIBITZ_MCP_SERVERS` | - | この kibitz が提供する MCP サーバーの定義。名前 → サーバーの JSON オブジェクト (下記) |
@@ -158,6 +159,36 @@ KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
 - 単価が未設定のモデルでは**トークン数だけ**を出す。「無料だった」と「誰も設定していない」は別のこと
 - 通貨記号は `KIBITZ_MODEL_PRICE_CURRENCY` で変えられる (既定 `$`)。
   円建ての単価を入れて `$` のまま出すより、記号を合わせるほうがよい
+
+### 設計文書 (ADR) の参照
+
+リポジトリに ADR があれば、**パスとタイトルだけ**をプロンプトに載せ、
+本文は `search_docs` / `get_doc` ツールで必要なものだけ読ませる。
+
+```
+KIBITZ_REFERENCE_DOCS=docs/adr/**/*.md,docs/decisions/**/*.md
+KIBITZ_REFERENCE_DOCS=off
+```
+
+**索引だけを載せるのが肝。** エージェントは `rg` も `read` も持っているので検索能力は
+元からあるが、`docs/adr/` を見る理由がなければ引かない。タイトルの一覧が
+「読める」を「読もうと思う」に変え、同時に**検索語彙**を与える
+(ADR は「ordering key」と書き、diff には `PublishOrdered` としか出てこない)。
+
+本文を全部載せない理由は逆で、ADR が 30 件あるリポジトリでは毎回数万トークンになり、
+肝心の差分を押し出す。
+
+- **既定は ADR の置き場所だけ。** `docs/**/*.md` まで広げると索引が長くなるリポジトリが出る。
+  必要なら明示的に指定できる
+- 索引は 50 件、タイトルは 90 文字、本文取得は 48 KiB で打ち切る
+- **索引に載っているパスしかツールは返さない。** 「文書を読む」が「任意のファイルを読む」に
+  ならないようにするため (パスはモデルが PR を読んで組み立てるものなので)
+- 索引が空なら**セクションもツールも出ない**。ADR を置いていないリポジトリのコストはゼロ
+- 内容は `<<<` `>>>` で囲って返す。**これが `read` ツールとの違い**で、
+  `read` の出力は囲えない ([security.md](security.md))
+
+チェックアウト側から索引を作るので、**その PR が追加した ADR も載る**。
+規約ファイル (下記) と違って内容は**データ**として扱うので、PR 側で構わない。
 
 ### リポジトリの規約ファイル
 

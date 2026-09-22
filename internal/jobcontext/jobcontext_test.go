@@ -29,7 +29,7 @@ func TestBuildAndRoundTrip(t *testing.T) {
 	comments := []forge.Comment{{Author: event.Actor{Login: "alice"}, Path: "queue.go", Line: 2, Body: "ctx?"}}
 
 	dir := t.TempDir()
-	path, err := jobcontext.Build(ev, pr, all, reviewed, comments).Write(dir)
+	path, err := jobcontext.Build(ev, pr, all, reviewed, comments, dir, nil).Write(dir)
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestBuildAndRoundTrip(t *testing.T) {
 
 // A leading "./" is what a model writes about as often as not.
 func TestFileNormalizesThePath(t *testing.T) {
-	ctx := jobcontext.Build(nil, nil, &forge.Diff{Files: []forge.File{file("queue.go")}}, nil, nil)
+	ctx := jobcontext.Build(nil, nil, &forge.Diff{Files: []forge.File{file("queue.go")}}, nil, nil, "", nil)
 	if _, ok := ctx.File(" ./queue.go "); !ok {
 		t.Error("a path with a ./ prefix was not found")
 	}
@@ -71,7 +71,7 @@ func TestFileNormalizesThePath(t *testing.T) {
 // guessing at fields.
 func TestLoadRefusesAnotherSchema(t *testing.T) {
 	dir := t.TempDir()
-	ctx := jobcontext.Build(nil, nil, nil, nil, nil)
+	ctx := jobcontext.Build(nil, nil, nil, nil, nil, "", nil)
 	ctx.SchemaVersion = jobcontext.SchemaVersion + 1
 	path, err := ctx.Write(dir)
 	if err != nil {

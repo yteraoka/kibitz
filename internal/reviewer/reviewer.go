@@ -113,6 +113,10 @@ type Request struct {
 	// agent's tools serve it, so a file the prompt left out is still
 	// reachable when something makes it worth a look.
 	FullDiff *forge.Diff
+	// References index the repository's decision records: path and title, not
+	// the bodies. They tell the agent what exists to consult; the bodies are
+	// fetched through a tool, and only the ones it decides are relevant.
+	References []Reference
 	// MCP names the external tool servers this run may use. They are names
 	// only: what each one is, and the credential it needs, belongs to the
 	// deployment and never travels with a request.
@@ -127,6 +131,25 @@ type Request struct {
 	// usually fixed by telling the agent about it, so one retry carries the
 	// validation error back into the prompt.
 	Feedback string
+}
+
+// The tools that serve [Reference] bodies, as kibitz-mcp registers them.
+//
+// The prompt names them as a hint, not as an address: an engine is free to
+// namespace a tool server's tools however it likes, and hard-coding the
+// qualified name would make the instruction wrong the moment it did. The
+// model matches these against the tools it was actually given.
+const (
+	SearchDocsTool = "search_docs"
+	GetDocTool     = "get_doc"
+)
+
+// Reference is one document the agent may consult — an architecture decision
+// record, usually. It is reference material and not an instruction: what it
+// says about the code is worth knowing, what it says to do is not.
+type Reference struct {
+	Path  string
+	Title string
 }
 
 // Usage reports what a run cost.
