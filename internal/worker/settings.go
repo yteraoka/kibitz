@@ -10,6 +10,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/repoconfig"
+	"github.com/yteraoka/kibitz/internal/reviewer"
 )
 
 // resolved is the settings one job runs with, together with whatever should
@@ -31,12 +32,19 @@ type resolved struct {
 // repository without a .kibitz.yaml gets, and the floor everything else is
 // laid over.
 func (j *ReviewJob) defaults() repoconfig.Settings {
+	limits := j.Limits
+	// Resolved here rather than left to the sanitizer, because a repository
+	// may only lower this and "lower than nothing" has no answer.
+	if limits.MaxComments <= 0 {
+		limits.MaxComments = reviewer.DefaultMaxComments
+	}
+
 	return repoconfig.Settings{
 		ReviewEnabled: true,
 		AnswerEnabled: true,
 		SkipDraft:     j.SkipDraft,
 		Language:      j.Language,
-		Limits:        j.Limits,
+		Limits:        limits,
 		Model:         j.Model,
 		Guidelines:    j.Guidelines,
 	}

@@ -18,6 +18,11 @@ import (
 // A pattern that starts with "**/" also matches at the root, so "**/*.md"
 // covers README.md as well as docs/README.md. Anything else is a literal,
 // matched against the whole path.
+//
+// A pattern also covers everything under what it names, so "vendor" and
+// "vendor/" both exclude vendor/github.com/x/y.go. Without that, the two
+// spellings everybody reaches for first would match nothing at all and say
+// nothing about it.
 type PathFilter struct {
 	patterns []string
 	re       *regexp.Regexp
@@ -36,7 +41,9 @@ func NewPathFilter(patterns []string) (*PathFilter, error) {
 			return nil, err
 		}
 		cleaned = append(cleaned, pattern)
-		parts = append(parts, translate(pattern))
+		// "vendor/" names a directory the same way "vendor" does; the
+		// trailing separator is not part of any path it has to match.
+		parts = append(parts, translate(strings.TrimSuffix(pattern, "/")))
 	}
 	if len(parts) == 0 {
 		return nil, nil
@@ -46,7 +53,10 @@ func NewPathFilter(patterns []string) (*PathFilter, error) {
 	// the repository and the file list from the pull request, and both can be
 	// long. Go's regexp is linear in the input, so a hostile pattern costs
 	// compile time and nothing else.
-	re, err := regexp.Compile("^(?:" + strings.Join(parts, "|") + ")$")
+	// The "(?:/.*)?" is what makes a pattern cover a directory's contents:
+	// it is the one place the whole alternation needs it, and applying it
+	// there is the same as applying it to every branch.
+	re, err := regexp.Compile("^(?:" + strings.Join(parts, "|") + ")(?:/.*)?$")
 	if err != nil {
 		return nil, fmt.Errorf("patterns %v cannot be compiled: %w", cleaned, err)
 	}
@@ -79,6 +89,9 @@ func validPattern(pattern string) error {
 	}
 	if strings.HasPrefix(pattern, "/") {
 		return fmt.Errorf("%q: paths are relative to the repository root, so they do not start with /", pattern)
+	}
+	if strings.TrimSuffix(pattern, "/") == "" {
+		return fmt.Errorf("%q: a pattern of nothing but separators matches nothing useful", pattern)
 	}
 	return nil
 }

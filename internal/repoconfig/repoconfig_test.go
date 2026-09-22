@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/yteraoka/kibitz/internal/event"
+	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/repoconfig"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 )
@@ -173,5 +174,42 @@ func TestParseRejectsWhatCannotBeApplied(t *testing.T) {
 		if _, _, err := repoconfig.Parse([]byte(text)); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+// A repository asking for no inline comments is asking for fewer, not for the
+// built-in default. Reading zero as "unset" turned the lowest setting there
+// is into the highest, which took a deployment capped at 5 up to 20.
+func TestMaxCommentsOfZeroIsZero(t *testing.T) {
+	strict := base()
+	strict.Limits.MaxComments = 5
+
+	settings, err := parse(t, "review:\n  max_comments: 0\n").Apply(strict)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if settings.Limits.MaxComments != 0 {
+		t.Fatalf("MaxComments = %d, want 0", settings.Limits.MaxComments)
+	}
+
+	// And the sanitizer has to agree, which is where it went wrong: it used
+	// to read a zero cap as "nobody said" and fall back to 20.
+	diff := &forge.Diff{Files: []forge.File{{
+		Path: "a.go", Status: forge.FileModified,
+		Patch: "@@ -1,1 +1,3 @@\n+1\n+2\n+3",
+	}}}
+	out := &reviewer.Output{SchemaVersion: reviewer.OutputSchemaVersion}
+	for line := 1; line <= 3; line++ {
+		out.Comments = append(out.Comments, reviewer.OutputComment{
+			Path: "a.go", Line: line, Severity: "high", Title: "t", Body: "b",
+		})
+	}
+
+	got := reviewer.Sanitize(out, reviewer.NewPositions(diff), settings.Limits)
+	if len(got.Findings) != 0 {
+		t.Errorf("%d findings posted under a cap of zero", len(got.Findings))
+	}
+	if got.Excess != 3 {
+		t.Errorf("Excess = %d, want the three that were held back", got.Excess)
 	}
 }
