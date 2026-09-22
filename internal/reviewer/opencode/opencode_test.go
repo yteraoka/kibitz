@@ -15,6 +15,7 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/jobcontext"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 )
@@ -41,6 +42,9 @@ func fakeCLI(t *testing.T, script, argsFile, configFile string) string {
 		"printf '%s\\n' \"$@\" > '" + argsFile + "'\n" +
 		"printenv OPENCODE_CONFIG > '" + configFile + "'\n" +
 		"printenv > '" + configFile + ".env'\n" +
+		// The runner deletes the job directory when it returns, so anything a
+		// test wants to look at afterwards is copied out here.
+		"cp \"$(dirname \"$OPENCODE_CONFIG\")/context.json\" '" + configFile + ".context' 2>/dev/null || true\n" +
 		script
 	if err := os.WriteFile(path, []byte(body), 0o700); err != nil { //nolint:gosec // a test fixture
 		t.Fatalf("writing the fake CLI: %v", err)
@@ -67,6 +71,10 @@ func newHarness(t *testing.T, script string) harness {
 	h.bin = fakeCLI(t, script, h.argsFile, h.configFile)
 	return h
 }
+
+// contextCopy is where the fake CLI put the job context, which the runner
+// deletes along with the job directory when it returns.
+func (h harness) contextCopy() string { return h.configFile + ".context" }
 
 // env reads the environment the fake CLI was started with.
 func (h harness) env(t *testing.T) map[string]string {
@@ -580,5 +588,80 @@ func TestForkPullRequestsGetNoMCPServersByDefault(t *testing.T) {
 	// allow_fork is kibitz's own bookkeeping, not part of opencode's schema.
 	if _, written := server["allow_fork"]; written {
 		t.Errorf("allow_fork was written into the config: %v", server)
+	}
+}
+
+// kibitz's own server is registered for every review, without a repository
+// asking: it holds no credential and answers about the pull request the agent
+// is already looking at.
+func TestContextServerIsAlwaysRegistered(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin, ContextBin: "/usr/local/bin/kibitz-mcp"}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	// The prompt carried one file; the pull request has two.
+	req.FullDiff = &forge.Diff{Files: []forge.File{
+		req.Diff.Files[0],
+		{Path: "docs/skipped.md", Status: forge.FileModified, Patch: "@@ -1 +1,2 @@\n+y"},
+	}}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("no mcp block")
+	}
+	server, ok := mcp[opencode.ContextServerName].(map[string]any)
+	if !ok {
+		t.Fatalf("kibitz's own server is missing: %v", mcp)
+	}
+	command := server["command"].([]any)
+	if command[0] != "/usr/local/bin/kibitz-mcp" || command[1] != "--context" {
+		t.Errorf("command = %v", command)
+	}
+
+	// The file it points at holds the whole pull request, not the part the
+	// prompt carried.
+	job, err := jobcontext.Load(h.contextCopy())
+	if err != nil {
+		t.Fatalf("loading the context the runner wrote: %v", err)
+	}
+	if len(job.Files) != 2 {
+		t.Errorf("%d files in the context, want the whole pull request", len(job.Files))
+	}
+	if !job.WasReviewed("queue.go") || job.WasReviewed("docs/skipped.md") {
+		t.Errorf("Reviewed = %v", job.Reviewed)
+	}
+}
+
+// Triage reads file names to decide what is worth reading. Handing it a tool
+// that returns diffs would spend what the pass exists to save.
+func TestTriageGetsNoContextServer(t *testing.T) {
+	h := newHarness(t, `
+cp "$OPENCODE_CONFIG" .kibitz/config-copy.json
+mkdir -p .kibitz/out
+echo '{"schema_version":1,"paths":["queue.go"]}' > .kibitz/out/triage.json
+`)
+	runner := opencode.New(opencode.Config{Bin: h.bin, ContextBin: "kibitz-mcp"}, discardLogger())
+
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeTriage)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, ok := h.config(t)["mcp"]; ok {
+		t.Error("triage was given a tool server")
+	}
+}
+
+// A deployment whose image does not carry the binary leaves it out.
+func TestNoContextServerWithoutABinary(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, ok := h.config(t)["mcp"]; ok {
+		t.Error("a server was registered although no binary is configured")
 	}
 }

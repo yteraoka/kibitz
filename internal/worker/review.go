@@ -258,6 +258,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		Event:            ev,
 		PullRequest:      pr,
 		Diff:             selection.Diff,
+		FullDiff:         diff,
 		ExistingComments: kibitzExcluded(comments, ev),
 		Language:         settings.Language,
 		Model:            settings.Model,

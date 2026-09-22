@@ -272,6 +272,10 @@ type OpenCode struct {
 	// secrets, the GitHub App key — stay in the worker; this is the escape
 	// hatch for a deployment that needs one more variable.
 	EnvPassthrough []string
+	// ContextBin is the kibitz-mcp binary, shipped in the same image. It
+	// serves the agent facts about the pull request that the prompt does not
+	// carry. Setting it to "off" leaves it out.
+	ContextBin string
 }
 
 // Limits bounds a single review job.
@@ -433,6 +437,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			TriageAgent:    l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
 			ProviderEnv:    l.list("KIBITZ_PROVIDER_ENV", nil),
 			EnvPassthrough: l.list("KIBITZ_AGENT_ENV_PASSTHROUGH", nil),
+			ContextBin:     l.str("KIBITZ_MCP_CONTEXT_BIN", "kibitz-mcp"),
 		},
 		Limits: Limits{
 			MaxComments:  l.positiveInt("KIBITZ_MAX_COMMENTS", 20),

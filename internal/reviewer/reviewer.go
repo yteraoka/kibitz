@@ -108,6 +108,11 @@ type Request struct {
 	// emphasis rather than replacing the standard criteria: a review asked to
 	// focus on security is still expected to report the crash it walked past.
 	Focus []string
+	// FullDiff is the whole pull request when Diff holds only the part the
+	// prompt carries — after triage, or after narrowing to what is new. The
+	// agent's tools serve it, so a file the prompt left out is still
+	// reachable when something makes it worth a look.
+	FullDiff *forge.Diff
 	// MCP names the external tool servers this run may use. They are names
 	// only: what each one is, and the credential it needs, belongs to the
 	// deployment and never travels with a request.

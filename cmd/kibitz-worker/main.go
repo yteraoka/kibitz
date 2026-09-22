@@ -306,6 +306,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
 		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
+		ContextBin:     contextBin(cfg.OpenCode.ContextBin),
 		MCPServers:     mcp,
 		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
@@ -418,4 +419,13 @@ func agentEnv(cfg *config.Worker, logger *slog.Logger) []string {
 			slog.Any("variables", missing))
 	}
 	return env
+}
+
+// contextBin resolves the kibitz-mcp setting. "off" turns the server off,
+// which is the way out for a deployment whose image does not carry it.
+func contextBin(configured string) string {
+	if strings.EqualFold(strings.TrimSpace(configured), "off") {
+		return ""
+	}
+	return strings.TrimSpace(configured)
 }

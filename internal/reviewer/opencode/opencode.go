@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/jobcontext"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 )
 
@@ -39,6 +41,11 @@ type Config struct {
 	// Env is added to the process environment, for provider credentials such
 	// as GOOGLE_CLOUD_PROJECT.
 	Env []string
+	// ContextBin is the kibitz-mcp binary. When set, every review and answer
+	// gets it as a local MCP server, so the agent can reach facts about the
+	// pull request that the prompt does not carry — the diff of a file triage
+	// left out, for one. Empty leaves it out entirely.
+	ContextBin string
 	// EnvPassthrough names further variables to copy from the worker's own
 	// environment. The agent's process is otherwise built from a fixed list
 	// rather than inherited, so that the worker's secrets stay in the worker
@@ -176,8 +183,20 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	}
 	defer func() { _ = os.RemoveAll(jobDir) }()
 
+	// The context file is what kibitz's own MCP server answers from. It is
+	// written before the config, because the config has to name it.
+	contextPath := ""
+	if r.cfg.ContextBin != "" && req.Mode != reviewer.ModeTriage {
+		path, err := jobcontext.Build(req.Event, req.PullRequest, fullDiff(req), req.Diff, req.ExistingComments).Write(jobDir)
+		if err != nil {
+			return nil, fmt.Errorf("opencode: %w", err)
+		}
+		contextPath = path
+	}
+	servers := r.serversFor(req, contextPath)
+
 	configPath := filepath.Join(jobDir, "opencode.json")
-	if err := r.writeConfig(ctx, configPath, req); err != nil {
+	if err := r.writeConfig(ctx, configPath, req, servers); err != nil {
 		return nil, err
 	}
 
@@ -191,7 +210,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	}
 
 	start := time.Now()
-	stdout, err := r.exec(ctx, configPath, req)
+	stdout, err := r.exec(ctx, configPath, req, servers)
 	if err != nil && req.SessionID != "" && isMissingSession(err) {
 		// The session lives in the agent's own storage, inside a container
 		// that is disposable. Losing it is ordinary, not a failure: the
@@ -201,7 +220,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 			slog.String("session_id", req.SessionID),
 		)
 		req.SessionID = ""
-		stdout, err = r.exec(ctx, configPath, req)
+		stdout, err = r.exec(ctx, configPath, req, servers)
 	}
 	if err != nil {
 		return nil, err
@@ -261,12 +280,12 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 }
 
 // exec runs the CLI and returns its stdout.
-func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Request) ([]byte, error) {
+func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer) ([]byte, error) {
 	args := r.args(req)
 
 	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
 	cmd.Dir = req.WorkspaceDir
-	cmd.Env = r.childEnv(r.serversFor(req))
+	cmd.Env = r.childEnv(servers)
 	cmd.Env = append(cmd.Env,
 		"OPENCODE_CONFIG="+configPath,
 		// The agent must not pick up the operator's own session history.
@@ -348,4 +367,14 @@ func (r *Runner) args(req reviewer.Request) []string {
 		"--file", filepath.Join(".kibitz", "prompt.md"),
 	)
 	return args
+}
+
+// fullDiff is the whole pull request when the caller narrowed what the prompt
+// carries, and the prompt's own diff otherwise. It is what makes a file triage
+// left out still reachable through a tool.
+func fullDiff(req reviewer.Request) *forge.Diff {
+	if req.FullDiff != nil {
+		return req.FullDiff
+	}
+	return req.Diff
 }

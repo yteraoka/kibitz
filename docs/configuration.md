@@ -77,6 +77,7 @@
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
+| `KIBITZ_MCP_CONTEXT_BIN` | `kibitz-mcp` | kibitz 自身の MCP サーバーのパス。`off` で無効 |
 | `KIBITZ_MCP_SERVERS` | - | この kibitz が提供する MCP サーバーの定義。名前 → サーバーの JSON オブジェクト (下記) |
 | `KIBITZ_MCP_ALLOWLIST` | - | そのうちリポジトリが有効化してよい名前 (カンマ区切り)。未設定なら定義したものすべて |
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
@@ -159,7 +160,9 @@ KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
 
 ### MCP サーバー
 
-外部サービス (Jira、Sentry など) を MCP 経由でレビューに参加させる。
+kibitz 自身の `kibitz-mcp` は**設定なしで毎回有効**になる
+(資格情報を持たず、PR について答えるだけなので。[worker.md](worker.md#8-独自-mcp-サーバー-kibitz-mcp))。
+以下は**外部サービス** (Jira、Sentry など) を MCP 経由でレビューに参加させる話。
 **運用側が定義し、リポジトリが名前で有効化する**という二段構え。
 
 ```

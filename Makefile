@@ -18,7 +18,7 @@ LDFLAGS                := -s -w -X main.version=$(VERSION)
 all: fmt vet test build
 
 .PHONY: build
-build: bin/kibitz-server bin/kibitz-worker bin/kibitz-scaler
+build: bin/kibitz-server bin/kibitz-worker bin/kibitz-scaler bin/kibitz-mcp
 
 bin/kibitz-server: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-server
@@ -28,6 +28,9 @@ bin/kibitz-worker: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 
 bin/kibitz-scaler: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-scaler
+
+bin/kibitz-mcp: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-mcp
 
 .PHONY: test
 test:
