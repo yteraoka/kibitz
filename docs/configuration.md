@@ -23,7 +23,8 @@
 | `KIBITZ_GITHUB_WEBHOOK_SECRETS` | - | カンマ区切り (ローテーション用) |
 | `KIBITZ_GITLAB_WEBHOOK_TOKENS` | - | GitLab の共有トークン (`X-Gitlab-Token`)。カンマ区切り |
 | `KIBITZ_GITLAB_SIGNING_TOKENS` | - | GitLab 19.0+ の署名トークン (`whsec_...`)。**body まで検証できるのでこちらを推奨**。両方設定した場合、署名が来ていれば署名を検証する |
-| `KIBITZ_AZDO_BASIC_USER` / `_PASSWORDS` | - | Azure DevOps Service Hooks の Basic 認証 |
+| `KIBITZ_AZDO_BASIC_USER` / `_PASSWORDS` | - | Azure DevOps Service Hooks の Basic 認証。`_PASSWORDS` はカンマ区切り (ローテーション用)。**Azure DevOps は署名しない**ので、これが唯一の資格情報になる |
+| `KIBITZ_AZDO_HEADER_NAME` / `_VALUES` | - | 任意。Service Hooks に設定した固定ヘッダも検証する。Basic 認証と**両方**一致しないと受け付けない。パスワードだけが漏れたときの被害を狭める |
 | `KIBITZ_GITHUB_APP_ID` | - | 自分の発言を判別するための GitHub App id。**秘密情報ではない** (App の設定 URL に含まれる数字)。GitHub がコメントに付ける `performed_via_github_app.id` と突き合わせる |
 | `KIBITZ_BOT_LOGINS` | - | 追加で無視したいアカウント名 (カンマ区切り)。通常は不要 — App id での判別が効かないイベント (レビューコメントなど) の保険 |
 | `KIBITZ_ALLOWED_REPOS` | `*` | 受け付けるリポジトリのグロブ (カンマ区切り) |

@@ -24,6 +24,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/scale"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/webhook"
+	azdohook "github.com/yteraoka/kibitz/internal/webhook/azuredevops"
 	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
 	gitlabhook "github.com/yteraoka/kibitz/internal/webhook/gitlab"
 )
@@ -155,7 +156,17 @@ func realMain() error {
 		logger,
 		receiverOpts...,
 	))
-	// Azure DevOps lands in Phase 5.
+	mux.Handle("POST /webhook/azure-devops", webhook.NewReceiver(
+		azdohook.New(
+			cfg.Webhook.AzureDevOpsUser,
+			reveal(cfg.Webhook.AzureDevOpsPasswords),
+			azdohook.WithHeader(cfg.Webhook.AzureDevOpsHeader, reveal(cfg.Webhook.AzureDevOpsHeaderValues)),
+		),
+		publisher,
+		triggers,
+		logger,
+		receiverOpts...,
+	))
 
 	handler := httpx.Chain(mux,
 		httpx.RequestID,

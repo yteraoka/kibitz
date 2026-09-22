@@ -134,10 +134,10 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			rc.reject(r, w, nil, http.StatusRequestEntityTooLarge, "payload too large", err)
+			rc.reject(r, w, nil, nil, http.StatusRequestEntityTooLarge, "payload too large", err)
 			return
 		}
-		rc.reject(r, w, nil, http.StatusBadRequest, "could not read body", err)
+		rc.reject(r, w, nil, nil, http.StatusBadRequest, "could not read body", err)
 		return
 	}
 
@@ -146,22 +146,22 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrNoSecrets):
 			// kibitz's own misconfiguration, not the caller's fault.
-			rc.reject(r, w, nil, http.StatusInternalServerError, "webhook verification is not configured", err)
+			rc.reject(r, w, nil, nil, http.StatusInternalServerError, "webhook verification is not configured", err)
 		case errors.Is(err, ErrMissingSignature):
-			rc.reject(r, w, nil, http.StatusBadRequest, "signature is missing", err)
+			rc.reject(r, w, nil, nil, http.StatusBadRequest, "signature is missing", err)
 		default:
-			rc.reject(r, w, nil, http.StatusUnauthorized, "signature is invalid", err)
+			rc.reject(r, w, nil, nil, http.StatusUnauthorized, "signature is invalid", err)
 		}
 		return
 	}
 
 	ev, err := rc.handler.Normalize(r, body)
 	if err != nil {
-		rc.reject(r, w, nil, http.StatusBadRequest, "could not normalize payload", err)
+		rc.reject(r, w, body, nil, http.StatusBadRequest, "could not normalize payload", err)
 		return
 	}
 	if ev == nil {
-		rc.skip(r, w, "unsupported_event", nil)
+		rc.skip(r, w, body, "unsupported_event", nil)
 		return
 	}
 	rc.attachTrace(r.Context(), ev, inbound)
@@ -173,7 +173,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	decision := rc.policy.Evaluate(ev, rc.now())
 	if !decision.Publish {
-		rc.skip(r, w, string(decision.Reason), ev)
+		rc.skip(r, w, body, string(decision.Reason), ev)
 		return
 	}
 
@@ -185,7 +185,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Answering 5xx is the only way to ask the forge to try again, and on
 		// GitHub it at least makes the failure visible in the hook's delivery
 		// log for a manual redelivery.
-		rc.reject(r, w, ev, http.StatusServiceUnavailable, "could not publish event", err)
+		rc.reject(r, w, body, ev, http.StatusServiceUnavailable, "could not publish event", err)
 		return
 	}
 
@@ -198,7 +198,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.waker.Wake()
 	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event published",
-		append(rc.deliveryAttrs(r, ev),
+		append(rc.deliveryAttrs(r, body, ev),
 			slog.Bool("published", true),
 			slog.String("message_id", msgID),
 		)...,
@@ -276,12 +276,12 @@ func headerCarrier(r *http.Request) telemetry.Carrier {
 // It logs at info rather than debug, because "nothing was published" is the
 // answer to the question an operator actually asks — why did my pull request
 // not get reviewed — and it is not an answer they can get from anywhere else.
-func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, reason string, ev *event.ReviewEvent) {
+func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, body []byte, reason string, ev *event.ReviewEvent) {
 	if rc.metrics != nil {
 		rc.metrics.WebhooksReceived.WithLabelValues(string(rc.handler.Platform()), "skipped", reason).Inc()
 	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event skipped",
-		append(rc.deliveryAttrs(r, ev),
+		append(rc.deliveryAttrs(r, body, ev),
 			slog.Bool("published", false),
 			slog.String("reason", reason),
 		)...,
@@ -289,7 +289,7 @@ func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, reason string, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, ev *event.ReviewEvent, status int, msg string, err error) {
+func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, body []byte, ev *event.ReviewEvent, status int, msg string, err error) {
 	if rc.metrics != nil {
 		rc.metrics.WebhooksReceived.WithLabelValues(
 			string(rc.handler.Platform()), "rejected", strconv.Itoa(status)).Inc()
@@ -299,7 +299,7 @@ func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, ev *event.Rev
 		level = slog.LevelError
 	}
 	rc.logger.LogAttrs(r.Context(), level, "webhook rejected",
-		append(rc.deliveryAttrs(r, ev),
+		append(rc.deliveryAttrs(r, body, ev),
 			slog.Bool("published", false),
 			slog.Int("status", status),
 			slog.String("error", err.Error()),
@@ -316,7 +316,7 @@ func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, ev *event.Rev
 // Before a payload has been normalized there is no event to describe, and the
 // handler is asked for the forge's own identifiers instead: enough to find
 // the delivery in the forge's own log and redeliver it.
-func (rc *Receiver) deliveryAttrs(r *http.Request, ev *event.ReviewEvent) []slog.Attr {
+func (rc *Receiver) deliveryAttrs(r *http.Request, body []byte, ev *event.ReviewEvent) []slog.Attr {
 	attrs := make([]slog.Attr, 0, 10)
 	attrs = append(attrs,
 		slog.String("platform", string(rc.handler.Platform())),
@@ -324,14 +324,23 @@ func (rc *Receiver) deliveryAttrs(r *http.Request, ev *event.ReviewEvent) []slog
 	)
 
 	if ev == nil {
+		var id, name string
 		if d, ok := rc.handler.(DeliveryDescriber); ok {
-			id, name := d.Delivery(r)
-			if id != "" {
-				attrs = append(attrs, slog.String("delivery_id", id))
+			id, name = d.Delivery(r)
+		}
+		// A platform that keeps these in the payload rather than in headers
+		// is asked for them only once the body has been verified, which is
+		// why the body reaches here at all.
+		if d, ok := rc.handler.(BodyDeliveryDescriber); ok && len(body) > 0 {
+			if bodyID, bodyName := d.DeliveryFromBody(body); bodyID != "" || bodyName != "" {
+				id, name = firstNonEmpty(id, bodyID), firstNonEmpty(name, bodyName)
 			}
-			if name != "" {
-				attrs = append(attrs, slog.String("event_name", name))
-			}
+		}
+		if id != "" {
+			attrs = append(attrs, slog.String("delivery_id", id))
+		}
+		if name != "" {
+			attrs = append(attrs, slog.String("event_name", name))
 		}
 		return attrs
 	}
@@ -353,4 +362,13 @@ func (rc *Receiver) deliveryAttrs(r *http.Request, ev *event.ReviewEvent) []slog
 		attrs = append(attrs, slog.String("command", ev.Command.Name))
 	}
 	return attrs
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

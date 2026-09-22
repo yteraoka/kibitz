@@ -22,10 +22,18 @@
   (そもそも配送ごとの署名自体が同じ性質のオラクルになっている)。切り分け手順は
   [deployment.md](deployment.md#401-の切り分け)。
 - Azure DevOps は HMAC を持たないため、以下で補強する:
-  - HTTPS 必須 + 長いランダムパスワード
+  - HTTPS 必須 + 長いランダムパスワード (`KIBITZ_AZDO_BASIC_PASSWORDS`)
+  - **固定ヘッダを併用する** (`KIBITZ_AZDO_HEADER_NAME` / `_VALUES`)。任意だが、
+    Basic 認証と**両方**一致しないと受け付けないので、パスワードだけが漏れたときの被害が狭まる
   - 可能なら送信元 IP レンジ制限 (Azure DevOps のサービスタグ) を LB 側で設定
   - 受信したイベントの `resource` を鵜呑みにせず、**Azure DevOps API に問い合わせ直して
-    PR の実体を確認する** (偽造 payload でレビューを走らせられないようにする)
+    PR の実体を確認する** (偽造 payload でレビューを走らせられないようにする)。
+    これはワーカーが全プラットフォームで元々やっていること (`client.PullRequest()`) だが、
+    **署名が無い Azure DevOps でだけは防御として効いている**
+  - 署名が無いことの代償がもう 1 つある。**検証に失敗した配送はログに配送 ID が残らない。**
+    Azure DevOps は配送 ID と eventType を body に入れるので、
+    kibitz は**検証を通った body からしか**それを読まない
+    (`webhook.BodyDeliveryDescriber`)。認証されていない body は識別子の出どころにしない
 - リプレイ対策は配送 ID の重複排除 (7 日) を主軸とする。`occurred_at` による
   古い配送の破棄は既定で無効 ([event-schema.md](event-schema.md))。
 

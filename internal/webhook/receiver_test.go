@@ -29,6 +29,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/queue"
 	"github.com/yteraoka/kibitz/internal/queue/memory"
 	"github.com/yteraoka/kibitz/internal/webhook"
+	azdohook "github.com/yteraoka/kibitz/internal/webhook/azuredevops"
 	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
 )
 
@@ -579,4 +580,56 @@ func TestReceiverLogsRejectedDeliveries(t *testing.T) {
 	field(t, record, "published", false)
 	field(t, record, "delivery_id", "7f3c")
 	field(t, record, "event_name", "pull_request")
+}
+
+// Azure DevOps keeps the delivery id and the event name in the payload rather
+// than in headers, so a delivery that verified but was not interesting would
+// otherwise be logged with nothing to find it by. The body reaches the log
+// only because Verify accepted it first.
+func TestUninterestingDeliveryIsLoggedByItsBodyIdentifiers(t *testing.T) {
+	var log bytes.Buffer
+	body := []byte(`{"id":"d-42","eventType":"git.push","resource":{}}`)
+
+	rc := webhook.NewReceiver(
+		azdohook.New("kibitz", []string{"s3cret"}),
+		memory.New(),
+		testPolicy(),
+		slog.New(slog.NewJSONHandler(&log, nil)),
+	)
+
+	r := httptest.NewRequest(http.MethodPost, "/webhook/azure-devops", bytes.NewReader(body))
+	r.SetBasicAuth("kibitz", "s3cret")
+	w := httptest.NewRecorder()
+	rc.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	for _, want := range []string{`"delivery_id":"d-42"`, `"event_name":"git.push"`} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the log does not carry %s:\n%s", want, log.String())
+		}
+	}
+}
+
+// A delivery refused at verification is logged without them, on purpose: an
+// unauthenticated body is not a source of identifiers.
+func TestRejectedDeliveryIsNotDescribedFromItsBody(t *testing.T) {
+	var log bytes.Buffer
+	body := []byte(`{"id":"d-43","eventType":"git.push","resource":{}}`)
+
+	rc := webhook.NewReceiver(
+		azdohook.New("kibitz", []string{"s3cret"}),
+		memory.New(),
+		testPolicy(),
+		slog.New(slog.NewJSONHandler(&log, nil)),
+	)
+
+	r := httptest.NewRequest(http.MethodPost, "/webhook/azure-devops", bytes.NewReader(body))
+	r.SetBasicAuth("kibitz", "wrong")
+	rc.ServeHTTP(httptest.NewRecorder(), r)
+
+	if strings.Contains(log.String(), "d-43") {
+		t.Errorf("an unverified body was used for log identifiers:\n%s", log.String())
+	}
 }

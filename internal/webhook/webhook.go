@@ -64,6 +64,20 @@ type DeliveryDescriber interface {
 	Delivery(r *http.Request) (id, name string)
 }
 
+// BodyDeliveryDescriber reports the same identifiers from the payload, for a
+// platform that puts them there rather than in headers. Azure DevOps is that
+// platform: its deliveries carry no event header at all, and the id and the
+// event name are fields of the JSON.
+//
+// The receiver calls it only with a body that [Handler.Verify] has already
+// accepted, which is what keeps the rule above intact — an unauthenticated
+// payload is still not a source of identifiers. A delivery refused at
+// verification is therefore logged without them, which is the cost of a
+// platform that does not sign what it sends.
+type BodyDeliveryDescriber interface {
+	DeliveryFromBody(body []byte) (id, name string)
+}
+
 // Fingerprint identifies a secret without revealing it, so that "is the value
 // in the running container the one I pasted into the forge" can be answered
 // from a log line. It is the first bytes of the SHA-256 of the secret, which
