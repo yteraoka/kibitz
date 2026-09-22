@@ -29,12 +29,17 @@ resource "google_cloud_run_v2_service" "server" {
       # is the only moment the CPU limit is felt -- a webhook that waits for
       # one risks the forge's timeout.
       #
-      # 512Mi is the floor, not a measurement: the second generation
-      # execution environment refuses to start below it. Lowering it is a
-      # deploy-time failure rather than a tight fit at runtime.
+      # A whole CPU is the floor here, not a measurement: Cloud Run only
+      # allows a fractional CPU when an instance takes one request at a time,
+      # and this service keeps the default concurrency so one warm instance
+      # absorbs a burst of deliveries. Asking for less is rejected at deploy
+      # time with "Total cpu < 1 is not supported with concurrency > 1".
+      #
+      # 512Mi is likewise the floor: the second generation execution
+      # environment refuses to start below it.
       resources {
         limits = {
-          cpu    = "0.5"
+          cpu    = "1"
           memory = "512Mi"
         }
         startup_cpu_boost = true
@@ -184,8 +189,8 @@ resource "google_cloud_run_v2_service" "worker" {
 
       resources {
         limits = {
-          cpu    = "2"
-          memory = "4Gi"
+          cpu    = "1"
+          memory = "2Gi"
         }
         # Without this the CPU is throttled between requests and the pull
         # subscriber stops making progress.
