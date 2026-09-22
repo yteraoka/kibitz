@@ -1,0 +1,136 @@
+# Pushing a tag builds the images at that tag and deploys them.
+#
+#   git tag v0.4.0 && git push origin v0.4.0
+#
+# The images are tagged with the git tag and nothing else: a deployment has to
+# be able to say which commit it is running, and a moving tag cannot.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two tags pushed together would otherwise race to deploy, and the loser
+  # would be whichever finished first.
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE_TAG: ${{ github.ref_name }}
+
+jobs:
+  # A tag usually points at a commit CI has already seen, but "usually" is not
+  # a reason to deploy something nobody checked.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Workload Identity Federation: GitHub mints the token Google exchanges.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Failing here says what is missing. Failing later says "permission
+      # denied" and takes an afternoon.
+      - name: Check the deployment settings
+        run: |
+          missing=""
+          for name in GCP_PROJECT_ID GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER \
+                      GCP_DEPLOY_SERVICE_ACCOUNT GCP_IMAGE_REPOSITORY; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "These repository variables are not set:$missing"
+            echo "terraform output github_actions prints all of them."
+            exit 1
+          fi
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          GCP_IMAGE_REPOSITORY: ${{ vars.GCP_IMAGE_REPOSITORY }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Log in to Artifact Registry
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Cloud Run runs amd64. Building on whatever the runner happens to be
+      # would eventually produce an image the platform cannot start.
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          for component in server worker scaler; do
+            image="${{ vars.GCP_IMAGE_REPOSITORY }}/kibitz-${component}:${IMAGE_TAG}"
+            echo "::group::kibitz-${component}"
+            docker buildx build \
+              --platform linux/amd64 \
+              --file "deploy/docker/Dockerfile.${component}" \
+              --build-arg "VERSION=${IMAGE_TAG}" \
+              --tag "$image" \
+              --push .
+            echo "::endgroup::"
+          done
+
+      # The images are deployed rather than applied with Terraform: Terraform
+      # ignores the image field so that the two never undo each other.
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          repo="${{ vars.GCP_IMAGE_REPOSITORY }}"
+          region="${{ vars.GCP_REGION }}"
+
+          for service in server worker; do
+            gcloud run services update "kibitz-${service}" \
+              --region "$region" \
+              --image "${repo}/kibitz-${service}:${IMAGE_TAG}" \
+              --quiet
+          done
+
+          gcloud run jobs update kibitz-scaler \
+            --region "$region" \
+            --image "${repo}/kibitz-scaler:${IMAGE_TAG}" \
+            --quiet
+
+      - name: Report what is running
+        run: |
+          {
+            echo "### Deployed \`${IMAGE_TAG}\`"
+            echo
+            echo "| Component | Revision |"
+            echo "| --- | --- |"
+            for service in server worker; do
+              revision=$(gcloud run services describe "kibitz-${service}" \
+                --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
+              echo "| kibitz-${service} | \`${revision}\` |"
+            done
+            echo "| kibitz-scaler | job updated |"
+          } >> "$GITHUB_STEP_SUMMARY"

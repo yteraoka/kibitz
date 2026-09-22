@@ -21,8 +21,21 @@ variable "name_prefix" {
   default     = "kibitz"
 }
 
+variable "github_repository" {
+  description = "The repository allowed to deploy, as owner/name. Only tags pushed here can exchange a token for the deploy service account's."
+  type        = string
+  default     = "yteraoka/kibitz"
+}
+
 variable "server_image" {
-  description = "Image for kibitz-server, e.g. REGION-docker.pkg.dev/PROJECT/kibitz/kibitz-server:v1."
+  description = <<-EOT
+    Image for kibitz-server, e.g. REGION-docker.pkg.dev/PROJECT/kibitz/kibitz-server:v1.
+
+    This is the starting point only. Once the release workflow has deployed a
+    tag, the running image is whatever it deployed: Terraform ignores the
+    field so the two do not undo each other. Change it here to move a service
+    back to a specific image by hand.
+  EOT
   type        = string
 }
 

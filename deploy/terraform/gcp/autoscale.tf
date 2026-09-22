@@ -90,6 +90,10 @@ resource "google_cloud_run_v2_job" "scaler" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_iam_member.scaler_monitoring,
     google_cloud_run_v2_service_iam_member.worker_scaling,

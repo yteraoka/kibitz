@@ -181,6 +181,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 | キーワードによる publish の絞り込み (`trigger_keywords`) | 完了 |
 | ワーカーのオートスケール (バックログから 0〜N。`kibitz-scaler` + publish 時の起動) | 完了 |
 | イメージのビルドと push (`make push`) | 完了 |
+| タグ push での自動ビルド・デプロイ (Workload Identity Federation) | 完了 |
 | デプロイ手順と初回検証チェックリスト | 完了 |
 | ダッシュボード | 未 |
 | 予算管理と上限到達時の挙動 | 未 |

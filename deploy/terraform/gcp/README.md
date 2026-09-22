@@ -27,6 +27,18 @@ job. The server and the scaler also hold `roles/run.developer` **on the worker
 service alone**, which is what lets them change its instance count and nothing
 else.
 
+## Who owns the images
+
+Terraform sets each service's image once and then ignores the field, because
+the release workflow deploys it on a tag push. Whoever applied last would
+otherwise undo the other. `terraform output github_actions` prints what that
+workflow needs; none of it is secret, so it goes in repository variables
+rather than secrets.
+
+The workflow authenticates with Workload Identity Federation, so no service
+account key exists to leak. What may use it is this repository, and only on a
+tag: a workflow on a branch cannot exchange a token at all.
+
 ## Who owns the worker's instance count
 
 Terraform writes `scaling.min_instance_count` once and then ignores it

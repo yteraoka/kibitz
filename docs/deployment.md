@@ -506,13 +506,62 @@ gcloud logging read \
 curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_agent_tokens_total
 ```
 
-### 更新
+### 更新 (タグを push する)
+
+**タグを push すると GitHub Actions がビルドしてデプロイする。**
 
 ```bash
-make push IMAGE_REPO=... TAG=v0.2.0
-# tfvars の server_image / worker_image / scaler_image を更新して
-terraform apply
+git tag v0.4.0
+git push origin v0.4.0
 ```
+
+`.github/workflows/release.yml` が次を行う。
+
+1. `go vet` と `go test -race` (タグが指すコミットを誰も検証していない、という事故を防ぐ)
+2. 3 つのイメージを `linux/amd64` でビルドし、**タグと同じ名前**で Artifact Registry へ push
+3. `gcloud run services update` / `gcloud run jobs update` で 3 つを差し替え
+4. 実行中のリビジョン名をジョブサマリに出す
+
+イメージに `latest` は付けない。**「どのコミットが動いているか」を言えないデプロイは
+ロールバックできない**ので、動くタグは使わない。
+
+#### 初回だけ必要な設定
+
+認証は **Workload Identity Federation** で、サービスアカウントキーは作らない。
+Terraform が作るので、`terraform apply` のあと出力をリポジトリ変数に入れる。
+
+```bash
+terraform output github_actions
+```
+
+出た 5 つを GitHub の **Settings → Secrets and variables → Actions → Variables**
+に登録する (どれも秘密情報ではないので Secrets ではなく Variables)。
+
+| 変数 | 内容 |
+| --- | --- |
+| `GCP_PROJECT_ID` | プロジェクト ID |
+| `GCP_REGION` | リージョン |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/.../providers/github` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | `kibitz-deployer@...` |
+| `GCP_IMAGE_REPOSITORY` | `REGION-docker.pkg.dev/PROJECT/kibitz` |
+
+未設定のまま tag を push すると、**最初のステップで「どれが足りないか」を出して止まる**
+(権限エラーで午後を溶かさないため)。
+
+このリポジトリの**タグからしか**トークンを交換できない。ブランチ上のワークフローは
+—— Pull Request が持ち込んだものも含めて —— デプロイできない。
+
+#### 手で push する場合
+
+```bash
+make push IMAGE_REPO=... TAG=v0.4.0
+gcloud run services update kibitz-worker --region asia-northeast1 \
+  --image .../kibitz-worker:v0.4.0
+```
+
+**イメージは Terraform の管理外**になっている (`lifecycle { ignore_changes }`)。
+tfvars の `*_image` は初回の値であって、以降の実体はデプロイしたものになる。
+特定のイメージに戻したいときだけ tfvars を直して `terraform apply` する。
 
 ### ロールバック
 
@@ -522,7 +571,9 @@ gcloud run services update-traffic kibitz-worker \
   --region asia-northeast1 --to-revisions=PREVIOUS_REVISION=100
 ```
 
-Cloud Run のリビジョンは残るので、tfvars を戻して `terraform apply` でも良い。
+Cloud Run のリビジョンは残るので、トラフィックを戻すのが最短。
+古いタグを再デプロイしたい場合は、そのタグのイメージを指定して
+`gcloud run services update --image` する (タグを打ち直す必要は無い)。
 
 ### 止める
 

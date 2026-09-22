@@ -10,6 +10,10 @@ resource "google_project_service" "required" {
     "artifactregistry.googleapis.com",
     "monitoring.googleapis.com",
     "cloudscheduler.googleapis.com",
+    # Workload Identity Federation, which is how GitHub Actions deploys
+    # without a service account key.
+    "iamcredentials.googleapis.com",
+    "sts.googleapis.com",
   ])
 
   service            = each.value

@@ -49,6 +49,17 @@ output "worker_scaling" {
   }
 }
 
+output "github_actions" {
+  description = "What the release workflow needs as repository variables. None of it is secret."
+  value = {
+    GCP_PROJECT_ID                 = var.project_id
+    GCP_REGION                     = var.region
+    GCP_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.github.name
+    GCP_DEPLOY_SERVICE_ACCOUNT     = google_service_account.deployer.email
+    GCP_IMAGE_REPOSITORY           = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
+  }
+}
+
 output "pubsub" {
   description = "Queue resources."
   value = {
