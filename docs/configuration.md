@@ -33,7 +33,7 @@
 | `KIBITZ_SCALE_BACKEND` | `none` | `cloudrun` にすると publish 直後にワーカーのインスタンス数を 1 に引き上げる |
 | `KIBITZ_SCALE_PROJECT_ID` | `KIBITZ_PUBSUB_PROJECT_ID` | ワーカーがいるプロジェクト |
 | `KIBITZ_SCALE_REGION` | - | ワーカーのリージョン (backend=cloudrun で必須) |
-| `KIBITZ_SCALE_WORKER_SERVICE` | - | ワーカーの Cloud Run サービス名 (同上) |
+| `KIBITZ_SCALE_WORKER_POOL` | - | ワーカーの Cloud Run worker pool 名 (同上) |
 | `KIBITZ_SCALE_WAKE_COOLDOWN` | `30s` | 起動要求をまとめる間隔。初回は待たない |
 
 ## 2. kibitz-worker (環境変数)
@@ -114,7 +114,7 @@ Cloud Run ジョブとして Cloud Scheduler から毎分起動する
 | `KIBITZ_PUBSUB_PROJECT_ID` | - | 監視するサブスクリプションのプロジェクト (必須) |
 | `KIBITZ_PUBSUB_SUBSCRIPTION` | `kibitz-worker` | 監視するサブスクリプション |
 | `KIBITZ_SCALE_BACKEND` | - | `cloudrun` (必須) |
-| `KIBITZ_SCALE_REGION` / `_WORKER_SERVICE` | - | 対象のワーカーサービス (必須) |
+| `KIBITZ_SCALE_REGION` / `_WORKER_POOL` | - | 対象のワーカー (worker pool) (必須) |
 | `KIBITZ_SCALE_MIN_INSTANCES` | `0` | キューが空のときのインスタンス数 |
 | `KIBITZ_SCALE_MAX_INSTANCES` | `3` | 上限 |
 | `KIBITZ_SCALE_MESSAGES_PER_INSTANCE` | `2` | 1 インスタンスが引き受けるメッセージ数。通常は `KIBITZ_CONCURRENCY` と同じ |
@@ -123,7 +123,7 @@ Cloud Run ジョブとして Cloud Scheduler から毎分起動する
 
 `-loop` を付けなければ 1 回調整して終了する (Cloud Run ジョブ向け)。
 
-必要な権限は `roles/monitoring.viewer` と、**ワーカーサービスに対する**
+必要な権限は `roles/monitoring.viewer` と、**ワーカーの worker pool に対する**
 `roles/run.developer`。プロジェクト全体の権限は要らない。
 
 ### コストの概算について

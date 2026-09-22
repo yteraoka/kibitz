@@ -431,15 +431,15 @@ func TestScalingIsOffByDefault(t *testing.T) {
 	}
 }
 
-func TestScalingNeedsTheServiceItScales(t *testing.T) {
+func TestScalingNeedsTheWorkerPoolItScales(t *testing.T) {
 	env := minimalServerEnv()
 	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
 
 	_, err := config.LoadServer(config.MapEnv(env))
 	if err == nil {
-		t.Fatal("LoadServer succeeded, want the missing service reported")
+		t.Fatal("LoadServer succeeded, want the missing worker pool reported")
 	}
-	for _, want := range []string{"KIBITZ_SCALE_REGION", "KIBITZ_SCALE_WORKER_SERVICE"} {
+	for _, want := range []string{"KIBITZ_SCALE_REGION", "KIBITZ_SCALE_WORKER_POOL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %s", err, want)
 		}
@@ -452,7 +452,7 @@ func TestScalingInheritsTheProject(t *testing.T) {
 	env := minimalServerEnv()
 	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
 	env["KIBITZ_SCALE_REGION"] = "asia-northeast1"
-	env["KIBITZ_SCALE_WORKER_SERVICE"] = "kibitz-worker"
+	env["KIBITZ_SCALE_WORKER_POOL"] = "kibitz-worker"
 
 	cfg, err := config.LoadServer(config.MapEnv(env))
 	if err != nil {
@@ -473,7 +473,7 @@ func TestScalingRejectsAFloorAboveTheCap(t *testing.T) {
 	env := minimalServerEnv()
 	env["KIBITZ_SCALE_BACKEND"] = "cloudrun"
 	env["KIBITZ_SCALE_REGION"] = "asia-northeast1"
-	env["KIBITZ_SCALE_WORKER_SERVICE"] = "kibitz-worker"
+	env["KIBITZ_SCALE_WORKER_POOL"] = "kibitz-worker"
 	env["KIBITZ_SCALE_MIN_INSTANCES"] = "5"
 	env["KIBITZ_SCALE_MAX_INSTANCES"] = "2"
 
@@ -485,10 +485,10 @@ func TestScalingRejectsAFloorAboveTheCap(t *testing.T) {
 
 func TestLoadScaler(t *testing.T) {
 	env := map[string]string{
-		"KIBITZ_PUBSUB_PROJECT_ID":    "kibitz-dev",
-		"KIBITZ_SCALE_BACKEND":        "cloudrun",
-		"KIBITZ_SCALE_REGION":         "asia-northeast1",
-		"KIBITZ_SCALE_WORKER_SERVICE": "kibitz-worker",
+		"KIBITZ_PUBSUB_PROJECT_ID": "kibitz-dev",
+		"KIBITZ_SCALE_BACKEND":     "cloudrun",
+		"KIBITZ_SCALE_REGION":      "asia-northeast1",
+		"KIBITZ_SCALE_WORKER_POOL": "kibitz-worker",
 	}
 
 	cfg, err := config.LoadScaler(config.MapEnv(env))

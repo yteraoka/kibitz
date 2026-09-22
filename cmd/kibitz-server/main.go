@@ -200,14 +200,14 @@ func newWaker(ctx context.Context, cfg *config.Server, logger *slog.Logger) (*sc
 		return nil, nil
 	}
 
-	service, err := scale.NewCloudRunService(ctx, cfg.Scale.ProjectID, cfg.Scale.Region, cfg.Scale.Service)
+	pool, err := scale.NewCloudRunWorkerPool(ctx, cfg.Scale.ProjectID, cfg.Scale.Region, cfg.Scale.WorkerPool)
 	if err != nil {
 		return nil, fmt.Errorf("worker autoscaling: %w", err)
 	}
 	logger.LogAttrs(ctx, slog.LevelInfo, "worker wake-up is enabled",
-		slog.String("service", service.String()),
+		slog.String("worker_pool", pool.String()),
 	)
-	return scale.NewWaker(service, 1, cfg.Scale.WakeCooldown, logger), nil
+	return scale.NewWaker(pool, 1, cfg.Scale.WakeCooldown, logger), nil
 }
 
 // newPublisher builds the queue publisher for the configured backend.

@@ -102,9 +102,11 @@ OpenCode の同時実行数はセマフォで制限する (メモリとトーク
 
 ### 2.3 kibitz-scaler
 
-ワーカーは pull 購読なので Cloud Run から見ると**リクエストが来ない**。
-プラットフォーム側にスケールの根拠が無いので、キューの滞留数をその根拠にする
-小さなジョブを別に置く。
+ワーカーは pull 購読なので**リクエストが 1 件も来ない**。これは Cloud Run の
+**worker pool** がちょうど想定している形で、ingress もポートもプローブも無く、
+CPU は常時割り当てられる。ただし worker pool にオートスケールは無く、
+インスタンス数は「誰かが決めて書き込む」もの。その数をキューの滞留数から
+決める小さなジョブを別に置く。
 
 ```
 Cloud Scheduler ──毎分──> kibitz-scaler
@@ -118,8 +120,11 @@ Cloud Scheduler ──毎分──> kibitz-scaler
   それを待つとレビューの開始が遅れる。scaler は増減と 0 への回収を担当する。
 - 滞留数には **ack されていない配送済みメッセージも含まれる**ので、レビュー実行中の
   ワーカーが「空」と判定されて消されることはない。
-- 書き換えるのはサービスレベルのインスタンス数だけで、リビジョンテンプレートには
-  触らない (新リビジョンが作られると実行中のレビューが中断されるため)。
+- 書き換えるのは worker pool のインスタンス数 (`scaling.manualInstanceCount`) だけで、
+  リビジョンテンプレートには触らない (新リビジョンが作られると実行中のレビューが
+  中断されるため)。
+- 上限 (`worker_max_instances`) は worker pool 側には設定しない。この数を動かすのは
+  kibitz だけなので、上限も数を決める側 (scaler) が持つ。
 
 詳細は [deployment.md](deployment.md#ワーカーのオートスケール)。
 
@@ -306,7 +311,7 @@ type Result struct {
 | --- | --- | --- |
 | server | Cloud Run (HTTP) | ECS Fargate + ALB、または Lambda + API Gateway |
 | queue | Cloud Pub/Sub | SQS FIFO (+ DLQ) |
-| worker | Cloud Run (pull 購読、台数は kibitz-scaler が決める) | ECS Fargate (常駐) |
+| worker | Cloud Run worker pool (pull 購読、台数は kibitz-scaler が決める) | ECS Fargate (常駐) |
 | scaler | Cloud Run ジョブ + Cloud Scheduler | (SQS + Application Auto Scaling) |
 | blob | Cloud Storage | S3 |
 | state | Firestore | DynamoDB |
