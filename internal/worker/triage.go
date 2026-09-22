@@ -16,6 +16,9 @@ import (
 type triaged struct {
 	Diff    *forge.Diff
 	Skipped []string
+	// Usage is what the triage pass itself cost. It is part of the bill for
+	// the review, so it is reported with it rather than disappearing.
+	Usage reviewer.Usage
 	// Notes is the agent's own account of the selection, shown to the author.
 	Notes string
 }
@@ -67,13 +70,14 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		j.Logger.LogAttrs(ctx, slog.LevelWarn, "triage failed; reviewing the whole change",
 			slog.String("error", errorText(err)),
 		)
-		return triaged{Diff: diff}
+		// Whatever it spent before failing was still spent.
+		return triaged{Diff: diff, Usage: usageOf(result)}
 	}
 
 	selected, skipped := selectFiles(diff, result.Triage.Paths)
 	if len(selected.Files) == 0 {
 		j.Logger.LogAttrs(ctx, slog.LevelWarn, "triage selected nothing that is in the diff; reviewing the whole change")
-		return triaged{Diff: diff}
+		return triaged{Diff: diff, Usage: result.Usage}
 	}
 
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "triage selected the files to review",
@@ -83,7 +87,7 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		slog.Int("input_tokens", result.Usage.InputTokens),
 		slog.Int("output_tokens", result.Usage.OutputTokens),
 	)
-	return triaged{Diff: selected, Skipped: skipped, Notes: result.Triage.Notes}
+	return triaged{Diff: selected, Skipped: skipped, Notes: result.Triage.Notes, Usage: result.Usage}
 }
 
 // selectFiles keeps the files the triage pass asked for, in the order the
@@ -107,6 +111,14 @@ func selectFiles(diff *forge.Diff, paths []string) (*forge.Diff, []string) {
 		skipped = append(skipped, f.Path)
 	}
 	return selected, skipped
+}
+
+// usageOf reports what a run spent, including a run that then failed.
+func usageOf(result *reviewer.Result) reviewer.Usage {
+	if result == nil {
+		return reviewer.Usage{}
+	}
+	return result.Usage
 }
 
 func errorText(err error) string {
