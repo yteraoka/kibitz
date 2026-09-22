@@ -67,7 +67,7 @@ func answerPermissions() permissions {
 	}
 }
 
-func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Request) error {
+func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Request, servers map[string]MCPServer) error {
 	model := req.Model
 	if model == "" {
 		model = r.cfg.Model
@@ -77,7 +77,7 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 		Schema:     "https://opencode.ai/config.json",
 		Model:      model,
 		Permission: reviewPermissions(),
-		MCP:        r.serversFor(req),
+		MCP:        servers,
 	}
 	if req.Mode == reviewer.ModeAnswer {
 		cfg.Permission = answerPermissions()
@@ -122,8 +122,36 @@ func writeFile(path string, data []byte) error {
 // Triage never gets any. It reads a list of file names to decide what is worth
 // reading, and a pass that pulled in Jira would spend exactly what it exists
 // to save.
-func (r *Runner) serversFor(req reviewer.Request) map[string]MCPServer {
-	if len(r.cfg.MCPServers) == 0 || len(req.MCP) == 0 || req.Mode == reviewer.ModeTriage {
+func (r *Runner) serversFor(req reviewer.Request, contextPath string) map[string]MCPServer {
+	if req.Mode == reviewer.ModeTriage {
+		return nil
+	}
+	servers := r.repositoryServers(req)
+
+	// kibitz's own server is not something a repository asks for: it holds no
+	// credential, costs one process, and answers questions about the pull
+	// request the agent is already looking at.
+	if r.cfg.ContextBin != "" && contextPath != "" {
+		if servers == nil {
+			servers = map[string]MCPServer{}
+		}
+		servers[ContextServerName] = MCPServer{
+			Type:    MCPLocal,
+			Command: []string{r.cfg.ContextBin, "--context", contextPath},
+			Enabled: true,
+		}
+	}
+	return servers
+}
+
+// ContextServerName is how kibitz's own MCP server appears in the config, and
+// therefore the prefix the agent sees on its tools.
+const ContextServerName = "kibitz"
+
+// repositoryServers picks the third-party servers this run may use: the ones
+// the deployment defined, narrowed to the ones the repository asked for.
+func (r *Runner) repositoryServers(req reviewer.Request) map[string]MCPServer {
+	if len(r.cfg.MCPServers) == 0 || len(req.MCP) == 0 {
 		return nil
 	}
 	fork := req.PullRequest != nil && req.PullRequest.IsFork

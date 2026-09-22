@@ -364,10 +364,46 @@ Go で実装し、ワーカーと同じイメージに同梱、ジョブごと�
 こうすることで、(a) エージェントに認証情報を露出しない、(b) すべての外部アクセスを
 ワーカー側でログ・制限できる、(c) 3 プラットフォームの差異をツール側で吸収できる。
 
-> **`kibitz-mcp` 自体はまだ未実装** ([roadmap.md](roadmap.md) Phase 7)。
-> 現時点では、差分・PR 情報・既存コメントはプロンプトに入れて渡し、
-> リポジトリの中身はエージェントがワークスペースを直接読む。
-> どちらの経路でも Forge のトークンはエージェントに渡していない。
+実装済みのツール:
+
+| ツール | 用途 |
+| --- | --- |
+| `get_pr_metadata` | PR のタイトル / 本文 / 作成者 / ブランチ / 状態 |
+| `list_pr_files` | 変更ファイル一覧。プロンプトに差分が載ったかどうかも返す |
+| `get_pr_diff` | 差分 (ファイル指定可)。**triage で選から漏れたファイルも読める** |
+| `list_pr_comments` | 既存の指摘 (重複回避) |
+
+未実装: `get_file` (任意リビジョン)、`search_code`、`get_related_issue`。
+前 2 つはワークスペースへの `read` / `rg` で足りており、
+`get_related_issue` は Forge API の追加が要るため別途。
+
+**kibitz-mcp は Forge に到達できない。** ジョブごとにワーカーが
+`context.json` を書き、kibitz-mcp はそれを読むだけ。資格情報を持たないので、
+エージェントが何を吹き込まれてもそこから先へは行けない。
+
+```
+[ワーカー] --(自分のトークンで取得)--> PR / 差分 / コメント
+     |
+     +--> <jobdir>/context.json を書く
+                |
+[opencode] --(local MCP として起動)--> kibitz-mcp --context <path>
+                                            |
+                                            +--> ファイルを読んで答えるだけ
+```
+
+これが効くのは **triage で絞ったとき**。プロンプトには選抜後の差分しか載らないが、
+`context.json` には PR 全体が入っているので、エージェントが気になったファイルを
+後から読める。
+
+`KIBITZ_MCP_CONTEXT_BIN=off` で無効にできる (バイナリを同梱していないイメージ向け)。
+
+単体 CLI としても動くので、レビューがおかしいときに同じ答えを人間が引ける:
+
+```
+kibitz-mcp --context ./context.json tools
+kibitz-mcp --context ./context.json call get_pr_diff '{"path":"queue.go"}'
+```
+
 
 ### 外部サービスの MCP (実装済み)
 

@@ -14,7 +14,10 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath \
         -ldflags "-s -w -X main.version=${VERSION}" \
-        -o /out/kibitz-worker ./cmd/kibitz-worker
+        -o /out/kibitz-worker ./cmd/kibitz-worker \
+    && CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/kibitz-mcp ./cmd/kibitz-mcp
 
 FROM node:22-slim
 
@@ -43,6 +46,10 @@ RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
     && opencode --version
 
 COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
+
+# kibitz's own MCP server. opencode starts it per job to answer questions about
+# the pull request; it holds no credential and reads one file the worker wrote.
+COPY --from=build /out/kibitz-mcp /usr/local/bin/kibitz-mcp
 
 # The agent definitions kibitz runs with. They are part of the image, not of
 # the repository under review: a pull request must not be able to rewrite the
