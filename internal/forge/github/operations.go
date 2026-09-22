@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -44,6 +45,52 @@ func (c *Client) Diff(ctx context.Context, ref forge.PRRef) (*forge.Diff, error)
 			diff.Files = append(diff.Files, f.normalize())
 		}
 		if len(files) < pageSize {
+			return diff, nil
+		}
+	}
+
+	diff.Truncated = true
+	return diff, nil
+}
+
+// Compare implements [forge.Client]. It asks GitHub what changed between two
+// commits, which is what makes a second review of a pull request look only at
+// what was pushed since the first one.
+//
+// A commit that no longer exists — the usual outcome of a force push — is
+// reported as [forge.ErrNoCompare] rather than as a failure: reviewing the
+// whole diff is still correct.
+func (c *Client) Compare(ctx context.Context, ref forge.PRRef, base, head string) (*forge.Diff, error) {
+	if base == "" || head == "" {
+		return nil, forge.ErrNoCompare
+	}
+	if base == head {
+		return &forge.Diff{}, nil
+	}
+
+	diff := &forge.Diff{}
+	for page := 1; page <= maxPages; page++ {
+		path := fmt.Sprintf("%s/compare/%s...%s?per_page=%d&page=%d",
+			repoPath(ref, ""), url.PathEscape(base), url.PathEscape(head), pageSize, page)
+
+		var body struct {
+			Files []changedFile `json:"files"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, nil, &body); err != nil {
+			var apiErr *APIError
+			if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				return nil, fmt.Errorf("%w: %s...%s", forge.ErrNoCompare, base, head)
+			}
+			return nil, err
+		}
+		for _, f := range body.Files {
+			if len(diff.Files) >= c.maxFiles {
+				diff.Truncated = true
+				return diff, nil
+			}
+			diff.Files = append(diff.Files, f.normalize())
+		}
+		if len(body.Files) < pageSize {
 			return diff, nil
 		}
 	}
