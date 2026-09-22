@@ -126,6 +126,7 @@ func (r *Runner) serversFor(req reviewer.Request) map[string]MCPServer {
 	if len(r.cfg.MCPServers) == 0 || len(req.MCP) == 0 || req.Mode == reviewer.ModeTriage {
 		return nil
 	}
+	fork := req.PullRequest != nil && req.PullRequest.IsFork
 
 	servers := make(map[string]MCPServer, len(req.MCP))
 	for _, name := range req.MCP {
@@ -136,7 +137,15 @@ func (r *Runner) serversFor(req reviewer.Request) map[string]MCPServer {
 			// belt-and-braces check rather than the one that matters.
 			continue
 		}
+		if fork && !server.AllowFork {
+			// A fork's branch is written by somebody without commit access,
+			// and the agent reads it. A server holding a credential is not
+			// reachable from there unless the operator said it is safe.
+			continue
+		}
 		server.Enabled = true
+		// Not a field opencode defines; it decided whether we are here.
+		server.AllowFork = false
 		servers[name] = server
 	}
 	if len(servers) == 0 {

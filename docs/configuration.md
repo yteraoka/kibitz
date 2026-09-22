@@ -167,7 +167,9 @@ KIBITZ_MCP_SERVERS='{
   "jira":   {"type": "remote", "url": "https://jira.example.com/mcp",
              "headers": {"Authorization": "Bearer {env:JIRA_TOKEN}"}},
   "sentry": {"type": "local", "command": ["sentry-mcp"],
-             "environment": {"SENTRY_TOKEN": "{env:SENTRY_TOKEN}"}}
+             "environment": {"SENTRY_TOKEN": "{env:SENTRY_TOKEN}"}},
+  "docs":   {"type": "remote", "url": "https://docs.example.com/mcp",
+             "allow_fork": true}
 }'
 ```
 
@@ -186,6 +188,11 @@ KIBITZ_MCP_SERVERS='{
 
 - `type` は `local` (`command` 必須、`cwd` / `environment` 可) または
   `remote` (`url` 必須、`headers` 可)。`timeout` はミリ秒
+- **fork からの PR では既定で有効にならない。** fork のブランチはコミット権の無い人が
+  書いたもので、それをエージェントが読む。資格情報を持つサーバーがそこから
+  到達可能であってはいけない ([security.md](security.md))。
+  公開情報しか返さないサーバーは `"allow_fork": true` を付ければ fork でも有効になる
+  (この項目は kibitz 側の判断材料で、opencode に渡す設定には書かれない)
 - 定義と許可リストが食い違う (定義したのに許可リストに無い) 場合は**起動時にエラー**。
   片方だけ直したつもりの設定ミスを黙って通さない
 - リポジトリが要求した名前をこの kibitz が提供していない場合は、

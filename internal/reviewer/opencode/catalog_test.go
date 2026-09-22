@@ -71,6 +71,19 @@ func TestParseCatalogRejectsNonsense(t *testing.T) {
 	}
 }
 
+// A server the operator marked safe for fork pull requests parses, and the
+// flag does not leak into what opencode is handed.
+func TestParseCatalogAllowFork(t *testing.T) {
+	catalog, err := opencode.ParseCatalog(
+		`{"public": {"type": "remote", "url": "https://public.example.com/mcp", "allow_fork": true}}`, nil)
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	if !catalog["public"].AllowFork {
+		t.Error("allow_fork was not read")
+	}
+}
+
 func TestParseCatalogEmpty(t *testing.T) {
 	for _, definitions := range []string{"", "   ", "{}"} {
 		catalog, err := opencode.ParseCatalog(definitions, nil)

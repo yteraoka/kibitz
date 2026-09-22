@@ -545,3 +545,40 @@ func TestPromptFileIsTheLastArgument(t *testing.T) {
 		t.Errorf("message = %q, want it to point at %s", message, prompt)
 	}
 }
+
+// A fork's branch is written by somebody without commit access, and the agent
+// reads it. A server holding a credential is not reachable from there unless
+// the operator said so.
+func TestForkPullRequestsGetNoMCPServersByDefault(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin: h.bin,
+		MCPServers: opencode.Catalog{
+			"jira":   {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+			"public": {Type: opencode.MCPRemote, URL: "https://public.example.com/mcp", AllowFork: true},
+		},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.PullRequest.IsFork = true
+	req.MCP = []string{"jira", "public"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("no mcp block, want the one marked safe for forks")
+	}
+	if _, leaked := mcp["jira"]; leaked {
+		t.Error("a fork pull request reached a server holding a credential")
+	}
+	server, ok := mcp["public"].(map[string]any)
+	if !ok {
+		t.Fatalf("the server marked safe for forks was dropped: %v", mcp)
+	}
+	// allow_fork is kibitz's own bookkeeping, not part of opencode's schema.
+	if _, written := server["allow_fork"]; written {
+		t.Errorf("allow_fork was written into the config: %v", server)
+	}
+}

@@ -74,6 +74,15 @@ type MCPServer struct {
 	OAuth     json.RawMessage `json:"oauth,omitempty"`
 	TimeoutMS int             `json:"timeout,omitempty"`
 	Enabled   bool            `json:"enabled"`
+	// AllowFork marks a server that may also be used on a pull request from a
+	// fork. It is off by default, because a fork's branch is written by
+	// somebody who does not have commit access and the agent reads it: a
+	// server holding a credential must not be reachable from there
+	// (docs/security.md).
+	//
+	// It is read from the operator's catalog and cleared before the config is
+	// written, so opencode never sees a field it does not define.
+	AllowFork bool `json:"allow_fork,omitempty"`
 }
 
 // Validate rejects a definition opencode would refuse, at startup rather than
