@@ -55,6 +55,7 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 
 | ドキュメント | 内容 |
 | --- | --- |
+| [docs/adr/](docs/adr/) | **設計判断の記録 (ADR)**。なぜそう作られているか、何を捨てたか |
 | [docs/architecture.md](docs/architecture.md) | 全体アーキテクチャ、コンポーネント、Go のインターフェース定義、ディレクトリ構成 |
 | [docs/review-flow.md](docs/review-flow.md) | Webhook から投稿までの処理の流れ (シーケンス図)、スキップの判断順序 |
 | [docs/event-schema.md](docs/event-schema.md) | 3 プラットフォームの Webhook 差異と正規化イベントスキーマ |
