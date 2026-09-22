@@ -108,6 +108,10 @@ type Request struct {
 	// emphasis rather than replacing the standard criteria: a review asked to
 	// focus on security is still expected to report the crash it walked past.
 	Focus []string
+	// MCP names the external tool servers this run may use. They are names
+	// only: what each one is, and the credential it needs, belongs to the
+	// deployment and never travels with a request.
+	MCP []string
 	// HeadSHA is the commit that was actually checked out.
 	HeadSHA string
 	// SinceSHA is the commit kibitz reviewed last time, when [Request.Diff]

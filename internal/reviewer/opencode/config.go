@@ -77,7 +77,7 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 		Schema:     "https://opencode.ai/config.json",
 		Model:      model,
 		Permission: reviewPermissions(),
-		MCP:        r.cfg.MCPServers,
+		MCP:        r.serversFor(req),
 	}
 	if req.Mode == reviewer.ModeAnswer {
 		cfg.Permission = answerPermissions()
@@ -110,4 +110,46 @@ func writeFile(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// serversFor picks the MCP servers this run may use: the ones the deployment
+// defined, narrowed to the ones the repository asked for.
+//
+// Nothing is enabled unless a repository asked. Tool definitions are sent with
+// every request and cost tokens whether or not the model calls them, so a
+// server that is merely available is a bill nobody agreed to.
+//
+// Triage never gets any. It reads a list of file names to decide what is worth
+// reading, and a pass that pulled in Jira would spend exactly what it exists
+// to save.
+func (r *Runner) serversFor(req reviewer.Request) map[string]MCPServer {
+	if len(r.cfg.MCPServers) == 0 || len(req.MCP) == 0 || req.Mode == reviewer.ModeTriage {
+		return nil
+	}
+	fork := req.PullRequest != nil && req.PullRequest.IsFork
+
+	servers := make(map[string]MCPServer, len(req.MCP))
+	for _, name := range req.MCP {
+		server, ok := r.cfg.MCPServers[name]
+		if !ok {
+			// The worker resolves the names against the same catalog before
+			// it gets here and reports what it dropped, so this is a
+			// belt-and-braces check rather than the one that matters.
+			continue
+		}
+		if fork && !server.AllowFork {
+			// A fork's branch is written by somebody without commit access,
+			// and the agent reads it. A server holding a credential is not
+			// reachable from there unless the operator said it is safe.
+			continue
+		}
+		server.Enabled = true
+		// Not a field opencode defines; it decided whether we are here.
+		server.AllowFork = false
+		servers[name] = server
+	}
+	if len(servers) == 0 {
+		return nil
+	}
+	return servers
 }

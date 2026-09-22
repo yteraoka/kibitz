@@ -25,7 +25,11 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Disca
 // records its arguments and environment, then produces whatever the test asked
 // for. The real binary is exercised separately; what matters here is that
 // kibitz invokes it correctly and reads its output correctly.
-func fakeCLI(t *testing.T, script string) string {
+// The paths it records to are written into the script rather than passed in
+// the environment: the runner builds the agent's environment from a fixed
+// list, so a variable the test invented would not reach it — which is the
+// point of that list.
+func fakeCLI(t *testing.T, script, argsFile, configFile string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake CLI is a shell script")
@@ -34,8 +38,9 @@ func fakeCLI(t *testing.T, script string) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "opencode")
 	body := "#!/bin/sh\nset -e\n" +
-		"printf '%s\\n' \"$@\" > \"$KIBITZ_TEST_ARGS\"\n" +
-		"printenv OPENCODE_CONFIG > \"$KIBITZ_TEST_CONFIG_PATH\"\n" +
+		"printf '%s\\n' \"$@\" > '" + argsFile + "'\n" +
+		"printenv OPENCODE_CONFIG > '" + configFile + "'\n" +
+		"printenv > '" + configFile + ".env'\n" +
 		script
 	if err := os.WriteFile(path, []byte(body), 0o700); err != nil { //nolint:gosec // a test fixture
 		t.Fatalf("writing the fake CLI: %v", err)
@@ -53,16 +58,32 @@ type harness struct {
 func newHarness(t *testing.T, script string) harness {
 	t.Helper()
 
-	dir := t.TempDir()
+	record := t.TempDir()
 	h := harness{
-		bin:        fakeCLI(t, script),
-		workspace:  dir,
-		argsFile:   filepath.Join(t.TempDir(), "args"),
-		configFile: filepath.Join(t.TempDir(), "config-path"),
+		workspace:  t.TempDir(),
+		argsFile:   filepath.Join(record, "args"),
+		configFile: filepath.Join(record, "config-path"),
 	}
-	t.Setenv("KIBITZ_TEST_ARGS", h.argsFile)
-	t.Setenv("KIBITZ_TEST_CONFIG_PATH", h.configFile)
+	h.bin = fakeCLI(t, script, h.argsFile, h.configFile)
 	return h
+}
+
+// env reads the environment the fake CLI was started with.
+func (h harness) env(t *testing.T) map[string]string {
+	t.Helper()
+
+	data, err := os.ReadFile(h.configFile + ".env")
+	if err != nil {
+		t.Fatalf("reading the recorded environment: %v", err)
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		name, value, ok := strings.Cut(line, "=")
+		if ok {
+			env[name] = value
+		}
+	}
+	return env
 }
 
 func (h harness) args(t *testing.T) []string {
@@ -268,17 +289,22 @@ echo '{"type":"text","text":"ロックの期限が切れるためです。"}'
 	}
 }
 
+// Only the servers the request named, and only those. A server the deployment
+// merely offers costs tokens on every call for tool definitions nobody asked
+// for.
 func TestMCPServersAreWrittenIntoTheConfig(t *testing.T) {
 	h := newHarness(t, writeOutput)
 	runner := opencode.New(opencode.Config{
 		Bin: h.bin,
-		MCPServers: map[string]opencode.MCPServer{
-			"kibitz-context": {Type: "local", Command: []string{"kibitz-mcp"}, Enabled: true},
-			"jira":           {Type: "remote", URL: "https://jira.example.com/mcp", Enabled: true},
+		MCPServers: opencode.Catalog{
+			"jira":   {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+			"sentry": {Type: opencode.MCPLocal, Command: []string{"sentry-mcp"}},
 		},
 	}, discardLogger())
 
-	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+	req := request(h.workspace, reviewer.ModeReview)
+	req.MCP = []string{"jira"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -286,12 +312,132 @@ func TestMCPServersAreWrittenIntoTheConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("no mcp block")
 	}
-	if len(mcp) != 2 {
-		t.Errorf("%d mcp servers, want 2", len(mcp))
+	if len(mcp) != 1 {
+		t.Fatalf("%d mcp servers, want only the one that was asked for: %v", len(mcp), mcp)
 	}
-	jira := mcp["jira"].(map[string]any)
+	jira, ok := mcp["jira"].(map[string]any)
+	if !ok {
+		t.Fatalf("jira is missing: %v", mcp)
+	}
 	if jira["url"] != "https://jira.example.com/mcp" {
 		t.Errorf("jira = %v", jira)
+	}
+	// Written as enabled: being in this file at all is the decision.
+	if jira["enabled"] != true {
+		t.Errorf("jira was written but not enabled: %v", jira)
+	}
+}
+
+// A repository that asked for nothing gets nothing, and the block is left out
+// rather than written empty.
+func TestNoMCPServersWithoutARequest(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin:        h.bin,
+		MCPServers: opencode.Catalog{"jira": {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"}},
+	}, discardLogger())
+
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, ok := h.config(t)["mcp"]; ok {
+		t.Error("a server was enabled although the repository asked for none")
+	}
+}
+
+// Triage reads a list of file names to decide what is worth reading. Loading
+// Jira's tool definitions into that pass would spend what the pass exists to
+// save.
+func TestTriageGetsNoMCPServers(t *testing.T) {
+	h := newHarness(t, `
+cp "$OPENCODE_CONFIG" .kibitz/config-copy.json
+mkdir -p .kibitz/out
+echo '{"schema_version":1,"paths":["queue.go"]}' > .kibitz/out/triage.json
+`)
+	runner := opencode.New(opencode.Config{
+		Bin:        h.bin,
+		MCPServers: opencode.Catalog{"jira": {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"}},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeTriage)
+	req.MCP = []string{"jira"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, ok := h.config(t)["mcp"]; ok {
+		t.Error("triage was given an MCP server")
+	}
+}
+
+// The agent's process is built from a list rather than inherited. The worker's
+// environment holds the webhook secrets and the GitHub App's private key, and
+// an MCP server is a binary kibitz did not write, started by opencode, with
+// opencode's environment.
+func TestTheAgentDoesNotInheritTheWorkersSecrets(t *testing.T) {
+	t.Setenv("KIBITZ_WEBHOOK_SECRETS", "s3cr3t")
+	t.Setenv("KIBITZ_GITHUB_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----")
+	t.Setenv("JIRA_TOKEN", "jira-token")
+	t.Setenv("SOMETHING_ELSE", "not asked for")
+
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin: h.bin,
+		MCPServers: opencode.Catalog{"jira": {
+			Type:    opencode.MCPRemote,
+			URL:     "https://jira.example.com/mcp",
+			Headers: map[string]string{"Authorization": "Bearer {env:JIRA_TOKEN}"},
+		}},
+		Env: []string{"GOOGLE_CLOUD_PROJECT=kibitz-prod"},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.MCP = []string{"jira"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	env := h.env(t)
+	for _, name := range []string{"KIBITZ_WEBHOOK_SECRETS", "KIBITZ_GITHUB_PRIVATE_KEY", "SOMETHING_ELSE"} {
+		if _, leaked := env[name]; leaked {
+			t.Errorf("%s reached the agent", name)
+		}
+	}
+	// What the enabled server refers to does reach it: that is how the
+	// credential gets there without being written into the config file.
+	if env["JIRA_TOKEN"] != "jira-token" {
+		t.Errorf("JIRA_TOKEN = %q, want the value the server refers to", env["JIRA_TOKEN"])
+	}
+	if env["GOOGLE_CLOUD_PROJECT"] != "kibitz-prod" {
+		t.Errorf("the configured provider credentials did not reach the agent: %q", env["GOOGLE_CLOUD_PROJECT"])
+	}
+	if env["PATH"] == "" {
+		t.Error("PATH did not reach the agent")
+	}
+	// And the secret is not in the file, which is the other half.
+	data, err := os.ReadFile(filepath.Join(h.workspace, ".kibitz", "config-copy.json"))
+	if err != nil {
+		t.Fatalf("reading the generated config: %v", err)
+	}
+	if strings.Contains(string(data), "jira-token") {
+		t.Error("the credential was written into the config file")
+	}
+	if !strings.Contains(string(data), "{env:JIRA_TOKEN}") {
+		t.Errorf("the placeholder was not kept:\n%s", data)
+	}
+}
+
+// A variable a server does not refer to is not forwarded just because it is
+// set, but a deployment can name one.
+func TestEnvPassthrough(t *testing.T) {
+	t.Setenv("KIBITZ_EXTRA", "extra")
+
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin, EnvPassthrough: []string{"KIBITZ_EXTRA"}}, discardLogger())
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if h.env(t)["KIBITZ_EXTRA"] != "extra" {
+		t.Error("a variable the deployment named did not reach the agent")
 	}
 }
 
@@ -397,5 +543,42 @@ func TestPromptFileIsTheLastArgument(t *testing.T) {
 	}
 	if !strings.Contains(message, prompt) {
 		t.Errorf("message = %q, want it to point at %s", message, prompt)
+	}
+}
+
+// A fork's branch is written by somebody without commit access, and the agent
+// reads it. A server holding a credential is not reachable from there unless
+// the operator said so.
+func TestForkPullRequestsGetNoMCPServersByDefault(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin: h.bin,
+		MCPServers: opencode.Catalog{
+			"jira":   {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+			"public": {Type: opencode.MCPRemote, URL: "https://public.example.com/mcp", AllowFork: true},
+		},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.PullRequest.IsFork = true
+	req.MCP = []string{"jira", "public"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("no mcp block, want the one marked safe for forks")
+	}
+	if _, leaked := mcp["jira"]; leaked {
+		t.Error("a fork pull request reached a server holding a credential")
+	}
+	server, ok := mcp["public"].(map[string]any)
+	if !ok {
+		t.Fatalf("the server marked safe for forks was dropped: %v", mcp)
+	}
+	// allow_fork is kibitz's own bookkeeping, not part of opencode's schema.
+	if _, written := server["allow_fork"]; written {
+		t.Errorf("allow_fork was written into the config: %v", server)
 	}
 }

@@ -63,13 +63,21 @@ PR のタイトル・本文・差分・コメントはすべて**外部の第三
    - `opencode.json` / `.opencode/` / `AGENTS.md` は既定では**読み込まない**
    - `.kibitz.yaml` は許可されたキーのみをホワイトリストで取り込む
      (`mcp.allow` に指定できるのは、運用側のグローバル許可リストに載っているものだけ)
+   - **エージェントのプロセス環境は固定リストから組み立てる。** ワーカーの環境には
+     Webhook シークレット・GitHub App 秘密鍵・GitLab トークンが入っており、
+     local な MCP サーバー (kibitz が書いたわけではないバイナリ) は opencode の
+     環境をそのまま継承するため、丸ごと渡してはいけない。MCP の資格情報は
+     `{env:NAME}` で参照し、**有効になったサーバーが参照している変数だけ**を渡す
+     ([configuration.md](configuration.md#エージェントのプロセス環境))
    - リポジトリ設定は**常に**デフォルトブランチ側から読む (fork PR に限らない)。
      実装は `forge.Client.ReadFile` で、GitHub は ref を付けずに contents API を、
      GitLab は `ref=HEAD` を使う。どちらも「デフォルトブランチ」を意味する
    - リポジトリ側から**弱められない**設定がある: `guidelines` は追記のみ、
      `max_comments` は小さくする方向にのみ効く
 5. **fork PR の扱い。** 既定では fork からの PR に対しては
-   - シークレットを注入しない (MCP なし、または公開情報のみの MCP)
+   - シークレットを注入しない (MCP なし、または公開情報のみの MCP)。
+     **実装済み**: fork PR では `KIBITZ_MCP_SERVERS` の定義に
+     `"allow_fork": true` があるサーバーだけが有効になる (既定は無効)
    - モデルの利用予算を別枠にする
    - メンテナが `/kibitz review` とコメントの先頭に明示したときだけ実行する
    という縮退モードで動かす。

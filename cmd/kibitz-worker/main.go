@@ -289,6 +289,15 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		return nil, fmt.Errorf("KIBITZ_MODEL_PRICES: %w", err)
 	}
 
+	mcp, err := opencode.ParseCatalog(cfg.MCPServers, cfg.MCPAllowlist)
+	if err != nil {
+		return nil, fmt.Errorf("KIBITZ_MCP_SERVERS: %w", err)
+	}
+	if len(mcp) > 0 {
+		logger.LogAttrs(context.Background(), slog.LevelInfo, "MCP servers are available to repositories",
+			slog.Any("servers", mcp.Names()))
+	}
+
 	engine := opencode.New(opencode.Config{
 		Bin:            cfg.OpenCode.Bin,
 		Model:          cfg.OpenCode.Model,
@@ -296,12 +305,15 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		AnswerAgent:    cfg.OpenCode.AnswerAgent,
 		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
+		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
+		MCPServers:     mcp,
 		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
 
 	return &worker.ReviewJob{
 		Forges: forges,
 		Engine: engine,
+		MCP:    mcp,
 		Workspace: workspace.Config{
 			Root:    cfg.WorkspaceDir,
 			Depth:   cfg.Limits.CloneDepth,
