@@ -96,6 +96,18 @@ variable "model" {
   default     = "google-vertex/gemini-3.1-pro-preview"
 }
 
+variable "triage_model" {
+  description = <<-EOT
+    Model for the auxiliary tasks — picking which files of a large PR are worth
+    reading, and writing the summary. Leave empty to reuse `model`.
+
+    These runs are short and repetitive, so a cheaper model of the same family
+    is usually enough (google-vertex/gemini-3.5-flash-lite).
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "model_api_key_env_name" {
   description = <<-EOT
     Environment variable the model provider authenticates with, when it needs
