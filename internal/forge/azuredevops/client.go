@@ -8,11 +8,7 @@
 // internal/webhook/azuredevops), so the delivery is a claim about what
 // happened and this package is what establishes the fact.
 //
-// # What is missing
-//
-// This does not implement [forge.Client] yet: Diff and Compare are absent, so
-// nothing wires it into the worker. That is not an oversight but an open
-// question, and the reason is worth stating where somebody will find it.
+// # The diff is computed here, not fetched
 //
 // Azure DevOps's REST API does not return a diff. A pull request iteration's
 // changes, and the commit diffs endpoint, both answer with GitChange, whose
@@ -21,17 +17,18 @@
 // published specification (vsts-rest-api-specs, git/7.1), not an omission in
 // the reading.
 //
-// kibitz needs patches for two things: the prompt carries the diff, and
-// reviewer.NewPositions checks findings against it. Without them every
-// finding is dropped as out of diff.
+// kibitz needs patches twice over: the prompt carries the diff, and
+// reviewer.NewPositions checks findings against it, so without them every
+// finding would be dropped as out of diff. The change records do carry the
+// git object ids of both versions of every file, so the two blobs are
+// fetched and the patch is computed in internal/textdiff.
 //
-// The two ways out are a decision rather than a detail. One is to fetch both
-// blobs for each changed file — the change carries objectId and
-// originalObjectId — and compute the diff here, which keeps the platform
-// boundary intact and costs up to two requests per file. The other is to
-// produce the diff from the checkout the worker already makes, which is exact
-// and free but moves the checkout ahead of the diff for every platform and
-// hands the client something it does not have today.
+// That costs up to two requests per changed file, which is the price of
+// keeping the platform's differences inside this package — the alternative
+// was to move the worker's checkout ahead of Diff and run git, which would
+// have reordered the flow for GitHub and GitLab as well, and made every
+// event clone a repository before finding out whether there was anything to
+// review. Both the file count and the total bytes downloaded are capped.
 package azuredevops
 
 import (
@@ -56,6 +53,12 @@ import (
 // gets whichever one the instance prefers today.
 const apiVersion = "7.1"
 
+// defaultMaxFiles caps a diff. It is lower than the other clients' because
+// each file costs two requests here rather than none: past a few hundred
+// files a review is reading a rewrite, and the triage step would narrow it
+// anyway.
+const defaultMaxFiles = 300
+
 // Config configures a client.
 type Config struct {
 	// OrganizationURL is the account root: "https://dev.azure.com/{org}" for
@@ -71,14 +74,20 @@ type Config struct {
 	// basic auth. Entra ID service principal tokens need this; a PAT does
 	// not.
 	TokenIsBearer bool
+	// MaxFiles caps how many changed files one diff reports. It matters more
+	// here than on the other platforms: every file costs two requests,
+	// because the patch is computed from the two blobs rather than returned.
+	// Zero uses the default.
+	MaxFiles int
 }
 
 // Client implements [forge.Client] for Azure DevOps.
 type Client struct {
-	http    *http.Client
-	baseURL string
-	token   string
-	bearer  bool
+	http     *http.Client
+	baseURL  string
+	token    string
+	bearer   bool
+	maxFiles int
 }
 
 // Option customizes a client.
@@ -101,16 +110,22 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	}
 
 	c := &Client{
-		http:    &http.Client{Timeout: 30 * time.Second},
-		baseURL: base,
-		token:   cfg.Token,
-		bearer:  cfg.TokenIsBearer,
+		http:     &http.Client{Timeout: 30 * time.Second},
+		baseURL:  base,
+		token:    cfg.Token,
+		bearer:   cfg.TokenIsBearer,
+		maxFiles: cfg.MaxFiles,
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	if c.maxFiles <= 0 {
+		c.maxFiles = defaultMaxFiles
+	}
 	return c, nil
 }
+
+var _ forge.Client = (*Client)(nil)
 
 // Platform implements [forge.Client].
 func (c *Client) Platform() event.Platform { return event.PlatformAzureDevOps }

@@ -117,10 +117,16 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - **受信 payload を信用せず API で PR を再取得**する経路 (署名がないため)
   **(完了 — ワーカーが元々全プラットフォームでやっている `client.PullRequest()`)**
 - `internal/forge/azuredevops` — threads API、`threadContext` によるインライン位置、
-  Entra ID / PAT 認証 **(9 メソッド中 7 つ完了)**
-- **差分取得は未着手・方式未決。** Azure DevOps の REST API は**差分テキストを返さない**
-  (`GitChange` はファイル一覧のみで patch も行数も無い)。
-  blob を 2 つ取って自前で差分を作るか、ワーカーのチェックアウトから `git diff` で作るかの判断が要る
+  Entra ID / PAT 認証 **(`forge.Client` の 9 メソッドすべて完了)**
+- `internal/textdiff` — **差分を自前で計算する** **(完了)**。
+  Azure DevOps の REST API は**差分テキストを返さない** (`GitChange` はファイル一覧のみで
+  patch も行数も無い)。変更記録が新旧 blob の object id を持っているので、
+  両方を取って Myers 法で unified diff を作る。
+  ワーカーのチェックアウトから `git diff` を作る案は採らなかった:
+  `Diff()` は `prepareWorkspace()` より前にあり、その間に
+  「レビュー対象 0 件なら終了」の早期脱出があるため、
+  順序を入れ替えると **GitHub / GitLab でも毎回 clone が走る**ことになる
+- ワーカーへの配線と設定 (`KIBITZ_AZDO_ORG_URL` / `KIBITZ_AZDO_TOKEN`) **(未着手)**
 
 **完了条件**: Azure DevOps の PR で Phase 3 と同じ受け入れ条件が通る。
 偽造 payload ではレビューが走らないことをテストで確認。
