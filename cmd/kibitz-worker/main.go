@@ -296,6 +296,11 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 			"no forge credentials configured; the worker will not be able to review anything")
 	}
 
+	budgets, err := worker.ParseBudgets(cfg.OpenCode.RepoBudgets)
+	if err != nil {
+		return nil, fmt.Errorf("KIBITZ_REPO_BUDGETS: %w", err)
+	}
+
 	prices, err := reviewer.ParsePrices(cfg.OpenCode.ModelPrices)
 	if err != nil {
 		return nil, fmt.Errorf("KIBITZ_MODEL_PRICES: %w", err)
@@ -345,6 +350,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:           cfg.OpenCode.Model,
 		Prices:          prices,
 		Currency:        cfg.OpenCode.PriceCurrency,
+		Budgets:         budgets,
 		Mention:         cfg.Mention,
 		SkipDraft:       cfg.SkipDraft,
 		SessionTTL:      cfg.SessionTTL,

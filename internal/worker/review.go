@@ -28,8 +28,12 @@ import (
 const (
 	SummaryMarker = "<!-- kibitz:summary -->"
 	FailureMarker = "<!-- kibitz:failure -->"
-	HelpMarker    = "<!-- kibitz:help -->"
-	IgnoreMarker  = "<!-- kibitz:ignore -->"
+	// BudgetMarker identifies the notice that says the month's budget is
+	// gone. It replaces itself rather than stacking, so a repository at its
+	// ceiling gets one notice per pull request instead of one per push.
+	BudgetMarker = "<!-- kibitz:budget -->"
+	HelpMarker   = "<!-- kibitz:help -->"
+	IgnoreMarker = "<!-- kibitz:ignore -->"
 )
 
 // ReviewJob runs one review or one answer from start to finish: read the pull
@@ -69,6 +73,10 @@ type ReviewJob struct {
 	// whatever the prices were given in, because printing a dollar sign in
 	// front of a yen figure is worse than printing nothing.
 	Currency string
+	// Budgets cap what a repository may cost in a calendar month. With none
+	// configured nothing is capped, which is the behaviour of every
+	// deployment that has not thought about it yet.
+	Budgets Budgets
 	// Mention is how a comment addresses kibitz. It is only used to write the
 	// help text, which would otherwise tell people to use a token this
 	// deployment does not answer to.
@@ -190,6 +198,14 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "this pull request is being ignored; skipping",
 			slog.String("ref", ref.String()),
 		)
+		return nil
+	}
+
+	// Out of money for the month. This is checked before the diff rather
+	// than after, because being over the ceiling means nothing is going to
+	// be reviewed either way and the diff is not free — on Azure DevOps it
+	// is two API calls per changed file.
+	if j.reportExhausted(ctx, client, ref, ev) {
 		return nil
 	}
 
@@ -321,6 +337,8 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	)
 
 	j.record(ev, result, sanitized, settings.Model)
+	j.charge(ctx, ev, pass{Model: settings.Model, Usage: result.Usage},
+		pass{Model: j.triageModel(settings.Model), Usage: selection.Usage})
 	j.rememberReviewed(ctx, ev, ws.HeadSHA)
 
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
@@ -653,6 +671,10 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		return nil
 	}
 
+	if j.reportExhausted(ctx, client, ref, ev) {
+		return nil
+	}
+
 	diff, err := client.Diff(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("fetching the diff of %s: %w", ref, err)
@@ -708,6 +730,7 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		slog.Any("docs_read", result.Tools.Documents),
 	)
 	j.recordTools(result.Tools)
+	j.charge(ctx, ev, pass{Model: settings.Model, Usage: result.Usage})
 
 	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
 		return fmt.Errorf("replying on %s: %w", ref, err)
@@ -808,8 +831,12 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 	}
 	b.WriteString("\n")
 	// A review that needed a triage pass paid for two runs, and both are its
-	// bill.
-	j.writeUsage(&b, result.Usage.Add(selection.Usage), settings.Model)
+	// bill. The tokens add up, but the money does not: triage may have run
+	// on a different model, and pricing its half at the review model's rate
+	// would misreport whichever of the two was cheaper.
+	j.writeUsage(&b, result.Usage.Add(selection.Usage),
+		pass{Model: settings.Model, Usage: result.Usage},
+		pass{Model: j.triageModel(settings.Model), Usage: selection.Usage})
 	writeSettingsNotes(&b, settings)
 	return b.String()
 }
@@ -820,7 +847,7 @@ func (j *ReviewJob) summaryBody(result *reviewer.Result, sanitized reviewer.Sani
 // It is in the comment rather than only in the metrics because the person
 // deciding whether a bot is worth having is the one reading its comments, and
 // "this took 40,000 tokens" is the number that decision turns on.
-func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage, model string) {
+func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage, passes ...pass) {
 	if usage.Tokens() == 0 {
 		return
 	}
@@ -835,7 +862,7 @@ func (j *ReviewJob) writeUsage(b *strings.Builder, usage reviewer.Usage, model s
 	if usage.ReasoningTokens > 0 {
 		fmt.Fprintf(b, " (うち推論 %s)", thousands(usage.ReasoningTokens))
 	}
-	if cost, ok := j.Prices.Cost(model, usage); ok {
+	if cost, ok := j.cost(passes...); ok {
 		// An estimate, and said to be one: it is the configured rates applied
 		// to what the agent reported, not a bill.
 		fmt.Fprintf(b, " / 概算 %s", money(cost, j.currency()))

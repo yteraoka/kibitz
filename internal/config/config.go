@@ -285,6 +285,15 @@ type OpenCode struct {
 	// does not know prices: they differ by provider, region and contract,
 	// and they change.
 	ModelPrices []string
+	// RepoBudgets cap what a repository may cost in a calendar month, as
+	// "pattern=amount" where the pattern matches "owner/name" with the same
+	// wildcards the allow list uses and the amount is in the currency the
+	// prices are quoted in. The first matching pattern decides, so specific
+	// entries go before "*". Empty means nothing is capped.
+	//
+	// It is deployment configuration on purpose. A repository that could
+	// raise its own ceiling does not have one.
+	RepoBudgets []string
 	// PriceCurrency is the symbol the estimate is written with. It follows
 	// the prices; a dollar sign in front of a yen figure is worse than none.
 	PriceCurrency string
@@ -472,6 +481,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-3.1-pro-preview"),
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
 			ModelPrices:   l.list("KIBITZ_MODEL_PRICES", nil),
+			RepoBudgets:   l.list("KIBITZ_REPO_BUDGETS", nil),
 			PriceCurrency: l.str("KIBITZ_MODEL_PRICE_CURRENCY", "$"),
 			FallbackModel: l.str("KIBITZ_MODEL_FALLBACK", ""),
 			Vertex: Vertex{

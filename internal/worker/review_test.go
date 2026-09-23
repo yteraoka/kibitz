@@ -32,6 +32,7 @@ type fakeForge struct {
 	reviewErr error
 
 	summaries  []string
+	markers    []string
 	reviews    []forge.Review
 	replies    []string
 	compared   []string
@@ -79,8 +80,9 @@ func (f *fakeForge) CreateReview(_ context.Context, _ forge.PRRef, r forge.Revie
 	return nil
 }
 
-func (f *fakeForge) UpsertSummary(_ context.Context, _ forge.PRRef, _, body string) error {
+func (f *fakeForge) UpsertSummary(_ context.Context, _ forge.PRRef, marker, body string) error {
 	f.summaries = append(f.summaries, body)
+	f.markers = append(f.markers, marker)
 	return nil
 }
 
