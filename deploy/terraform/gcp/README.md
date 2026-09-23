@@ -69,6 +69,50 @@ The count is written on the pool rather than on its revision template, because
 changing the template rolls a new revision, which would interrupt a review in
 progress.
 
+## Which platforms it deploys
+
+GitHub is always wired. The other two are off by default and turned on with
+`gitlab_enabled` and `azure_devops_enabled`, which create that platform's
+secrets and grant each service account exactly what it needs — the server
+verifies deliveries, the worker calls the API, and neither reads the other's
+credential.
+
+`terraform output gitlab_secret_names` and `azure_devops_secret_names` print
+what to fill in with `gcloud secrets versions add`. They come back empty when
+the platform is off, so the two outputs also say what this deployment
+actually reviews.
+
+Azure DevOps needs `azure_devops_org_url`: unlike the other two there is
+nothing in a delivery to derive the instance from, since a service hook names
+the organization in its payload and Azure DevOps Server can be at any address.
+Setting `azure_devops_header_name` adds a second credential the hooks must
+send, which is what a leaked basic-auth password on its own does not get past.
+Azure DevOps does not sign anything, so that password is otherwise the whole
+of it.
+
+## Settings without a variable of their own
+
+Most of what [docs/configuration.md](../../../docs/configuration.md) lists has
+a default that is right until it is not. Rather than a variable each, those go
+through `server_env` and `worker_env`:
+
+```hcl
+worker_env = {
+  KIBITZ_MIN_SEVERITY = "high"
+  KIBITZ_MAX_COMMENTS = "10"
+}
+```
+
+Names this configuration sets itself are rejected by the variable's own
+validation rather than silently producing a container with the same
+environment variable twice, which Cloud Run refuses.
+
+What does have a variable is what an operator decides deliberately: the model,
+the two platforms above, and what it may cost — `model_prices`,
+`model_price_currency` and `repo_budgets`. Set prices along with a budget: a
+run on a model nobody priced counts towards no budget on purpose, because
+counting it as zero would let a ceiling be passed without ever being reached.
+
 ## Terraform version
 
 The repository pins Terraform with [mise](https://mise.jdx.dev); `mise install`
