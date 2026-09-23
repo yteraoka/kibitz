@@ -233,6 +233,54 @@ func TestLoadWorkerPartialGitHubApp(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerNeedsBothHalvesOfAzureDevOps(t *testing.T) {
+	// Either on its own fails at the first API call instead of at startup,
+	// which is the sort of thing that is discovered by a pull request going
+	// unreviewed.
+	tests := map[string]struct {
+		set  map[string]string
+		want string
+	}{
+		"a token with no instance":  {set: map[string]string{"KIBITZ_AZDO_TOKEN": "pat"}, want: "KIBITZ_AZDO_ORG_URL"},
+		"an instance with no token": {set: map[string]string{"KIBITZ_AZDO_ORG_URL": "https://dev.azure.com/x"}, want: "KIBITZ_AZDO_TOKEN"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := minimalWorkerEnv()
+			for k, v := range tc.set {
+				env[k] = v
+			}
+
+			_, err := config.LoadWorker(config.MapEnv(env))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to mention %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadWorkerAcceptsAzureDevOps(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_AZDO_ORG_URL"] = "https://dev.azure.com/fabrikam"
+	env["KIBITZ_AZDO_TOKEN"] = "pat"
+	env["KIBITZ_AZDO_TOKEN_IS_BEARER"] = "true"
+
+	cfg, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if !cfg.AzureDevOps.Configured() {
+		t.Error("both halves are set but the client would not be built")
+	}
+	if !cfg.AzureDevOps.TokenIsBearer {
+		t.Error("an Entra ID token would be sent as a personal access token, and rejected")
+	}
+	if got := cfg.AzureDevOps.Token.Reveal(); got != "pat" {
+		t.Errorf("token is %q, want pat", got)
+	}
+}
+
 func TestLoadWorkerRejectsUnknownOpenCodeMode(t *testing.T) {
 	env := minimalWorkerEnv()
 	env["KIBITZ_OPENCODE_MODE"] = "serve"

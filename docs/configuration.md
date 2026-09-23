@@ -86,7 +86,9 @@
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
 | `KIBITZ_GITLAB_BASE_URL` | `https://gitlab.com` | GitLab インスタンス。self-managed はここを変える (`/api/v4` は付けても付けなくてもよい) |
 | `KIBITZ_GITLAB_TOKEN` | - | personal / group / project access token (`api` スコープ)。**GitLab には GitHub App のインストールトークンに相当するものが無く、長命な資格情報になる** |
-| `KIBITZ_AZDO_ORG_URL` / `_TOKEN` | - | Azure DevOps 認証 |
+| `KIBITZ_AZDO_ORG_URL` | - | Azure DevOps の組織。Services なら `https://dev.azure.com/{org}`、Server なら `https://{server}/{collection}`。**イベントから導出できないので設定が要る** (Server はどのアドレスにも置ける)。`_TOKEN` と**両方**揃っていないと起動時に落ちる |
+| `KIBITZ_AZDO_TOKEN` | - | PAT (Code の読み取り + Pull Request Threads の読み書き) か Entra ID のアクセストークン |
+| `KIBITZ_AZDO_TOKEN_IS_BEARER` | `false` | トークンが Entra ID のアクセストークンであることを示す。**PAT は空ユーザーの Basic 認証のパスワード、Entra ID は Bearer** と送る場所が違い、入れ替えるとどちらも拒否される |
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
 起動時 + 定期リフレッシュで取得する (`KIBITZ_*_SECRET_REF` に参照名を置く形も用意する)。

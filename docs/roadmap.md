@@ -126,7 +126,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
   `Diff()` は `prepareWorkspace()` より前にあり、その間に
   「レビュー対象 0 件なら終了」の早期脱出があるため、
   順序を入れ替えると **GitHub / GitLab でも毎回 clone が走る**ことになる
-- ワーカーへの配線と設定 (`KIBITZ_AZDO_ORG_URL` / `KIBITZ_AZDO_TOKEN`) **(未着手)**
+- ワーカーへの配線と設定 (`KIBITZ_AZDO_ORG_URL` / `KIBITZ_AZDO_TOKEN`) **(完了)**
 
 **完了条件**: Azure DevOps の PR で Phase 3 と同じ受け入れ条件が通る。
 偽造 payload ではレビューが走らないことをテストで確認。
