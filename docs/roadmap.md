@@ -209,7 +209,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - Terraform (GCP): **3 プラットフォーム分の設定とシークレット** **(完了)**。
   GitLab / Azure DevOps の資格情報、コスト関連 (`model_prices` / `repo_budgets`)、
   および残りの環境変数を通す `server_env` / `worker_env`
-- Helm chart (Kubernetes 向け) — **未着手。判断待ち** (下記)
+- Helm chart (Kubernetes 向け) — **保留** (2026-09-23)。GKE で動かす必要が生じてから着手する (下記)
 - ~~ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ、ワーカー台数)~~ **(完了 — ログベースメトリクス + Cloud Monitoring ダッシュボード)**
 - ~~リポジトリ別の予算管理と上限到達時の挙動~~ **(完了 — `KIBITZ_REPO_BUDGETS`)**
 - ~~シークレットローテーション手順、障害時の Runbook~~ **(完了 — [runbook.md](runbook.md))**
@@ -223,7 +223,9 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 > worker pool が無いので、[ADR-0014](adr/0014-worker-pool-and-self-managed-scaling.md)
 > の `kibitz-scaler` は意味を失い、KEDA などに置き換わる。つまりスケーリングの
 > 設計が別物になる。[ADR-0002](adr/0002-gcp-first-single-tenant.md) が GCP 主軸・
-> 単一組織を決めている以上、**GKE で動かす意思があるかどうかが先**。
+> 単一組織を決めている以上、**GKE で動かす意思があるかどうかが先**であり、
+> 現時点ではその予定が無いため保留とした。着手するときは ADR を 1 本立て、
+> スケーリングの置き換えをそこで決める。
 
 ## Phase X: AWS 対応 (必要になったら、目安 1 週)
 
