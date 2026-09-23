@@ -28,6 +28,14 @@ const (
 	CommandPlan      = "plan"
 )
 
+// issueCommands are the commands that mean something on an issue. The rest
+// need a diff, a thread, or a pull request to stay out of.
+var issueCommands = map[string]bool{
+	CommandImplement: true,
+	CommandPlan:      true,
+	CommandHelp:      true,
+}
+
 var knownCommands = map[string]bool{
 	CommandReview:    true,
 	CommandExplain:   true,

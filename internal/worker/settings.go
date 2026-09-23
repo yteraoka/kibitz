@@ -45,11 +45,15 @@ func (j *ReviewJob) defaults() repoconfig.Settings {
 	return repoconfig.Settings{
 		ReviewEnabled: true,
 		AnswerEnabled: true,
-		SkipDraft:     j.SkipDraft,
-		Language:      j.Language,
-		Limits:        limits,
-		Model:         j.Model,
-		Guidelines:    j.Guidelines,
+		// The ceiling, not the setting. A repository may come up to this and
+		// no further; one that says nothing stays off, because Apply reads a
+		// missing section as "has not asked".
+		Implement:  repoconfig.ImplementSettings{Enabled: j.ImplementEnabled},
+		SkipDraft:  j.SkipDraft,
+		Language:   j.Language,
+		Limits:     limits,
+		Model:      j.Model,
+		Guidelines: j.Guidelines,
 	}
 }
 

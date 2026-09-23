@@ -126,16 +126,43 @@ func (p pullRequest) normalize(repo repository) *event.PullRequest {
 // issue is the shape a pull request takes in issue_comment payloads. It
 // carries no head or base, so the worker resolves those from the API.
 type issue struct {
-	Number      int    `json:"number"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	State       string `json:"state"`
-	Draft       bool   `json:"draft"`
-	HTMLURL     string `json:"html_url"`
-	User        user   `json:"user"`
+	ID      int64  `json:"id"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	Body    string `json:"body"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	HTMLURL string `json:"html_url"`
+	User    user   `json:"user"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 	PullRequest *struct {
 		HTMLURL string `json:"html_url"`
 	} `json:"pull_request"`
+}
+
+// normalizeIssue turns the payload into an issue rather than into the pull
+// request it is not. GitHub sends the same shape for both and only the
+// pull_request member tells them apart.
+func (i issue) normalizeIssue() *event.Issue {
+	out := &event.Issue{
+		Number:      i.Number,
+		Title:       i.Title,
+		Description: i.Body,
+		State:       i.State,
+		URL:         i.HTMLURL,
+		Author:      i.User.normalize(),
+	}
+	if i.ID != 0 {
+		out.ID = strconv.FormatInt(i.ID, 10)
+	}
+	for _, label := range i.Labels {
+		if label.Name != "" {
+			out.Labels = append(out.Labels, label.Name)
+		}
+	}
+	return out
 }
 
 func (i issue) normalize() *event.PullRequest {

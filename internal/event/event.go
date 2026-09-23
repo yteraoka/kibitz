@@ -41,17 +41,55 @@ const (
 	KindPRMerged          Kind = "pr.merged"
 	KindCommentCreated    Kind = "comment.created"
 	KindCommand           Kind = "command"
+
+	// KindIssueComment is a comment on an issue rather than on a pull
+	// request. It never reaches the queue: the policy either finds a command
+	// in it and promotes it to [KindIssueCommand], or drops it. An issue
+	// kibitz has not been asked to do anything with is not work.
+	KindIssueComment Kind = "issue.comment"
+	// KindIssueCommand is an explicit instruction given on an issue, which
+	// is how implement mode is asked for.
+	//
+	// It is a kind of its own rather than [KindCommand] carrying an issue,
+	// because the kind is what an older worker checks first. One that does
+	// not know this kind sends the message to the dead letter queue, which
+	// is the right failure; one that saw [KindCommand] would accept it and
+	// then go looking for pull request number zero.
+	KindIssueCommand Kind = "issue.command"
 )
 
 // Known reports whether k is a kind this version understands.
 func (k Kind) Known() bool {
 	switch k {
 	case KindPROpened, KindPRUpdated, KindPRReadyForReview, KindPRReviewRequested,
-		KindPRClosed, KindPRMerged, KindCommentCreated, KindCommand:
+		KindPRClosed, KindPRMerged, KindCommentCreated, KindCommand,
+		KindIssueComment, KindIssueCommand:
 		return true
 	default:
 		return false
 	}
+}
+
+// aboutIssue reports whether this kind carries an issue rather than a pull
+// request.
+func (k Kind) aboutIssue() bool {
+	return k == KindIssueComment || k == KindIssueCommand
+}
+
+// needsComment reports whether the kind is meaningless without the comment it
+// came from.
+func (k Kind) needsComment() bool {
+	switch k {
+	case KindCommentCreated, KindCommand, KindIssueComment, KindIssueCommand:
+		return true
+	default:
+		return false
+	}
+}
+
+// needsCommand reports whether the kind promises an explicit instruction.
+func (k Kind) needsCommand() bool {
+	return k == KindCommand || k == KindIssueCommand
 }
 
 // Source describes where the event came from.
@@ -123,6 +161,24 @@ type PullRequest struct {
 	ChangedFiles int  `json:"changed_files,omitempty"`
 }
 
+// Issue is an issue, or an Azure DevOps work item. It is what implement mode
+// works from: the instruction is a command on the issue, and the issue's own
+// text is the description of what to build.
+//
+// The text is data, never instruction. Whoever wrote the issue and whoever
+// asked kibitz to act on it may be different people, and only the second is
+// checked against the allow list (docs/security.md, ADR-0010).
+type Issue struct {
+	ID          string   `json:"id,omitempty"`
+	Number      int      `json:"number"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	State       string   `json:"state,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	Author      Actor    `json:"author"`
+	Labels      []string `json:"labels,omitempty"`
+}
+
 // Comment is a comment on a pull request, either on the conversation or on a
 // line of the diff.
 type Comment struct {
@@ -165,11 +221,15 @@ type ReviewEvent struct {
 	Kind          Kind         `json:"kind"`
 	Repository    Repository   `json:"repository"`
 	PullRequest   *PullRequest `json:"pull_request,omitempty"`
-	Comment       *Comment     `json:"comment,omitempty"`
-	Command       *Command     `json:"command,omitempty"`
-	Actor         Actor        `json:"actor"`
-	PayloadRef    *PayloadRef  `json:"payload_ref,omitempty"`
-	Trace         *Trace       `json:"trace,omitempty"`
+	// Issue is set instead of PullRequest on the issue kinds. Exactly one of
+	// the two is present, which is what lets a consumer tell what it is
+	// holding without consulting the kind twice.
+	Issue      *Issue      `json:"issue,omitempty"`
+	Comment    *Comment    `json:"comment,omitempty"`
+	Command    *Command    `json:"command,omitempty"`
+	Actor      Actor       `json:"actor"`
+	PayloadRef *PayloadRef `json:"payload_ref,omitempty"`
+	Trace      *Trace      `json:"trace,omitempty"`
 }
 
 // Key identifies the pull request an event belongs to. It is used as the
@@ -178,6 +238,12 @@ type ReviewEvent struct {
 func (e *ReviewEvent) Key() string {
 	if e == nil {
 		return ""
+	}
+	if e.Issue != nil {
+		// Distinct from the pull request form on purpose: issue 42 and pull
+		// request 42 are different things, and one must not serialize
+		// against the other.
+		return fmt.Sprintf("%s/%s/issue/%d", e.Source.Platform, e.Repository.FullName, e.Issue.Number)
 	}
 	if e.PullRequest == nil {
 		return fmt.Sprintf("%s/%s", e.Source.Platform, e.Repository.FullName)
@@ -216,18 +282,37 @@ func (e *ReviewEvent) Validate() error {
 		problems = append(problems, "occurred_at is zero")
 	}
 
-	// Every kind except the repository-level ones needs a pull request, and a
-	// comment kind needs the comment itself.
-	if e.PullRequest == nil {
-		problems = append(problems, "pull_request is missing")
-	} else if e.PullRequest.Number <= 0 {
-		problems = append(problems, "pull_request.number is not positive")
+	// An event is about a pull request or about an issue, never both and
+	// never neither. Enforcing it here is what lets every consumer take the
+	// presence of one as proof of the other's absence.
+	switch {
+	case e.Kind.aboutIssue():
+		if e.PullRequest != nil {
+			problems = append(problems, fmt.Sprintf("pull_request is set for kind %q", e.Kind))
+		}
+		switch {
+		case e.Issue == nil:
+			problems = append(problems, "issue is missing")
+		case e.Issue.Number <= 0:
+			problems = append(problems, "issue.number is not positive")
+		}
+	default:
+		if e.Issue != nil {
+			problems = append(problems, fmt.Sprintf("issue is set for kind %q", e.Kind))
+		}
+		switch {
+		case e.PullRequest == nil:
+			problems = append(problems, "pull_request is missing")
+		case e.PullRequest.Number <= 0:
+			problems = append(problems, "pull_request.number is not positive")
+		}
 	}
-	if (e.Kind == KindCommentCreated || e.Kind == KindCommand) && e.Comment == nil {
+
+	if e.Kind.needsComment() && e.Comment == nil {
 		problems = append(problems, fmt.Sprintf("comment is missing for kind %q", e.Kind))
 	}
-	if e.Kind == KindCommand && (e.Command == nil || e.Command.Name == "") {
-		problems = append(problems, "command is missing for kind command")
+	if e.Kind.needsCommand() && (e.Command == nil || e.Command.Name == "") {
+		problems = append(problems, fmt.Sprintf("command is missing for kind %q", e.Kind))
 	}
 
 	if len(problems) > 0 {

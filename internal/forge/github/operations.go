@@ -340,3 +340,23 @@ func escapePath(path string) string {
 	}
 	return strings.Join(segments, "/")
 }
+
+// UpsertIssueComment implements [forge.IssueClient].
+//
+// On GitHub an issue and a pull request share the comment endpoint — a pull
+// request is an issue with a branch attached — so this reuses the same calls
+// with the issue's number. That is true of GitHub and of nothing else: on
+// GitLab an issue note and a merge request note are different endpoints, and
+// on Azure DevOps a work item is not a pull request at all. The equivalence
+// belongs here, in the one client where it holds.
+func (c *Client) UpsertIssueComment(ctx context.Context, ref forge.IssueRef, marker, body string) error {
+	return c.UpsertSummary(ctx, asIssueOfRepo(ref), marker, body)
+}
+
+// asIssueOfRepo addresses the issue through the pull request paths, which is
+// only sound because of what UpsertIssueComment's comment says.
+func asIssueOfRepo(ref forge.IssueRef) forge.PRRef {
+	pr := ref.Repository()
+	pr.Number = ref.Number
+	return pr
+}

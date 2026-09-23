@@ -65,6 +65,61 @@ func HeadRef(platform event.Platform, number int) string {
 	}
 }
 
+// IssueRef identifies one issue, or an Azure DevOps work item.
+//
+// It is a type of its own rather than a [PRRef] carrying an issue number,
+// because on every platform an issue and a pull request may share a number
+// while being different objects. A comment addressed to the wrong one of them
+// is the kind of mistake that is only noticed by whoever receives it.
+type IssueRef struct {
+	Platform event.Platform
+	Owner    string
+	Repo     string
+	// Project is the Azure DevOps project; empty elsewhere.
+	Project string
+	Number  int
+}
+
+// FullName renders the "owner/name" form used in logs and state keys.
+func (r IssueRef) FullName() string { return r.Owner + "/" + r.Repo }
+
+// String renders a reference for humans. The word is there so that an issue
+// and a pull request never read the same in a log.
+func (r IssueRef) String() string { return fmt.Sprintf("%s issue #%d", r.FullName(), r.Number) }
+
+// Repository returns the repository-level reference, which is what reads a
+// settings file: those calls need the repository and not the issue.
+func (r IssueRef) Repository() PRRef {
+	return PRRef{Platform: r.Platform, Owner: r.Owner, Repo: r.Repo, Project: r.Project}
+}
+
+// IssueRefOf derives a reference from a normalized event. It returns false
+// when the event is not about an issue, which is the caller's signal that it
+// is holding something else.
+func IssueRefOf(ev *event.ReviewEvent) (IssueRef, bool) {
+	if ev == nil || ev.Issue == nil {
+		return IssueRef{}, false
+	}
+	return IssueRef{
+		Platform: ev.Source.Platform,
+		Owner:    ev.Repository.Owner,
+		Repo:     ev.Repository.Name,
+		Project:  ev.Repository.Project,
+		Number:   ev.Issue.Number,
+	}, true
+}
+
+// IssueClient is the part of a platform that implement mode talks to. It is
+// separate from [Client] because reviewing needs none of it, and a review
+// client that could write to issues would be a wider credential than reviews
+// require.
+type IssueClient interface {
+	// UpsertIssueComment posts or replaces the single comment identified by
+	// marker, so that repeated attempts on one issue replace their answer
+	// instead of stacking up.
+	UpsertIssueComment(ctx context.Context, ref IssueRef, marker, body string) error
+}
+
 // FileStatus describes what happened to a file in a pull request.
 type FileStatus string
 
