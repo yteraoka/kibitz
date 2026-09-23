@@ -18,6 +18,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/config"
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	azdoforge "github.com/yteraoka/kibitz/internal/forge/azuredevops"
 	githubforge "github.com/yteraoka/kibitz/internal/forge/github"
 	gitlabforge "github.com/yteraoka/kibitz/internal/forge/gitlab"
 	"github.com/yteraoka/kibitz/internal/httpx"
@@ -272,13 +273,24 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		}
 		forges[event.PlatformGitLab] = client
 	}
+	if cfg.AzureDevOps.Configured() {
+		client, err := azdoforge.New(azdoforge.Config{
+			OrganizationURL: cfg.AzureDevOps.OrganizationURL,
+			Token:           cfg.AzureDevOps.Token.Reveal(),
+			TokenIsBearer:   cfg.AzureDevOps.TokenIsBearer,
+		})
+		if err != nil {
+			return nil, err
+		}
+		forges[event.PlatformAzureDevOps] = client
+	}
 	if len(forges) == 0 {
 		// Without a client the worker would acknowledge every event while
 		// doing nothing, which looks healthy and reviews nothing. The
 		// in-memory queue is the one exception: nothing can arrive on it, so
 		// the local stack is allowed to come up unconfigured.
 		if cfg.Queue.Backend != config.QueueMemory {
-			return nil, fmt.Errorf("no forge credentials configured; set KIBITZ_GITHUB_APP_ID, KIBITZ_GITHUB_INSTALLATION_ID and KIBITZ_GITHUB_PRIVATE_KEY, or KIBITZ_GITLAB_TOKEN")
+			return nil, fmt.Errorf("no forge credentials configured; set KIBITZ_GITHUB_APP_ID, KIBITZ_GITHUB_INSTALLATION_ID and KIBITZ_GITHUB_PRIVATE_KEY, or KIBITZ_GITLAB_TOKEN, or KIBITZ_AZDO_ORG_URL and KIBITZ_AZDO_TOKEN")
 		}
 		logger.LogAttrs(context.Background(), slog.LevelWarn,
 			"no forge credentials configured; the worker will not be able to review anything")

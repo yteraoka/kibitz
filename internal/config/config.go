@@ -229,6 +229,34 @@ type GitLabAuth struct {
 // Configured reports whether kibitz can talk to GitLab at all.
 func (g GitLabAuth) Configured() bool { return g.Token != "" }
 
+// AzureDevOpsAuth holds the credentials kibitz posts to Azure DevOps with.
+//
+// Unlike the other two there is no way to derive the instance from an event:
+// a service hook names the organization inside the payload, and Azure DevOps
+// Server can be at any address at all. So the organization is configured, and
+// a worker that has one talks only to it.
+type AzureDevOpsAuth struct {
+	// OrganizationURL is the account root: "https://dev.azure.com/{org}" for
+	// the hosted service, or "https://{server}/{collection}" for Azure DevOps
+	// Server.
+	OrganizationURL string
+	// Token is a personal access token with Code (read) and Pull Request
+	// Threads (read & write), or an Entra ID access token.
+	Token Secret
+	// TokenIsBearer says the token is an Entra ID access token rather than a
+	// personal access token. The two go in different places — a PAT is the
+	// password of basic authentication, a bearer token is a bearer — and each
+	// is rejected in the other's position.
+	TokenIsBearer bool
+}
+
+// Configured reports whether kibitz can talk to Azure DevOps at all. Both
+// halves are needed: a token without an instance has nothing to authenticate
+// against, and an instance without a token cannot be read.
+func (a AzureDevOpsAuth) Configured() bool {
+	return a.Token != "" && a.OrganizationURL != ""
+}
+
 // Vertex holds the Google Cloud settings OpenCode needs to reach Vertex AI.
 // Authentication is ADC (Workload Identity), so there is no key.
 type Vertex struct {
@@ -344,6 +372,7 @@ type Worker struct {
 	ReferenceDocs    []string
 	GitHub           GitHubApp
 	GitLab           GitLabAuth
+	AzureDevOps      AzureDevOpsAuth
 	ImplementEnabled bool
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
@@ -478,6 +507,11 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			BaseURL: l.str("KIBITZ_GITLAB_BASE_URL", ""),
 			Token:   l.secret("KIBITZ_GITLAB_TOKEN"),
 		},
+		AzureDevOps: AzureDevOpsAuth{
+			OrganizationURL: l.str("KIBITZ_AZDO_ORG_URL", ""),
+			Token:           l.secret("KIBITZ_AZDO_TOKEN"),
+			TokenIsBearer:   l.bool("KIBITZ_AZDO_TOKEN_IS_BEARER", false),
+		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
 		SessionTTL:       l.duration("KIBITZ_SESSION_TTL", 7*24*time.Hour),
@@ -493,6 +527,14 @@ func LoadWorker(env Lookup) (*Worker, error) {
 	if cfg.GitHub.AppID != 0 || cfg.GitHub.PrivateKey != "" {
 		l.requireIf(cfg.GitHub.AppID == 0, "KIBITZ_GITHUB_APP_ID", "", "when a GitHub App private key is set")
 		l.requireIf(cfg.GitHub.PrivateKey == "", "KIBITZ_GITHUB_PRIVATE_KEY", "", "when a GitHub App ID is set")
+	}
+
+	// Azure DevOps needs both halves. A token with no instance has nothing to
+	// authenticate against, and an instance with no token cannot be read;
+	// either on its own fails at the first API call rather than at startup.
+	if cfg.AzureDevOps.OrganizationURL != "" || cfg.AzureDevOps.Token != "" {
+		l.requireIf(cfg.AzureDevOps.OrganizationURL == "", "KIBITZ_AZDO_ORG_URL", "", "when an Azure DevOps token is set")
+		l.requireIf(cfg.AzureDevOps.Token == "", "KIBITZ_AZDO_TOKEN", "", "when an Azure DevOps organization URL is set")
 	}
 
 	if err := errors.Join(l.errs...); err != nil {
