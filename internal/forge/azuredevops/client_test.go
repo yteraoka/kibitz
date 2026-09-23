@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/yteraoka/kibitz/internal/event"
@@ -28,9 +29,22 @@ type call struct {
 	Auth   string
 }
 
+// query reads one query parameter of a recorded request.
+func (c call) query(key string) string {
+	if v := c.Query[key]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
 // stub is an Azure DevOps that answers with canned bodies.
+//
+// It is guarded because one of the clients under test is concurrent: a diff
+// fetches the blobs of every changed file in parallel, so without the lock
+// the recorder would be a data race rather than a record.
 type stub struct {
 	t         *testing.T
+	mu        sync.Mutex
 	responses map[string]any
 	status    map[string]int
 	raw       map[string][]byte
@@ -52,6 +66,9 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if data, _ := io.ReadAll(r.Body); len(data) > 0 {
 		_ = json.Unmarshal(data, &rec.Body)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls = append(s.calls, rec)
 
 	key := r.Method + " " + r.URL.Path
@@ -80,6 +97,24 @@ func (s *stub) client(opts ...azuredevops.Option) (*azuredevops.Client, *httptes
 
 	opts = append(opts, azuredevops.WithHTTPClient(srv.Client()))
 	c, err := azuredevops.New(azuredevops.Config{OrganizationURL: srv.URL, Token: token}, opts...)
+	if err != nil {
+		s.t.Fatalf("New: %v", err)
+	}
+	return c, srv
+}
+
+// clientWith builds a client with a file cap, which is the one knob a diff
+// against this platform really needs: every file costs two requests.
+func (s *stub) clientWith(maxFiles int) (*azuredevops.Client, *httptest.Server) {
+	s.t.Helper()
+
+	srv := httptest.NewServer(s)
+	s.t.Cleanup(srv.Close)
+
+	c, err := azuredevops.New(
+		azuredevops.Config{OrganizationURL: srv.URL, Token: token, MaxFiles: maxFiles},
+		azuredevops.WithHTTPClient(srv.Client()),
+	)
 	if err != nil {
 		s.t.Fatalf("New: %v", err)
 	}

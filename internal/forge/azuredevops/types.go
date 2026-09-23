@@ -212,3 +212,79 @@ func apiPath(path string) string {
 	}
 	return path
 }
+
+// gitChange is one file touched by a pull request or by a range of commits.
+//
+// Note what is not here. Azure DevOps answers with the path, the kind of
+// change and the git object ids of the two versions — no patch, no hunks, no
+// line counts. That absence is why internal/textdiff exists.
+type gitChange struct {
+	ChangeType string  `json:"changeType"`
+	Item       gitItem `json:"item"`
+	// OriginalPath is set when the file was renamed, and names where it was
+	// before.
+	OriginalPath string `json:"originalPath"`
+}
+
+type gitItem struct {
+	Path string `json:"path"`
+	// ObjectID is the blob as the change leaves it, OriginalObjectID the blob
+	// as it was. Both are git object ids, and both are how the content is
+	// fetched.
+	ObjectID         string `json:"objectId"`
+	OriginalObjectID string `json:"originalObjectId"`
+	GitObjectType    string `json:"gitObjectType"`
+	IsFolder         bool   `json:"isFolder"`
+	CommitID         string `json:"commitId"`
+}
+
+// isTree reports whether the item is a directory rather than a file. Azure
+// DevOps lists the directories a change created alongside the files.
+func (i gitItem) isTree() bool {
+	return strings.EqualFold(strings.TrimSpace(i.GitObjectType), "tree")
+}
+
+// changeKinds splits a change type into its parts.
+//
+// Azure DevOps combines them: a file that was moved and modified in one
+// commit comes back as "edit, rename". Matching on the whole string would
+// miss that, and matching on a substring would read "undelete" as a delete
+// and "sourceRename" as a rename of this file rather than of another.
+func changeKinds(changeType string) map[string]bool {
+	kinds := make(map[string]bool)
+	for _, part := range strings.Split(changeType, ",") {
+		if k := strings.ToLower(strings.TrimSpace(part)); k != "" {
+			kinds[k] = true
+		}
+	}
+	return kinds
+}
+
+func (c gitChange) added() bool {
+	kinds := changeKinds(c.ChangeType)
+	return kinds["add"] || kinds["undelete"] || kinds["branch"]
+}
+
+func (c gitChange) deleted() bool {
+	return changeKinds(c.ChangeType)["delete"] && !changeKinds(c.ChangeType)["undelete"]
+}
+
+// status maps a change onto the four states kibitz knows.
+//
+// The order is what makes the combinations come out right: a file that was
+// deleted is deleted whatever else happened to it, and one that was renamed
+// and edited is reported as renamed, because the rename is the part the
+// other three statuses cannot express.
+func (c gitChange) status() forge.FileStatus {
+	kinds := changeKinds(c.ChangeType)
+	switch {
+	case kinds["delete"] && !kinds["undelete"]:
+		return forge.FileRemoved
+	case kinds["rename"] || kinds["sourcerename"] || kinds["targetrename"]:
+		return forge.FileRenamed
+	case kinds["add"] || kinds["undelete"] || kinds["branch"]:
+		return forge.FileAdded
+	default:
+		return forge.FileModified
+	}
+}
