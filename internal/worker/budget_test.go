@@ -1,7 +1,10 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -229,4 +232,72 @@ func TestTheEstimatePricesEachPassOnItsOwnModel(t *testing.T) {
 	if !strings.Contains(f.summaries[0], "$10.00") {
 		t.Errorf("the estimate is not the review model's price:\n%s", f.summaries[0])
 	}
+}
+
+// TestAnUnpricedRunIsLoggedAsUnpricedNotZero guards the number a dashboard
+// sums. Logging zero would make a month of work nobody priced read as a
+// month that cost nothing.
+func TestAnUnpricedRunIsLoggedAsUnpricedNotZero(t *testing.T) {
+	origin, _, _ := originRepo(t)
+
+	var buf bytes.Buffer
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{usedResult(1_000, 10)}}
+	j := newJob(t, f, e)
+	j.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	j.Prices = nil
+
+	if err := j.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	line := findLog(t, buf.String(), "review produced findings")
+	if got := line["cost"]; got != "unpriced" {
+		t.Errorf("cost is %#v, want %q", got, "unpriced")
+	}
+	if got, ok := line["total_tokens"].(float64); !ok || got != 1010 {
+		t.Errorf("total_tokens is %#v, want 1010", line["total_tokens"])
+	}
+	if got := line["repository"]; got != "yteraoka/kibitz" {
+		t.Errorf("repository is %#v, want yteraoka/kibitz", got)
+	}
+}
+
+func TestAPricedRunLogsWhatItCost(t *testing.T) {
+	origin, _, _ := originRepo(t)
+
+	var buf bytes.Buffer
+	f := defaultForge()
+	e := &fakeEngine{results: []*reviewer.Result{usedResult(1_000_000, 0)}}
+	j := newJob(t, f, e)
+	j.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	j.Prices = reviewer.Prices{reviewer.PriceFallback: {Input: 2, Output: 8}}
+
+	if err := j.Handle(context.Background(), queued(pullRequestEvent(event.KindPROpened, origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	line := findLog(t, buf.String(), "review produced findings")
+	if got, ok := line["cost"].(float64); !ok || got != 2 {
+		t.Errorf("cost is %#v, want 2", line["cost"])
+	}
+}
+
+// findLog picks one structured log line out of a handler's output.
+func findLog(t *testing.T, out, msg string) map[string]any {
+	t.Helper()
+	for _, raw := range strings.Split(out, "\n") {
+		if raw == "" {
+			continue
+		}
+		var line map[string]any
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
+			continue
+		}
+		if line["msg"] == msg {
+			return line
+		}
+	}
+	t.Fatalf("no log line %q in:\n%s", msg, out)
+	return nil
 }
