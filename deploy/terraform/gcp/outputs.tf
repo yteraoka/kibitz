@@ -28,6 +28,28 @@ output "model_api_key_secret_name" {
   value       = var.model_api_key_env_name != "" ? google_secret_manager_secret.model_api_key[0].secret_id : ""
 }
 
+# The secrets to fill in for the other two platforms. Empty when that
+# platform is off, so the list doubles as a checklist of what this deployment
+# actually reviews.
+output "gitlab_secret_names" {
+  description = "Secrets to add the GitLab credentials to, or empty when GitLab is off."
+  value = var.gitlab_enabled ? {
+    webhook_tokens = google_secret_manager_secret.gitlab_webhook_tokens[0].secret_id
+    signing_tokens = google_secret_manager_secret.gitlab_signing_tokens[0].secret_id
+    api_token      = google_secret_manager_secret.gitlab_token[0].secret_id
+  } : {}
+}
+
+output "azure_devops_secret_names" {
+  description = "Secrets to add the Azure DevOps credentials to, or empty when Azure DevOps is off."
+  value = var.azure_devops_enabled ? merge({
+    basic_passwords = google_secret_manager_secret.azure_devops_passwords[0].secret_id
+    api_token       = google_secret_manager_secret.azure_devops_token[0].secret_id
+    }, var.azure_devops_header_name != "" ? {
+    header_values = google_secret_manager_secret.azure_devops_header_values[0].secret_id
+  } : {}) : {}
+}
+
 output "service_accounts" {
   description = "Identities the two components run as."
   value = {

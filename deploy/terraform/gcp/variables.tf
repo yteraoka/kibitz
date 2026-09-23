@@ -274,3 +274,155 @@ variable "labels" {
   type        = map(string)
   default     = { app = "kibitz" }
 }
+
+# --- GitLab -------------------------------------------------------------
+#
+# GitLab has no equivalent of a GitHub App, so both the webhook credential
+# and the API token are ordinary secrets with no installation behind them.
+
+variable "gitlab_enabled" {
+  description = "Create the GitLab secrets and wire them into the server and the worker."
+  type        = bool
+  default     = false
+}
+
+variable "gitlab_base_url" {
+  description = "GitLab instance. Empty means gitlab.com; a self-managed instance goes here."
+  type        = string
+  default     = ""
+}
+
+# --- Azure DevOps -------------------------------------------------------
+
+variable "azure_devops_enabled" {
+  description = "Create the Azure DevOps secrets and wire them into the server and the worker."
+  type        = bool
+  default     = false
+}
+
+variable "azure_devops_org_url" {
+  description = <<-EOT
+    The Azure DevOps account root: "https://dev.azure.com/{org}", or
+    "https://{server}/{collection}" for Azure DevOps Server. Unlike the other
+    two platforms there is nothing in a delivery to derive this from, so it
+    has to be configured.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "azure_devops_basic_user" {
+  description = "The username half of the basic authentication the service hooks send. Azure DevOps does not sign its deliveries, so this and the password are the whole credential."
+  type        = string
+  default     = "kibitz"
+}
+
+variable "azure_devops_header_name" {
+  description = "An optional fixed header the service hooks must also send. Set it to narrow what a leaked password on its own is good for; empty turns the second check off."
+  type        = string
+  default     = ""
+}
+
+variable "azure_devops_token_is_bearer" {
+  description = "The API token is an Entra ID access token rather than a personal access token. The two go in different places and each is rejected in the other's."
+  type        = bool
+  default     = false
+}
+
+# --- Cost ---------------------------------------------------------------
+
+variable "model_prices" {
+  description = <<-EOT
+    What each model costs, as "model=input/output[/cache_read[/cache_write]]"
+    per million tokens, comma separated. "*" prices anything not named.
+    Without it the review summary reports tokens and says nothing about
+    money, and nothing counts against a budget.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "model_price_currency" {
+  description = "The symbol the cost estimate is written with. It follows the prices; a dollar sign in front of a yen figure is worse than none."
+  type        = string
+  default     = ""
+}
+
+variable "repo_budgets" {
+  description = <<-EOT
+    Monthly ceilings, as "pattern=amount" comma separated, where the pattern
+    matches "owner/name" with the same wildcards as allowed_repos and the
+    first match decides. Empty means nothing is capped.
+
+    Set model_prices as well: a run on a model with no price counts towards
+    no budget, on purpose, because counting it as zero would let a ceiling be
+    passed without ever being reached.
+  EOT
+  type        = string
+  default     = ""
+}
+
+# --- Everything else ----------------------------------------------------
+
+variable "server_env" {
+  description = <<-EOT
+    Extra environment variables for the server, for the settings that have a
+    sensible default and only sometimes need changing. Anything
+    docs/configuration.md lists can go here.
+
+    Variables this configuration sets itself are rejected: Cloud Run refuses
+    a container with the same name twice, and silently winning that race
+    would be worse than the error.
+  EOT
+  type        = map(string)
+  default     = {}
+
+  # The list is written out rather than read from a local because a
+  # validation condition may only reference other objects from Terraform 1.9,
+  # and this configuration supports 1.6.
+  validation {
+    condition = length(setintersection(keys(var.server_env), [
+      "KIBITZ_QUEUE_BACKEND",
+      "KIBITZ_PUBSUB_PROJECT_ID",
+      "KIBITZ_PUBSUB_TOPIC",
+      "KIBITZ_GITHUB_WEBHOOK_SECRETS",
+      "KIBITZ_GITLAB_WEBHOOK_TOKENS",
+      "KIBITZ_GITLAB_SIGNING_TOKENS",
+      "KIBITZ_AZDO_BASIC_USER",
+      "KIBITZ_AZDO_BASIC_PASSWORDS",
+      "KIBITZ_AZDO_HEADER_NAME",
+      "KIBITZ_AZDO_HEADER_VALUES",
+      "KIBITZ_METRICS_ADDR",
+      "KIBITZ_SCALE_BACKEND",
+      "KIBITZ_SCALE_REGION",
+      "KIBITZ_SCALE_WORKER_POOL",
+    ])) == 0
+    error_message = "server_env may not set a variable this configuration already sets; use the variable for it instead."
+  }
+}
+
+variable "worker_env" {
+  description = "Extra environment variables for the worker. See server_env."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = length(setintersection(keys(var.worker_env), [
+      "KIBITZ_QUEUE_BACKEND",
+      "KIBITZ_PUBSUB_PROJECT_ID",
+      "KIBITZ_PUBSUB_SUBSCRIPTION",
+      "KIBITZ_STATE_BACKEND",
+      "KIBITZ_FIRESTORE_PROJECT_ID",
+      "KIBITZ_GITHUB_PRIVATE_KEY",
+      "KIBITZ_GITLAB_BASE_URL",
+      "KIBITZ_GITLAB_TOKEN",
+      "KIBITZ_AZDO_ORG_URL",
+      "KIBITZ_AZDO_TOKEN",
+      "KIBITZ_AZDO_TOKEN_IS_BEARER",
+      "KIBITZ_MODEL_PRICES",
+      "KIBITZ_MODEL_PRICE_CURRENCY",
+      "KIBITZ_REPO_BUDGETS",
+    ])) == 0
+    error_message = "worker_env may not set a variable this configuration already sets; use the variable for it instead."
+  }
+}

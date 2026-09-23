@@ -118,6 +118,81 @@ resource "google_cloud_run_v2_service" "server" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.gitlab_enabled ? [1] : []
+        content {
+          name = "KIBITZ_GITLAB_WEBHOOK_TOKENS"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gitlab_webhook_tokens[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.gitlab_enabled ? [1] : []
+        content {
+          name = "KIBITZ_GITLAB_SIGNING_TOKENS"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gitlab_signing_tokens[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.azure_devops_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_BASIC_USER"
+          value = var.azure_devops_basic_user
+        }
+      }
+      dynamic "env" {
+        for_each = var.azure_devops_enabled ? [1] : []
+        content {
+          name = "KIBITZ_AZDO_BASIC_PASSWORDS"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.azure_devops_passwords[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.azure_devops_enabled && var.azure_devops_header_name != "" ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_HEADER_NAME"
+          value = var.azure_devops_header_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.azure_devops_enabled && var.azure_devops_header_name != "" ? [1] : []
+        content {
+          name = "KIBITZ_AZDO_HEADER_VALUES"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.azure_devops_header_values[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      # The long tail of settings that have a default and only sometimes
+      # need changing. Names this configuration sets itself are rejected by
+      # the variable's own validation.
+      dynamic "env" {
+        for_each = var.server_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       startup_probe {
         http_get {
           path = "/healthz"
@@ -141,6 +216,10 @@ resource "google_cloud_run_v2_service" "server" {
 
   depends_on = [
     google_secret_manager_secret_iam_member.server_webhook,
+    google_secret_manager_secret_iam_member.server_gitlab_webhook_tokens,
+    google_secret_manager_secret_iam_member.server_gitlab_signing_tokens,
+    google_secret_manager_secret_iam_member.server_azure_devops_passwords,
+    google_secret_manager_secret_iam_member.server_azure_devops_header_values,
     google_pubsub_topic_iam_member.server_publish,
     google_cloud_run_v2_worker_pool_iam_member.worker_scaling,
     google_service_account_iam_member.worker_act_as,
@@ -302,6 +381,88 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         }
       }
 
+      # What a review costs, and what a repository may spend in a month.
+      # Prices are needed for both: a run on a model nobody priced counts
+      # towards no budget, deliberately, because counting it as zero would
+      # let a ceiling be passed without ever being reached.
+      dynamic "env" {
+        for_each = var.model_prices != "" ? [1] : []
+        content {
+          name  = "KIBITZ_MODEL_PRICES"
+          value = var.model_prices
+        }
+      }
+      dynamic "env" {
+        for_each = var.model_price_currency != "" ? [1] : []
+        content {
+          name  = "KIBITZ_MODEL_PRICE_CURRENCY"
+          value = var.model_price_currency
+        }
+      }
+      dynamic "env" {
+        for_each = var.repo_budgets != "" ? [1] : []
+        content {
+          name  = "KIBITZ_REPO_BUDGETS"
+          value = var.repo_budgets
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.gitlab_enabled && var.gitlab_base_url != "" ? [1] : []
+        content {
+          name  = "KIBITZ_GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+      }
+      dynamic "env" {
+        for_each = var.gitlab_enabled ? [1] : []
+        content {
+          name = "KIBITZ_GITLAB_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gitlab_token[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.azure_devops_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_ORG_URL"
+          value = var.azure_devops_org_url
+        }
+      }
+      dynamic "env" {
+        for_each = var.azure_devops_enabled ? [1] : []
+        content {
+          name = "KIBITZ_AZDO_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.azure_devops_token[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.azure_devops_enabled && var.azure_devops_token_is_bearer ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_TOKEN_IS_BEARER"
+          value = "true"
+        }
+      }
+
+      # See server_env.
+      dynamic "env" {
+        for_each = var.worker_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       # Clones and agent scratch space go to memory-backed storage; the
       # container filesystem is small and the workspace is disposable anyway.
       volume_mounts {
@@ -342,6 +503,8 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
   depends_on = [
     google_secret_manager_secret_iam_member.worker_private_key,
     google_secret_manager_secret_iam_member.worker_model_api_key,
+    google_secret_manager_secret_iam_member.worker_gitlab_token,
+    google_secret_manager_secret_iam_member.worker_azure_devops_token,
     google_pubsub_subscription_iam_member.worker_subscribe,
     google_project_iam_member.worker_firestore,
     google_project_iam_member.worker_vertex,

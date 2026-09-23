@@ -78,3 +78,60 @@ alert_notification_channels = []
 # triage やサマリなどの補助タスクだけ安いモデルにする。未設定なら model と同じ。
 #
 #   triage_model = "google-vertex/gemini-3.5-flash-lite"
+
+# --- コスト ------------------------------------------------------------
+#
+# 単価を設定するとサマリコメントに概算が出る。kibitz は単価を知らない
+# (プロバイダ・リージョン・契約で違い、しかも変わる)。
+#
+#   model_prices         = "google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8"
+#   model_price_currency = "$"
+
+# リポジトリ 1 か月あたりの上限。最初に一致したパターンが効くので、
+# 具体的なものを "*" より前に置く。空なら上限なし。
+#
+# **model_prices も設定すること。** 単価が引けないモデルの実行は
+# どの予算にも計上されない (0 円として数えると、上限に到達しないまま
+# 超過するため)。
+#
+#   repo_budgets = "acme/payments=200,acme/*=50,*=10"
+
+# --- GitLab ------------------------------------------------------------
+#
+# 有効にするとシークレットが 3 つ作られる。値は gcloud で投入する
+# (`terraform output gitlab_secret_names` が名前を出す)。
+#
+#   gitlab_enabled  = true
+#   gitlab_base_url = "https://gitlab.example.com"   # gitlab.com なら空のまま
+
+# --- Azure DevOps ------------------------------------------------------
+#
+# **Azure DevOps は Service Hook に署名しない。** Basic 認証が唯一の
+# 資格情報になるので、固定ヘッダも設定して二重にするのが望ましい
+# (パスワードだけが漏れたときの被害を狭める)。
+#
+#   azure_devops_enabled     = true
+#   azure_devops_org_url     = "https://dev.azure.com/my-org"
+#   azure_devops_basic_user  = "kibitz"
+#   azure_devops_header_name = "X-Kibitz-Hook"
+#
+# トークンが Entra ID のアクセストークンなら true。PAT は空ユーザーの
+# Basic 認証のパスワードとして、Entra ID は Bearer として送るので、
+# 間違えるとどちらも拒否される。
+#
+#   azure_devops_token_is_bearer = false
+
+# --- その他の設定 ------------------------------------------------------
+#
+# docs/configuration.md にある環境変数のうち、既定値で足りるものは
+# ここから渡す。この設定自身が書いている変数名は拒否される
+# (Cloud Run が同名の env を 2 つ受け付けないため)。
+#
+#   worker_env = {
+#     KIBITZ_MIN_SEVERITY = "high"
+#     KIBITZ_MAX_COMMENTS = "10"
+#     KIBITZ_LANGUAGE     = "English"
+#   }
+#   server_env = {
+#     KIBITZ_MAX_EVENT_AGE = "24h"
+#   }
