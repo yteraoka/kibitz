@@ -189,6 +189,62 @@ GitLab 自身が書いたもの (「説明を変更しました」など) なの
 `position` があれば差分上のコメント、無ければ MR 全体へのコメント。
 返信先は `discussion_id` (GitLab はスレッドを discussion と呼ぶ)。
 
+### 3.3 Azure DevOps の `git.pullrequest.updated`
+
+GitLab の `update` と同じ問題だが、**もっと厳しい**。
+push・レビュアーの追加・投票・完了がすべて `git.pullrequest.updated` で届き、
+**payload にはどれだったかを示すものが無い**。
+`notificationType` はサブスクリプション側の絞り込み設定であって、配送のフィールドではない。
+
+そこで、**分かるものは `status` で分け、残りはすべて `pr.updated` にする**。
+
+| eventType | 条件 | kibitz の kind |
+| --- | --- | --- |
+| `git.pullrequest.created` | - | `pr.opened` |
+| (いずれか) | `resource.status == "completed"` | `pr.merged` |
+| (いずれか) | `resource.status == "abandoned"` | `pr.closed` |
+| `git.pullrequest.merged` | 上記以外 (= 完了していない) | 無視 (コンフリクトやポリシー失敗) |
+| `git.pullrequest.updated` | 上記以外 | **`pr.updated`** |
+
+**曖昧なものを `pr.updated` に倒すのは安全側である。**
+ワーカーは同じコミットを二度レビューしないので
+([ADR-0006](adr/0006-claim-and-completion-are-different-facts.md))、
+head が変わっていない投票は配送 1 件と API 参照 1 回で終わる。
+逆に倒すと、push だったかもしれない更新を落としてレビューを失う。
+
+コメントイベント (`ms.vss-code.git-pullrequest-comment-event`) は 2 つの理由で無視することがある。
+
+- `comment.commentType` が `text` 以外 — 投票・ブランチ更新・ポリシー結果など、
+  サービス自身が書いたもの
+- `publishedDate` より `lastUpdatedDate` が後 — **編集**。
+  Azure DevOps は新規コメントと編集に同じイベントを使うので、
+  区別しないと同じ質問に二度答えることになる
+
+**スレッド ID は payload にフィールドが無い。**
+`comment._links.threads.href` が `.../pullRequests/1/threads/5` で終わるので、そこから取る。
+行と位置はスレッド側にあり、このイベントには含まれないため、必要ならワーカーが API から取り直す。
+
+### 3.4 Azure DevOps の `full_name`
+
+Azure DevOps は他の 2 つより 1 階層深い。**組織 / プロジェクト / リポジトリ**。
+
+`Repository.FullName` は `<組織>/<プロジェクト>/<リポジトリ>` にする。
+これは `KIBITZ_ALLOWED_REPOS` の照合対象であり、
+**キューの順序キーと状態ストアのロックキー** (`ReviewEvent.Key()`) でもある。
+1 つの組織の別プロジェクトに同名のリポジトリがあるのは普通なので、
+プロジェクトを落とすと**別の PR が同じ PR として扱われ、2 つのレビューが競合する**。
+
+組織名の取り方は payload によって違う。
+
+| 出どころ | 使う場面 |
+| --- | --- |
+| `resourceContainers.*.baseUrl` | `git.pullrequest.*` にはある |
+| `repository.remoteUrl` / `repository.url` | **コメントイベントには `baseUrl` が無い** |
+
+`{org}.visualstudio.com` (旧形式) ではサブドメインが組織名、
+`dev.azure.com/{org}` と Azure DevOps Server ではパスの先頭セグメント
+(Server ではコレクション名) を使う。
+
 ## 4. コマンド構文
 
 **コメントの先頭**にメンションを置いた場合だけコマンドとして扱う。

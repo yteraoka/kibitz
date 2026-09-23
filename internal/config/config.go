@@ -163,6 +163,12 @@ type Webhook struct {
 	GitLabSigningTokens  []Secret
 	AzureDevOpsUser      string
 	AzureDevOpsPasswords []Secret
+	// AzureDevOpsHeader and AzureDevOpsHeaderValues are an optional second
+	// credential. Azure DevOps does not sign its deliveries, so basic auth is
+	// all there is; requiring a fixed header as well narrows what a leaked
+	// password on its own is good for.
+	AzureDevOpsHeader       string
+	AzureDevOpsHeaderValues []Secret
 }
 
 // Configured reports whether at least one platform can be verified. A server
@@ -170,7 +176,8 @@ type Webhook struct {
 // misconfiguration.
 func (w Webhook) Configured() bool {
 	return len(w.GitHubSecrets) > 0 || len(w.GitLabTokens) > 0 ||
-		len(w.GitLabSigningTokens) > 0 || len(w.AzureDevOpsPasswords) > 0
+		len(w.GitLabSigningTokens) > 0 || len(w.AzureDevOpsPasswords) > 0 ||
+		len(w.AzureDevOpsHeaderValues) > 0
 }
 
 // Policy holds the trigger rules the server applies before publishing.
@@ -376,11 +383,13 @@ func LoadServer(env Lookup) (*Server, error) {
 		Queue:             loadQueue(l),
 		Blob:              loadBlob(l),
 		Webhook: Webhook{
-			GitHubSecrets:        l.secrets("KIBITZ_GITHUB_WEBHOOK_SECRETS"),
-			GitLabTokens:         l.secrets("KIBITZ_GITLAB_WEBHOOK_TOKENS"),
-			GitLabSigningTokens:  l.secrets("KIBITZ_GITLAB_SIGNING_TOKENS"),
-			AzureDevOpsUser:      l.str("KIBITZ_AZDO_BASIC_USER", ""),
-			AzureDevOpsPasswords: l.secrets("KIBITZ_AZDO_BASIC_PASSWORDS"),
+			GitHubSecrets:           l.secrets("KIBITZ_GITHUB_WEBHOOK_SECRETS"),
+			GitLabTokens:            l.secrets("KIBITZ_GITLAB_WEBHOOK_TOKENS"),
+			GitLabSigningTokens:     l.secrets("KIBITZ_GITLAB_SIGNING_TOKENS"),
+			AzureDevOpsUser:         l.str("KIBITZ_AZDO_BASIC_USER", ""),
+			AzureDevOpsPasswords:    l.secrets("KIBITZ_AZDO_BASIC_PASSWORDS"),
+			AzureDevOpsHeader:       l.str("KIBITZ_AZDO_HEADER_NAME", ""),
+			AzureDevOpsHeaderValues: l.secrets("KIBITZ_AZDO_HEADER_VALUES"),
 		},
 		Policy: Policy{
 			AppID:        l.str("KIBITZ_GITHUB_APP_ID", ""),
@@ -401,6 +410,9 @@ func LoadServer(env Lookup) (*Server, error) {
 	}
 	if len(cfg.Webhook.AzureDevOpsPasswords) > 0 && cfg.Webhook.AzureDevOpsUser == "" {
 		l.fail("KIBITZ_AZDO_BASIC_USER", "is required when KIBITZ_AZDO_BASIC_PASSWORDS is set")
+	}
+	if len(cfg.Webhook.AzureDevOpsHeaderValues) > 0 && cfg.Webhook.AzureDevOpsHeader == "" {
+		l.fail("KIBITZ_AZDO_HEADER_NAME", "is required when KIBITZ_AZDO_HEADER_VALUES is set")
 	}
 
 	if err := errors.Join(l.errs...); err != nil {

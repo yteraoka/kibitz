@@ -112,8 +112,10 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 ## Phase 5: Azure DevOps 対応 (目安 1〜1.5 週)
 
 - `internal/webhook/azuredevops` — Basic 認証 + カスタムヘッダ検証、
-  `git.pullrequest.created/updated`、`ms.vss-code.git-pullrequest-comment-event` の正規化
+  `git.pullrequest.created/updated/merged`、`ms.vss-code.git-pullrequest-comment-event`
+  の正規化 **(完了)**
 - **受信 payload を信用せず API で PR を再取得**する経路 (署名がないため)
+  **(完了 — ワーカーが元々全プラットフォームでやっている `client.PullRequest()`)**
 - `internal/forge/azuredevops` — threads API、`threadContext` によるインライン位置、
   iterations/changes による差分取得、Entra ID / PAT 認証
 
