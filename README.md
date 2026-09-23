@@ -66,6 +66,8 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | [docs/security.md](docs/security.md) | 署名検証、シークレット管理、プロンプトインジェクション、fork PR の扱い |
 | [docs/configuration.md](docs/configuration.md) | サーバー / ワーカーの環境変数、リポジトリ設定 `.kibitz.yaml` |
 | [docs/deployment.md](docs/deployment.md) | GCP へのデプロイ手順、初回の動作確認、運用とトラブルシュート |
+| [docs/onboarding.md](docs/onboarding.md) | **リポジトリを 1 つ載せる手順**。GitHub / GitLab / Azure DevOps それぞれの Webhook 設定 |
+| [docs/runbook.md](docs/runbook.md) | **障害対応とシークレットのローテーション**。アラート別の対応、止めかたと戻しかた |
 | [docs/roadmap.md](docs/roadmap.md) | フェーズ別実装計画、受け入れ条件、テスト戦略、未決事項 |
 
 ## 前提
