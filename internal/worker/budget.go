@@ -254,3 +254,15 @@ func toMicros(amount float64) int64 {
 func fromMicros(micros int64) float64 {
 	return float64(micros) / 1e6
 }
+
+// costValue renders a cost for a log line.
+//
+// A run nobody priced is logged as absent rather than as zero: a dashboard
+// that sums these would otherwise report a month of unpriced work as a month
+// that cost nothing.
+func costValue(amount float64, ok bool) slog.Value {
+	if !ok {
+		return slog.StringValue("unpriced")
+	}
+	return slog.Float64Value(amount)
+}

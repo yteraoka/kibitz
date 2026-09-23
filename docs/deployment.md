@@ -382,8 +382,41 @@ gcloud run worker-pools logs read kibitz-worker --region asia-northeast1 --limit
 curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_
 ```
 
-ワーカーの `/metrics` は内部からのみ到達できる。Managed Prometheus に
-取り込む場合は、Cloud Run のサイドカーとして OTel collector を追加する。
+ワーカーの `/metrics` は内部からのみ到達できる。**スクレイプする構成は採っていない。**
+ワーカーは worker pool で **0 台まで落ち、1 インスタンスの寿命が 2 分ということもある**。
+スクレイプ間隔より短いので、測った値のほとんどが回収されないまま消える。
+
+代わりに、**ワーカーの構造化ログからログベースメトリクスを作る**。
+一度書かれたログは、書いたインスタンスが消えていても回収される。
+
+### ダッシュボード
+
+Terraform が `${name_prefix}: reviews, cost and backlog` を作る
+([dashboard.tf](../deploy/terraform/gcp/dashboard.tf))。
+
+| タイル | 出どころ |
+| --- | --- |
+| リポジトリ別のコスト (日次) | ログ `cost` |
+| リポジトリ別のトークン (日次) | ログ `total_tokens` |
+| エージェントの所要時間 (p50 / p95) | ログ `agent_duration` |
+| 指摘数と、諦めたジョブ | ログ `findings` / `giving up on the job` |
+| バックログ (最古の未 ack) | Pub/Sub |
+| Dead letter | Pub/Sub |
+| ワーカー台数 | Cloud Run |
+| 単価未設定の実行と、予算切れのリポジトリ | ログ |
+
+**最後の 1 枚が効く。** 単価が未設定のモデルは `cost` に金額ではなく `"unpriced"`
+と出る。合計から除外されるので、**コストのグラフだけを見ていると
+「誰も単価を設定していない 1 か月」が「無料だった 1 か月」に見える**。
+その枚数を隣に置いてある。
+
+所要時間は**ナノ秒**のまま。`EXTRACT()` は計算をしないので、
+slog が書いた単位がそのまま出る (バケットは 1 秒から始めてある)。
+
+> **`cost` と `repository` はログに出るが、Prometheus のカウンタには
+> リポジトリ名を入れていない。** ログには元から `ref` が入っており、
+> 費用は**リポジトリ単位でしか意味がない** (予算がその単位なので)。
+> カウンタ側の方針は変えていない。
 
 #### 設計文書の索引が効いているかを見る
 

@@ -199,7 +199,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 | イメージのビルドと push (`make push`) | 完了 |
 | タグ push での自動ビルド・デプロイ (Workload Identity Federation) | 完了 |
 | デプロイ手順と初回検証チェックリスト | 完了 |
-| ダッシュボード | 未 |
+| ダッシュボード | 完了 |
 | 予算管理と上限到達時の挙動 | 完了 |
 | シークレットローテーション手順・Runbook | 完了 ([runbook.md](runbook.md)) |
 | GitLab / Azure DevOps の Webhook 設定手順 | Phase 4 / 5 と同時 |
@@ -207,7 +207,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 ## Phase 9 の残り (目安 1 週)
 
 - Terraform モジュール (GCP) と Helm chart の整備
-- ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ、ワーカー台数)
+- ~~ダッシュボード (レイテンシ、成功率、トークン消費、コスト、DLQ、ワーカー台数)~~ **(完了 — ログベースメトリクス + Cloud Monitoring ダッシュボード)**
 - ~~リポジトリ別の予算管理と上限到達時の挙動~~ **(完了 — `KIBITZ_REPO_BUDGETS`)**
 - ~~シークレットローテーション手順、障害時の Runbook~~ **(完了 — [runbook.md](runbook.md))**
 - ~~導入ドキュメント (3 プラットフォームそれぞれの Webhook 設定手順)~~ **(完了 — [onboarding.md](onboarding.md))**

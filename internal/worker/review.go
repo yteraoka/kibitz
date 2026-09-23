@@ -317,7 +317,18 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	agentSpan.End()
 
 	sanitized := reviewer.Sanitize(result.RawOutput, reviewer.NewPositions(diff), settings.Limits)
+	passes := []pass{
+		{Model: settings.Model, Usage: result.Usage},
+		{Model: j.triageModel(settings.Model), Usage: selection.Usage},
+	}
+	// The repository and the cost are on the line so that a dashboard can be
+	// built from the logs. Scraping this worker is not an option: it scales
+	// to zero and an instance may live two minutes, which is shorter than
+	// any sensible scrape interval, so most of what it measured would never
+	// be collected.
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "review produced findings",
+		slog.String("repository", ev.Repository.FullName),
+		slog.String("model", settings.Model),
 		slog.String("ref", ref.String()),
 		slog.String("head", ws.HeadSHA),
 		slog.String("since", since),
@@ -334,11 +345,12 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 		slog.Int("reference_docs", len(references)),
 		slog.Int("docs_searched", result.Tools.Searches),
 		slog.Any("docs_read", result.Tools.Documents),
+		slog.Int("total_tokens", result.Usage.Tokens()+selection.Usage.Tokens()),
+		slog.Attr{Key: "cost", Value: costValue(j.cost(passes...))},
 	)
 
 	j.record(ev, result, sanitized, settings.Model)
-	j.charge(ctx, ev, pass{Model: settings.Model, Usage: result.Usage},
-		pass{Model: j.triageModel(settings.Model), Usage: selection.Usage})
+	j.charge(ctx, ev, passes...)
 	j.rememberReviewed(ctx, ev, ws.HeadSHA)
 
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
@@ -720,7 +732,10 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	}
 	j.rememberSession(ctx, ev, result.SessionID)
 
+	answerPass := pass{Model: settings.Model, Usage: result.Usage}
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "answered a question",
+		slog.String("repository", ev.Repository.FullName),
+		slog.String("model", settings.Model),
 		slog.String("ref", ref.String()),
 		slog.Int("thread_comments", len(thread)),
 		slog.Int("input_tokens", result.Usage.Input()),
@@ -728,9 +743,11 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 		slog.Int("tool_calls", result.Tools.Total()),
 		slog.Int("docs_searched", result.Tools.Searches),
 		slog.Any("docs_read", result.Tools.Documents),
+		slog.Int("total_tokens", result.Usage.Tokens()),
+		slog.Attr{Key: "cost", Value: costValue(j.cost(answerPass))},
 	)
 	j.recordTools(result.Tools)
-	j.charge(ctx, ev, pass{Model: settings.Model, Usage: result.Usage})
+	j.charge(ctx, ev, answerPass)
 
 	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
 		return fmt.Errorf("replying on %s: %w", ref, err)
