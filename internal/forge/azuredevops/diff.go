@@ -313,6 +313,13 @@ func applyResult(f *forge.File, r textdiff.Result) {
 func (c *Client) contents(ctx context.Context, ref forge.PRRef, ch gitChange, base string, spend func(int) bool) (before, after []byte, err error) {
 	newID, oldID := ch.Item.ObjectID, ch.Item.OriginalObjectID
 	if ch.deleted() {
+		// There is no version after a deletion, and the object the record
+		// names is therefore the one before it. Taking it as both sides
+		// would make the file read as unchanged; taking it as the previous
+		// version is what it is, and saves looking the same blob up again.
+		if oldID == "" {
+			oldID = newID
+		}
 		newID = ""
 	}
 	if ch.added() {

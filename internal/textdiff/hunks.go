@@ -169,16 +169,20 @@ func span(steps []step, changed op) (start, count int) {
 	return first + 1, count
 }
 
-// position answers where a side with no lines in the hunk sits, which is
-// after the last line of it that exists before the hunk.
+// position answers where a side with no lines in the hunk sits.
+//
+// Every step carries its position on both sides, so the first one already
+// says where the hunk begins on the side that contributes nothing to it: the
+// number of lines before it. Rendered as a zero-length range that reads
+// "-0,0" for a file that was created, which is what git writes.
 func position(steps []step, changed op) int {
-	for _, s := range steps {
-		if changed == opInsert {
-			return s.cur
-		}
-		return s.old
+	if len(steps) == 0 {
+		return 0
 	}
-	return 0
+	if changed == opInsert {
+		return steps[0].cur
+	}
+	return steps[0].old
 }
 
 func rng(start, count int) string {

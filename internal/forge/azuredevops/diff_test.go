@@ -485,3 +485,33 @@ func TestTheReviewerAcceptsFindingsOnTheComputedPatch(t *testing.T) {
 		t.Error("a finding past the end of the file was accepted")
 	}
 }
+
+// TestADeletionNamingOnlyOneObjectStillReadsAsADeletion covers the shape the
+// service actually sends: a deleted file whose record names the object once.
+// Read as both sides it would be no change at all.
+func TestADeletionNamingOnlyOneObjectStillReadsAsADeletion(t *testing.T) {
+	s := newStub(t)
+	s.iteration(1, "base111", map[string]any{
+		"changeType": "delete",
+		"item":       map[string]any{"path": "/gone.txt", "objectId": "o1"},
+	})
+	s.blob("o1", "a\nb\n")
+	c, _ := s.client()
+
+	diff, err := c.Diff(context.Background(), testRef())
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+
+	f := fileIn(t, diff, "gone.txt")
+	if f.Deletions != 2 || f.Additions != 0 {
+		t.Errorf("counted +%d -%d, want +0 -2", f.Additions, f.Deletions)
+	}
+	// The object was named, so nothing should have gone looking for it at
+	// the base commit.
+	for _, rec := range s.calls {
+		if strings.HasSuffix(rec.Path, "/items") {
+			t.Errorf("a deletion that named its object was still looked up: %+v", rec.Query)
+		}
+	}
+}
