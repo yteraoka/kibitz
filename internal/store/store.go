@@ -84,6 +84,7 @@ const (
 	prefixIgnore   = "ignore"
 	prefixReviewed = "reviewed"
 	prefixPosts    = "posts"
+	prefixSpend    = "spend"
 )
 
 // DeliveryKey identifies one webhook delivery. It is what stops a redelivered
@@ -126,6 +127,14 @@ func IgnoreKey(ev *event.ReviewEvent) string {
 // which is the backstop against a comment loop.
 func PostsKey(ev *event.ReviewEvent, now time.Time) string {
 	return fmt.Sprintf("%s:%s:%s", prefixPosts, ev.Key(), now.UTC().Format("2006010215"))
+}
+
+// SpendKey counts what one repository has cost in one calendar month, which
+// is what a budget is measured against. The month is in the key rather than
+// in the value so that a new month starts at zero without anything having to
+// reset it.
+func SpendKey(repoFullName string, now time.Time) string {
+	return fmt.Sprintf("%s:%s:%s", prefixSpend, repoFullName, now.UTC().Format("200601"))
 }
 
 func pullRequestNumber(ev *event.ReviewEvent) int {

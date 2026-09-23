@@ -52,10 +52,7 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		slog.Int("files", len(diff.Files)),
 	)
 
-	model := j.TriageModel
-	if model == "" {
-		model = settings.Model
-	}
+	model := j.triageModel(settings.Model)
 
 	result, err := j.Engine.Run(ctx, reviewer.Request{
 		Mode:         reviewer.ModeTriage,
