@@ -59,6 +59,10 @@ type Workspace struct {
 	// BaseSHA is the tip of the target branch that was fetched.
 	BaseSHA string
 
+	// runner is how the workspace runs git afterwards, with the credential it
+	// was prepared with. It is kept rather than rebuilt so that pushing cannot
+	// end up using a different one than fetching did.
+	runner gitRunner
 	logger *slog.Logger
 }
 
@@ -92,8 +96,8 @@ func Prepare(ctx context.Context, cfg Config, spec Spec, logger *slog.Logger) (w
 		}
 	}()
 
-	w := &Workspace{Dir: dir, logger: logger}
 	runner := gitRunner{dir: dir, timeout: cfg.Timeout, credential: spec.Credential}
+	w := &Workspace{Dir: dir, runner: runner, logger: logger}
 
 	if err := runner.run(ctx, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return nil, err
@@ -217,6 +221,17 @@ func (g gitRunner) run(ctx context.Context, args ...string) error {
 		return fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// exitCode returns the process's exit status, or -1 when the error was not a
+// process failing. It is how a caller tells git's "no such ref" from git not
+// having run at all.
+func exitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func (g gitRunner) output(ctx context.Context, args ...string) (string, error) {

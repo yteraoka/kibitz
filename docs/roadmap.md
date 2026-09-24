@@ -171,20 +171,33 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 
 - `internal/event` に `issue.comment` / `issue.command` を追加 **(GitHub 分完了)**。
   `issue.assigned` は未着手（コマンドと同じ機構の 2 つ目の入口で、完了条件には含まれない）
-- `forge.Writer` — ブランチ作成 / push / PR 作成 (GitHub → GitLab → Azure DevOps の順)
+- `forge.Writer` — ブランチ push / draft PR 作成 **(GitHub 分完了)**
 - `kibitz-plan` エージェント **(完了)** — 計画だけを書く。読み取りのみの権限なのでサンドボックス不要
-- `kibitz-implement` エージェントと、編集パス・実行コマンドのホワイトリスト権限
+- `kibitz-implement` エージェントと編集パスのホワイトリスト権限 **(完了)**。
+  実行コマンドはエージェントには許可せず、資格情報を持たない別ジョブで走らせる
 - ビルド・テストを**資格情報を持たない別の Cloud Run ジョブ**で実行 **(完了 — `kibitz-runner`、[ADR-0019](adr/0019-run-repository-code-in-a-credential-less-job.md))**。
   gVisor / Firecracker は GKE を意味し ADR-0014 に反するため採らなかった
   (Cloud Run 自体が gVisor 上で動くのでホスト分離は済んでいる)
-- 生成物は常に draft PR。元 Issue へのリンク、実行コマンドと結果を本文に明記
-- 指示者の限定 (`implement.allowed_actors`) **(完了)**、実行回数・トークンの上限
+- 生成物は常に draft PR。元 Issue へのリンク、実行コマンドと結果を本文に明記 **(完了)**
+- **実際に何が変わったかを git に聞いて照合する** **(完了)** —
+  エージェントに伝えた一覧は制約ではない。範囲外が 1 つでもあれば変更を全部破棄する
+- 指示者の限定 (`implement.allowed_actors`) **(完了)**。
+  モデルの費用は月次の予算に計上される **(完了)**。1 Issue あたりの実行回数の上限は未着手
+  (同名ブランチと既存 PR の確認で、同じ Issue に 2 つ目の PR は作られない)
 - CI 設定・`.kibitz.yaml`・依存定義ファイルの編集禁止 **(完了 — 設定不可の固定リスト)**
-- 自己レビューの禁止 (kibitz が作った PR に kibitz はレビューしない)
+- 自己レビューの禁止 (kibitz が作った PR に kibitz はレビューしない) **(完了)** —
+  PR を開いたのは kibitz 自身のアカウントなので、既存のループ防止がそのまま効く
 
 **完了条件**: 許可されたユーザーが Issue で `/kibitz implement` と書くと、
 ビルドとテストが通った状態の draft PR が作られる。
 許可外のユーザーの指示、許可外パスの編集、テスト失敗のいずれでも PR が作られない。
+
+**GitHub について達成。** 3 つの「作られない」にはそれぞれテストがある
+(`TestImplementIsRefusedForSomebodyNotOnTheList` /
+`TestAChangeOutsideTheAllowedPathsIsDiscardedWhole` /
+`TestAFailingVerificationOpensNoPullRequest`)。
+GitLab / Azure DevOps の `forge.Writer` と Issue クライアントは未実装で、
+その 2 つでは条件を満たしても「このプラットフォームでは作成できない」と返す。
 
 詳細は [worker.md](worker.md#9-実装モード-phase-8既定は無効) と
 [security.md](security.md#6-実装モードの追加対策-phase-8)。

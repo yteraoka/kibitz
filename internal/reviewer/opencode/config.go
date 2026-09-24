@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yteraoka/kibitz/internal/reviewer"
 )
@@ -67,6 +68,44 @@ func answerPermissions() permissions {
 	}
 }
 
+// implementPermissions let the agent write, and only where the repository said
+// it may.
+//
+// The patterns are opencode's own matching, not kibitz's, and that is why they
+// are not what this feature relies on: the worker checks every path that
+// actually changed against the same list before anything is committed
+// (see worker.Editable). This is the cheap layer that stops an honest mistake
+// early; the expensive one is the check afterwards, which stops the rest.
+//
+// bash stays where it is in every other profile. The commands that build and
+// test the change run somewhere kibitz holds no credentials (ADR-0019), and an
+// agent that could run them here would be running them in the process that
+// holds the GitHub App's private key.
+func implementPermissions(allow []string) permissions {
+	edit := map[string]string{"*": "deny"}
+	for _, pattern := range allow {
+		if pattern = strings.TrimSpace(pattern); pattern != "" {
+			edit[pattern] = "allow"
+		}
+	}
+
+	return permissions{
+		"*":        "deny",
+		"read":     "allow",
+		"grep":     "allow",
+		"glob":     "allow",
+		"webfetch": "deny",
+		"edit":     edit,
+		"bash": map[string]string{
+			"*":         "deny",
+			"git diff*": "allow",
+			"git log*":  "allow",
+			"git show*": "allow",
+			"rg *":      "allow",
+		},
+	}
+}
+
 func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Request, servers map[string]MCPServer) error {
 	model := req.Model
 	if model == "" {
@@ -84,6 +123,9 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 	// would be an implementation.
 	if req.Mode == reviewer.ModeAnswer || req.Mode == reviewer.ModePlan {
 		cfg.Permission = answerPermissions()
+	}
+	if req.Mode == reviewer.ModeImplement {
+		cfg.Permission = implementPermissions(req.EditablePaths)
 	}
 
 	// A model OpenCode's catalog does not know about is declared here, with a

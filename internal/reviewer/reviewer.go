@@ -25,6 +25,10 @@ const (
 	// It writes no code: the output is prose, and the permissions it runs
 	// under allow nothing else.
 	ModePlan Mode = "plan"
+	// ModeImplement writes the change an issue asks for. It is the only mode
+	// that edits files, and the only one whose output is a commit rather than
+	// a document.
+	ModeImplement Mode = "implement"
 	// ModeTriage picks which files of a very large change are worth
 	// reviewing. It reads the list of changed files, not their contents.
 	ModeTriage Mode = "triage"
@@ -90,11 +94,22 @@ type Request struct {
 	WorkspaceDir string
 	Event        *event.ReviewEvent
 	PullRequest  *event.PullRequest
-	// Issue is what [ModePlan] works from. Its text is data: whoever wrote
-	// it and whoever asked for it to be acted on may be different people
-	// (ADR-0010).
+	// Issue is what [ModePlan] and [ModeImplement] work from. Its text is
+	// data: whoever wrote it and whoever asked for it to be acted on may be
+	// different people (ADR-0010).
 	Issue *event.Issue
-	Diff  *forge.Diff
+	// EditablePaths are the globs [ModeImplement] may write to, from the
+	// repository's own settings. They are in the prompt so the agent knows
+	// where it may work; they are not what enforces it. What enforces it is
+	// the worker checking every changed path after the run, because a model
+	// that was told the rules is not the same thing as a rule.
+	EditablePaths []string
+	// VerifyCommands are the commands the change will be checked with once it
+	// is written. The agent is told them so that it can aim at passing them,
+	// and it never runs them: they run where kibitz has no credentials
+	// (ADR-0019).
+	VerifyCommands []string
+	Diff           *forge.Diff
 	// ExistingComments are the comments already on the pull request, so the
 	// agent does not repeat a point someone has made.
 	ExistingComments []forge.Comment

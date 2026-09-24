@@ -33,6 +33,13 @@ type Metrics struct {
 	// act on, by which condition said no. A deployment that has turned the
 	// mode on wants to know whether it is refusing for the reason it thinks.
 	ImplementRefused *prometheus.CounterVec
+	// ImplementVerified counts verifications by whether the change passed. It
+	// is the number that says whether the mode is producing changes worth
+	// anybody's time: a deployment where nothing ever passes is paying for
+	// model calls and getting comments.
+	ImplementVerified *prometheus.CounterVec
+	// ImplementOpened counts the draft pull requests the mode opened.
+	ImplementOpened prometheus.Counter
 }
 
 // NewMetrics registers the instruments on a fresh registry, so that two
@@ -97,6 +104,14 @@ func NewMetrics() *Metrics {
 			Name: "kibitz_implement_refused_total",
 			Help: "Instructions to write code that were refused, by which condition refused them. No repository name: the reason is what an operator acts on.",
 		}, []string{"reason"}),
+		ImplementVerified: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_implement_verified_total",
+			Help: "Verifications of a written change, by whether it passed.",
+		}, []string{"passed"}),
+		ImplementOpened: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "kibitz_implement_pull_requests_total",
+			Help: "Draft pull requests opened by the mode that writes code.",
+		}),
 	}
 
 	registry.MustRegister(
@@ -104,6 +119,7 @@ func NewMetrics() *Metrics {
 		m.JobsTotal, m.JobDuration, m.JobsInFlight,
 		m.AgentTokens, m.AgentToolCalls, m.ReferenceDocs,
 		m.CommentsPosted, m.FindingsDropped, m.ImplementRefused,
+		m.ImplementVerified, m.ImplementOpened,
 	)
 	return m
 }

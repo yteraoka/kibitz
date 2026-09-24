@@ -75,8 +75,11 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 - **クラウドは GCP をメイン**とする (Cloud Pub/Sub / Firestore / Cloud Run)。
   AWS (SQS) 対応はインターフェースとして残し、実装の優先度は下げる。
 - **単一組織での利用**を前提とする (マルチテナント分離は行わない)。
-- **当面はコメント投稿のみ。** 将来的に Issue からの指示でコードを実装し、
-  ブランチと PR を作るモードを追加する ([docs/roadmap.md](docs/roadmap.md) Phase 8)。
+- **レビューと回答は読み取りのみ。** Issue からの指示でコードを書く実装モードは
+  別枠の機能で、**既定は無効**。有効にするには運用側とリポジトリ側の両方が必要で、
+  書いた変更は資格情報を持たない別ジョブでビルドとテストが通ってから draft PR になる
+  ([docs/worker.md](docs/worker.md#9-実装モード-phase-8既定は無効)、
+  [ADR-0019](docs/adr/0019-run-repository-code-in-a-credential-less-job.md))。
 - エージェントエンジンは **OpenCode** を採用 ([docs/agent-engine.md](docs/agent-engine.md))。
 - GitHub は **GitHub App** で認証する (PAT は使わない)。
 - モデルは **Vertex AI 経由の Claude** (既定 `claude-opus-5`)。認証は Workload Identity。

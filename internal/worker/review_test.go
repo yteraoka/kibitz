@@ -44,6 +44,13 @@ type fakeForge struct {
 	files     map[string]string
 	fileErr   error
 	filesRead []string
+
+	// The write half, which only implement mode uses.
+	opened   []forge.NewPullRequest
+	existing *forge.PullRequestInfo
+	openErr  error
+	// noDraft is a repository whose plan does not offer draft pull requests.
+	noDraft bool
 }
 
 func (f *fakeForge) Platform() event.Platform { return event.PlatformGitHub }
@@ -113,6 +120,22 @@ func (f *fakeForge) ReadFile(_ context.Context, _ forge.PRRef, path string) ([]b
 
 func (f *fakeForge) CloneAuth(context.Context, forge.PRRef) (forge.CloneCredential, error) {
 	return forge.CloneCredential{Username: "x-access-token", Token: "t"}, nil
+}
+
+func (f *fakeForge) FindPullRequest(_ context.Context, _ forge.PRRef, _ string) (*forge.PullRequestInfo, error) {
+	return f.existing, nil
+}
+
+func (f *fakeForge) CreatePullRequest(_ context.Context, _ forge.PRRef, req forge.NewPullRequest) (*forge.PullRequestInfo, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	f.opened = append(f.opened, req)
+	return &forge.PullRequestInfo{
+		Number: 99,
+		URL:    "https://github.com/yteraoka/kibitz/pull/99",
+		Draft:  req.Draft && !f.noDraft,
+	}, nil
 }
 
 // fakeEngine returns canned results and records the requests it was given.
