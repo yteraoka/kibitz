@@ -256,13 +256,49 @@ implement:
 コメントの冒頭には「AI が書いた計画で、コードはまだ何も変更していない」ことを明記する。
 計画が変更履歴のように読めると、作業が済んだと誤解されるため。
 
+#### ビルドとテストはどこで走るか
+
+**ワーカーの中では走らない。** テストファイルは PR を開ける人が誰でもコードを
+置ける場所で、ワーカーは GitHub App の秘密鍵・GitLab / Azure DevOps のトークン・
+Vertex AI の ADC・Firestore・Pub/Sub を持っている。
+
+代わりに `kibitz-runner` が**権限を何も持たないサービスアカウント**の Cloud Run
+ジョブで走る。1 つのバケットの 1 プレフィックスだけが到達範囲で、**敵対的な
+テストがメタデータサーバーからトークンを取っても、そのトークンでできることが無い**
+([ADR-0019](adr/0019-run-repository-code-in-a-credential-less-job.md))。
+
+Terraform 側の設定:
+
+```hcl
+implement_enabled = true
+runner_image      = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-runner:v0.2.0"
+```
+
+`implement_enabled = false`（既定）なら、バケットもジョブもサービスアカウントも
+**1 つも作られない**。
+
+> **`commands_allow` はシェルを通らない。** argv として直接起動するので、
+> `&&` `||` `;` `|` `>` `` ` `` `$` を含む設定は**受け付けずに拒否する**。
+> 受け付けて無視すると「`go build` に妙な引数 3 つを渡して成功扱い」になる。
+>
+> ```yaml
+> commands_allow:
+>   - "go build ./..."     # ✓
+>   - "go test ./..."      # ✓ 2 つに分ける
+>   # - "go build ./... && go test ./..."   # ✗ 拒否される
+> ```
+
+失敗した最初のコマンドで止まる（コンパイルが通っていないのにテストを走らせても
+雑音しか出ない）。出力は**末尾 16 KB を残して切る** — 失敗の理由は末尾にある。
+
 #### この kibitz での実装状況
 
 | | |
 | --- | --- |
 | 条件判定・パスの拒否・Issue への応答 | 完了 |
 | `/kibitz plan` | 完了 |
-| ブランチ作成・実装・サンドボックス・draft PR | **未実装**。条件を満たした `implement` にはその旨を Issue に返す |
+| ビルドとテストを走らせるサンドボックス (`kibitz-runner`) | 完了 (下記) |
+| ブランチ作成・実装本体・draft PR | **未実装**。条件を満たした `implement` にはその旨を Issue に返す |
 
 ### 設計文書 (ADR) の参照
 

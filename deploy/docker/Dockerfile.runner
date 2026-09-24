@@ -1,0 +1,48 @@
+# kibitz-runner: builds and tests a tree somebody else's code wrote.
+#
+# Unlike the other three, this image is not distroless. It exists to run a
+# repository's own build and tests, so it needs that repository's toolchain —
+# and which toolchain that is depends on the repository. What is here is Go,
+# because that is what kibitz itself is written in; a deployment whose
+# repositories are TypeScript or Python builds its own from this file.
+#
+# What must not be here is any of kibitz's credentials. Nothing in this image
+# reads a secret, and the service account it runs as holds no roles beyond
+# reading and writing one bucket prefix. That is what makes running a
+# stranger's test suite safe: a test that reaches the metadata server gets a
+# token good for nothing.
+FROM golang:1.27 AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-s -w -X main.version=${VERSION}" \
+        -o /out/kibitz-runner ./cmd/kibitz-runner
+
+# The toolchain image, not a distroless one: the point of this container is to
+# run `go build` and `go test` on somebody else's code.
+FROM golang:1.27
+
+COPY --from=build /out/kibitz-runner /usr/local/bin/kibitz-runner
+
+# The module cache is warmed at build time so that a verification is not also
+# a download of the internet. It is a cache and nothing more: a repository's
+# own dependencies are fetched when it is built.
+ENV GOFLAGS=-mod=mod \
+    GOTOOLCHAIN=local \
+    CI=true
+
+# An unprivileged user, and a home it can write to. The build runs as this
+# user, so a test that writes outside its tree writes nowhere useful.
+RUN useradd --create-home --shell /usr/sbin/nologin runner
+USER runner
+WORKDIR /home/runner
+ENV HOME=/home/runner \
+    GOPATH=/home/runner/go \
+    GOCACHE=/home/runner/.cache/go-build
+
+ENTRYPOINT ["/usr/local/bin/kibitz-runner"]
