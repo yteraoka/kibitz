@@ -18,7 +18,7 @@ LDFLAGS                := -s -w -X main.version=$(VERSION)
 all: fmt vet test build
 
 .PHONY: build
-build: bin/kibitz-server bin/kibitz-worker bin/kibitz-scaler bin/kibitz-mcp
+build: bin/kibitz-server bin/kibitz-worker bin/kibitz-scaler bin/kibitz-mcp bin/kibitz-runner
 
 bin/kibitz-server: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-server
@@ -31,6 +31,9 @@ bin/kibitz-scaler: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 
 bin/kibitz-mcp: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-mcp
+
+bin/kibitz-runner: $(shell find . -name '*.go' -not -name '*_test.go') go.mod
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $@ ./cmd/kibitz-runner
 
 .PHONY: test
 test:
@@ -124,6 +127,7 @@ docker-build:
 	docker build -f deploy/docker/Dockerfile.server --build-arg VERSION=$(VERSION) -t kibitz-server:$(VERSION) .
 	docker build -f deploy/docker/Dockerfile.worker --build-arg VERSION=$(VERSION) $(WORKER_BUILD_ARGS) -t kibitz-worker:$(VERSION) .
 	docker build -f deploy/docker/Dockerfile.scaler --build-arg VERSION=$(VERSION) -t kibitz-scaler:$(VERSION) .
+	docker build -f deploy/docker/Dockerfile.runner --build-arg VERSION=$(VERSION) -t kibitz-runner:$(VERSION) .
 
 # Builds the images for the deployment platform and pushes them. IMAGE_REPO
 # is the Artifact Registry repository, which `terraform output
@@ -142,10 +146,13 @@ push:
 		--build-arg VERSION=$(TAG) $(WORKER_BUILD_ARGS) -t $(IMAGE_REPO)/kibitz-worker:$(TAG) --push .
 	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.scaler \
 		--build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-scaler:$(TAG) --push .
+	docker buildx build --platform $(PLATFORM) -f deploy/docker/Dockerfile.runner \
+		--build-arg VERSION=$(TAG) -t $(IMAGE_REPO)/kibitz-runner:$(TAG) --push .
 	@echo
 	@echo "server_image = \"$(IMAGE_REPO)/kibitz-server:$(TAG)\""
 	@echo "worker_image = \"$(IMAGE_REPO)/kibitz-worker:$(TAG)\""
 	@echo "scaler_image = \"$(IMAGE_REPO)/kibitz-scaler:$(TAG)\""
+	@echo "runner_image = \"$(IMAGE_REPO)/kibitz-runner:$(TAG)\""
 
 .PHONY: clean
 clean:

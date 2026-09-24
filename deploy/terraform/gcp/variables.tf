@@ -426,3 +426,44 @@ variable "worker_env" {
     error_message = "worker_env may not set a variable this configuration already sets; use the variable for it instead."
   }
 }
+
+# --- Implement mode (Phase 8) -------------------------------------------
+
+variable "implement_enabled" {
+  description = <<-EOT
+    Create the sandbox a repository's build and tests run in, and let the
+    worker use it. Off by default: implement mode writes code, and a
+    deployment that only reviews pull requests should not have the machinery
+    for writing them.
+
+    It is the ceiling, not the switch. A repository still has to ask for the
+    mode in its own .kibitz.yaml, and name who may instruct it and what may be
+    edited.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "runner_image" {
+  description = "The kibitz-runner image. Required when implement_enabled is true; `make push` prints it."
+  type        = string
+  default     = ""
+}
+
+variable "implement_verify_timeout" {
+  description = "How long one verification may take, as a Cloud Run job timeout."
+  type        = string
+  default     = "900s"
+}
+
+variable "implement_verify_cpu" {
+  description = "CPU for one verification. A build is the expensive part of implement mode after the model."
+  type        = string
+  default     = "2"
+}
+
+variable "implement_verify_memory" {
+  description = "Memory for one verification."
+  type        = string
+  default     = "4Gi"
+}
