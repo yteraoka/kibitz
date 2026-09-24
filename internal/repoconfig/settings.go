@@ -42,9 +42,16 @@ type Settings struct {
 // useful default, and one that guessed would be guessing about who may
 // instruct it and what it may change.
 type ImplementSettings struct {
-	// Enabled is true only when the deployment allows the mode AND the
-	// repository asked for it. A repository cannot turn on what the operator
-	// switched off.
+	// DeploymentAllows is the operator's switch. It is an input to resolving
+	// Enabled, not an answer on its own, and it is kept separate from it for
+	// a reason worth stating: a repository with no settings file at all never
+	// reaches Apply, so anything the deployment's value is written into is
+	// what that repository ends up with. Written into Enabled, that made "the
+	// operator allows it" silently mean "this repository asked for it".
+	DeploymentAllows bool
+	// Enabled is true only when DeploymentAllows holds AND the repository
+	// asked for the mode. It is the resolved answer, so a reader who checks
+	// only this field is still right.
 	Enabled bool
 	// AllowedActors are the accounts whose instruction is acted on. Empty
 	// means nobody.
@@ -130,11 +137,7 @@ func (c *Config) Apply(base Settings) (Settings, error) {
 		// Only ever narrowed: the repository asking for the mode is not the
 		// same as being allowed it, and the deployment's switch is the one
 		// that decides whether the question is even asked.
-		if i.Enabled != nil {
-			out.Implement.Enabled = base.Implement.Enabled && *i.Enabled
-		} else {
-			out.Implement.Enabled = false
-		}
+		out.Implement.Enabled = base.Implement.DeploymentAllows && i.Enabled != nil && *i.Enabled
 		out.Implement.AllowedActors = trimAll(i.AllowedActors)
 		out.Implement.PathsAllow = trimAll(i.PathsAllow)
 		out.Implement.CommandsAllow = trimAll(i.CommandsAllow)

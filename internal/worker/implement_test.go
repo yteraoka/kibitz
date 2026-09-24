@@ -103,18 +103,84 @@ func TestImplementIsRefusedWhenTheRepositoryHasNotAskedForIt(t *testing.T) {
 // makes the deployment switch worth having. Without it, the file that grants
 // permission would be the same file the mode could be asked to edit.
 func TestARepositoryCannotTurnOnWhatTheDeploymentTurnedOff(t *testing.T) {
-	base := repoconfig.Settings{Implement: repoconfig.ImplementSettings{Enabled: false}}
 	cfg, _, err := repoconfig.Parse([]byte(workingSettings))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	got, err := cfg.Apply(base)
+	off, err := cfg.Apply(repoconfig.Settings{
+		Implement: repoconfig.ImplementSettings{DeploymentAllows: false},
+	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if got.Implement.Enabled {
+	if off.Implement.Enabled {
 		t.Error("the repository turned on a mode the deployment had switched off")
+	}
+
+	// And the other direction, so that the check above is not passing because
+	// nothing can ever enable it.
+	on, err := cfg.Apply(repoconfig.Settings{
+		Implement: repoconfig.ImplementSettings{DeploymentAllows: true},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !on.Implement.Enabled {
+		t.Error("a repository that asked, with the deployment allowing it, still came back disabled")
+	}
+}
+
+// TestARepositoryWithNoSettingsFileHasNotAskedForThisMode is the bug kibitz
+// found in the first version of this change. A repository without a
+// .kibitz.yaml never reaches Apply, so whatever the defaults say is what it
+// gets — and the deployment's switch was being written into the field that
+// means "this repository asked".
+//
+// The visible symptom was a refusal blaming the actor list, on a repository
+// that had never written one.
+func TestARepositoryWithNoSettingsFileHasNotAskedForThisMode(t *testing.T) {
+	f := defaultForge() // serves no .kibitz.yaml at all
+	j := implementJob(t, f, true)
+
+	if err := j.Handle(context.Background(), queued(issueCommand("implement", "alice"))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if !strings.Contains(said(f), "implement.enabled") {
+		t.Errorf("the refusal does not say the repository has not enabled the mode:\n%s", said(f))
+	}
+	if strings.Contains(said(f), "allowed_actors") {
+		t.Errorf("the refusal blamed the actor list on a repository with no settings file:\n%s", said(f))
+	}
+}
+
+// TestPlanIsAnsweredRatherThanSilentlyDropped is the other bug kibitz found.
+// The gate only recognized "implement", so "plan" fell through to the branch
+// that says nothing at all — and recorded a reason that was not true.
+func TestPlanIsAnsweredRatherThanSilentlyDropped(t *testing.T) {
+	f := implementSettings(t, workingSettings)
+	j := implementJob(t, f, true)
+
+	if err := j.Handle(context.Background(), queued(issueCommand("plan", "alice"))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if said(f) == "" {
+		t.Fatal("/kibitz plan produced no answer at all")
+	}
+}
+
+// TestPlanIsGatedLikeImplement: a plan reads the code and costs a model call,
+// so the same people decide whether it may be asked for.
+func TestPlanIsGatedLikeImplement(t *testing.T) {
+	f := implementSettings(t, workingSettings)
+	j := implementJob(t, f, true)
+
+	if err := j.Handle(context.Background(), queued(issueCommand("plan", "mallory"))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !strings.Contains(said(f), "allowed_actors") {
+		t.Errorf("plan let somebody through who may not instruct implement mode:\n%s", said(f))
 	}
 }
 

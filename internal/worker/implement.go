@@ -153,6 +153,13 @@ func Editable(allow *repoconfig.PathFilter, filePath string) bool {
 	return allow.Match(clean)
 }
 
+// implementCommands are the instructions this gate answers for. Anything
+// else reaching it is a routing mistake, not a refusal worth reporting.
+var implementCommands = map[string]bool{
+	policy.CommandImplement: true,
+	policy.CommandPlan:      true,
+}
+
 // refusal is why implement mode did not run. It carries a reason for the log
 // and a sentence for the issue, because the person who asked is the one who
 // has to fix it and the log is not somewhere they can see.
@@ -202,7 +209,10 @@ func (j *ReviewJob) allowImplement(ev *event.ReviewEvent, settings repoconfig.Im
 			Say:    "実装モードは Issue 上でのみ使えます。",
 		}
 	}
-	if ev.Command == nil || ev.Command.Name != policy.CommandImplement {
+	// Both commands come through here, and both are gated the same way: a
+	// plan reads the code and costs a model call, which is enough to want the
+	// same answer about who may ask for it.
+	if ev.Command == nil || !implementCommands[ev.Command.Name] {
 		return &refusal{Reason: refusedNotACommand, Say: ""}
 	}
 
