@@ -28,6 +28,10 @@ import (
 const (
 	SummaryMarker = "<!-- kibitz:summary -->"
 	FailureMarker = "<!-- kibitz:failure -->"
+	// ImplementMarker identifies what kibitz says on an issue about implement
+	// mode. One comment per issue, replaced rather than repeated: a refusal
+	// that stacks up is how a bot turns an issue into its own log.
+	ImplementMarker = "<!-- kibitz:implement -->"
 	// BudgetMarker identifies the notice that says the month's budget is
 	// gone. It replaces itself rather than stacking, so a repository at its
 	// ceiling gets one notice per pull request instead of one per push.
@@ -83,6 +87,10 @@ type ReviewJob struct {
 	Mention string
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
+	// ImplementEnabled is the deployment's switch for the mode that writes
+	// code. Off means no repository can turn it on: what a repository
+	// controls is whether it is used here, not whether it exists.
+	ImplementEnabled bool
 	// Store remembers which commits have already been reviewed and how much
 	// has been posted lately. It may be nil, in which case neither check runs.
 	Store store.Store
@@ -122,6 +130,9 @@ func (j *ReviewJob) Handle(ctx context.Context, job *Job) error {
 	case event.KindCommentCreated:
 		// A mention without a command is a question.
 		return j.answer(ctx, client, ref, ev)
+
+	case event.KindIssueCommand:
+		return j.issueCommand(ctx, client, ev)
 
 	case event.KindPRClosed, event.KindPRMerged:
 		// The conversation is over: nothing kibitz remembers about this pull

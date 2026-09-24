@@ -230,3 +230,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 func repoPath(ref forge.PRRef, suffix string) string {
 	return fmt.Sprintf("/repos/%s/%s%s", ref.Owner, ref.Repo, suffix)
 }
+
+// The review client and the issue client are the same type here, because
+// GitHub serves both from one credential and one set of paths.
+var _ forge.IssueClient = (*Client)(nil)

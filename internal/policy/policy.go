@@ -27,6 +27,13 @@ const (
 	ReasonStale          Reason = "stale"
 	ReasonNoMention      Reason = "no_mention"
 	ReasonNoKeyword      Reason = "no_keyword"
+	// ReasonNoCommand drops a comment on an issue that did not ask for
+	// anything. An issue has no diff to review and no thread to answer
+	// about, so a mention on its own is not work.
+	ReasonNoCommand Reason = "no_command"
+	// ReasonCommandNotForIssue drops a command that only means something on
+	// a pull request. "review" on an issue is a typo, not an instruction.
+	ReasonCommandNotForIssue Reason = "command_not_for_issue"
 )
 
 // Config holds the server-side trigger rules.
@@ -123,6 +130,26 @@ func (e *Engine) Evaluate(ev *event.ReviewEvent, now time.Time) Decision {
 
 	if e.maxEventAge > 0 && !ev.OccurredAt.IsZero() && now.Sub(ev.OccurredAt) > e.maxEventAge {
 		return Decision{Reason: ReasonStale}
+	}
+
+	// A comment on an issue is only ever acted on when it asks for something
+	// explicitly, and only for the handful of things that mean anything
+	// without a diff. Everything else about an issue is somebody else's
+	// conversation (ADR-0012).
+	if ev.Kind == event.KindIssueComment {
+		if ev.Comment == nil || !Mentions(ev.Comment.Body, e.mention) {
+			return Decision{Reason: ReasonNoMention}
+		}
+		cmd := ParseCommand(ev.Comment.Body, e.mention)
+		if cmd == nil {
+			return Decision{Reason: ReasonNoCommand}
+		}
+		if !issueCommands[cmd.Name] {
+			return Decision{Reason: ReasonCommandNotForIssue}
+		}
+		ev.Command = cmd
+		ev.Kind = event.KindIssueCommand
+		return Decision{Publish: true, Reason: ReasonAccepted}
 	}
 
 	if ev.Kind == event.KindCommentCreated {

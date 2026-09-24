@@ -44,6 +44,41 @@ type Config struct {
 	Answer     *Answer `yaml:"answer"`
 	Guidelines string  `yaml:"guidelines"`
 	MCP        *MCP    `yaml:"mcp"`
+	// Implement turns on the mode that writes code. It is off unless the
+	// repository asks for it AND the deployment allows it at all.
+	Implement *Implement `yaml:"implement"`
+}
+
+// Implement holds the settings for the mode that writes code and opens pull
+// requests.
+//
+// These live in the repository rather than in the deployment because the
+// people who decide what may be changed in a repository are the ones who can
+// already merge to its default branch — which is where this file is read
+// from, and where a change to it has to pass whatever review the repository
+// requires. Someone who can edit it can already run arbitrary CI, so trusting
+// it here grants nothing new (ADR-0011).
+//
+// What the repository cannot do is turn the mode on when the deployment has
+// it switched off, or widen the paths kibitz refuses to touch under any
+// configuration.
+type Implement struct {
+	// Enabled is the repository's own switch. It is off unless the file says
+	// otherwise, because a repository that has never thought about this
+	// should not have a bot writing code in it.
+	Enabled *bool `yaml:"enabled"`
+	// AllowedActors are the accounts whose instruction kibitz acts on.
+	// Empty means nobody: a mode that writes code does not default to
+	// accepting whoever happens to comment.
+	AllowedActors []string `yaml:"allowed_actors"`
+	// PathsAllow are glob patterns the agent may edit. Empty means nothing,
+	// for the same reason.
+	PathsAllow []string `yaml:"paths_allow"`
+	// CommandsAllow are the commands the agent may run — the build and the
+	// tests, and nothing else. Empty means none.
+	CommandsAllow []string `yaml:"commands_allow"`
+	// BranchPrefix starts the name of the branch the work is pushed to.
+	BranchPrefix string `yaml:"branch_prefix"`
 }
 
 // MCP turns on the external tool servers a deployment has configured.
@@ -132,10 +167,13 @@ var (
 		},
 		"answer": {"enabled"},
 		"mcp":    {"allow"},
+		"implement": {
+			"enabled", "allowed_actors", "paths_allow",
+			"commands_allow", "branch_prefix",
+		},
 	}
 	reserved = map[string]string{
 		"budget":               "Phase 9",
-		"implement":            "Phase 8",
 		"review.allow_verdict": "未実装",
 		"answer.mention":       "未実装",
 	}

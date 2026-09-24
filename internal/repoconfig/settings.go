@@ -31,6 +31,66 @@ type Settings struct {
 	// resolved against the deployment's catalog by the caller, which is where
 	// the definitions and the credentials live.
 	MCP []string
+	// Implement is what the mode that writes code may do here.
+	Implement ImplementSettings
+}
+
+// ImplementSettings is what implement mode runs with.
+//
+// Every field starts empty and stays empty unless the repository fills it in.
+// That is the point: a mode that writes code and opens pull requests has no
+// useful default, and one that guessed would be guessing about who may
+// instruct it and what it may change.
+type ImplementSettings struct {
+	// DeploymentAllows is the operator's switch. It is an input to resolving
+	// Enabled, not an answer on its own, and it is kept separate from it for
+	// a reason worth stating: a repository with no settings file at all never
+	// reaches Apply, so anything the deployment's value is written into is
+	// what that repository ends up with. Written into Enabled, that made "the
+	// operator allows it" silently mean "this repository asked for it".
+	DeploymentAllows bool
+	// Enabled is true only when DeploymentAllows holds AND the repository
+	// asked for the mode. It is the resolved answer, so a reader who checks
+	// only this field is still right.
+	Enabled bool
+	// AllowedActors are the accounts whose instruction is acted on. Empty
+	// means nobody.
+	AllowedActors []string
+	// PathsAllow are the globs the agent may edit. Empty means nothing.
+	PathsAllow []string
+	// CommandsAllow are the commands it may run. Empty means none.
+	CommandsAllow []string
+	// BranchPrefix starts the branch name. Empty means the default.
+	BranchPrefix string
+}
+
+// AllowFilter compiles the editable paths. It is compiled by the caller,
+// once per job, because every file in a change is checked against the same
+// set.
+//
+// An empty list gives a nil filter, which matches nothing — which is the
+// right answer for a repository that has not said what may be edited.
+func (s ImplementSettings) AllowFilter() (*PathFilter, error) {
+	return NewPathFilter(s.PathsAllow)
+}
+
+// Allows reports whether actor may instruct implement mode here.
+//
+// The comparison is case insensitive because forges differ on whether they
+// preserve the case of a login, and an allow list that silently stopped
+// matching after somebody changed their display name would fail open in the
+// worst possible direction — no: it fails closed, which is merely confusing.
+func (s ImplementSettings) Allows(actor string) bool {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return false
+	}
+	for _, allowed := range s.AllowedActors {
+		if strings.EqualFold(strings.TrimSpace(allowed), actor) {
+			return true
+		}
+	}
+	return false
 }
 
 // Reviews reports whether an event of this kind should be reviewed.
@@ -72,6 +132,22 @@ func (c *Config) Apply(base Settings) (Settings, error) {
 		// has said which ones it wants, and an empty list turns them off.
 		out.MCP = trimAll(c.MCP.Allow)
 	}
+	if c.Implement != nil {
+		i := c.Implement
+		// Only ever narrowed: the repository asking for the mode is not the
+		// same as being allowed it, and the deployment's switch is the one
+		// that decides whether the question is even asked.
+		out.Implement.Enabled = base.Implement.DeploymentAllows && i.Enabled != nil && *i.Enabled
+		out.Implement.AllowedActors = trimAll(i.AllowedActors)
+		out.Implement.PathsAllow = trimAll(i.PathsAllow)
+		out.Implement.CommandsAllow = trimAll(i.CommandsAllow)
+		out.Implement.BranchPrefix = strings.TrimSpace(i.BranchPrefix)
+	} else {
+		// A repository that says nothing has not asked for a bot that writes
+		// code in it.
+		out.Implement.Enabled = false
+	}
+
 	if c.Review == nil {
 		return out, nil
 	}

@@ -29,6 +29,10 @@ type Metrics struct {
 	ReferenceDocs   *prometheus.CounterVec
 	CommentsPosted  *prometheus.CounterVec
 	FindingsDropped *prometheus.CounterVec
+	// ImplementRefused counts instructions the mode that writes code did not
+	// act on, by which condition said no. A deployment that has turned the
+	// mode on wants to know whether it is refusing for the reason it thinks.
+	ImplementRefused *prometheus.CounterVec
 }
 
 // NewMetrics registers the instruments on a fresh registry, so that two
@@ -89,13 +93,17 @@ func NewMetrics() *Metrics {
 			Name: "kibitz_findings_dropped_total",
 			Help: "Findings discarded before posting, by reason.",
 		}, []string{"reason"}),
+		ImplementRefused: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_implement_refused_total",
+			Help: "Instructions to write code that were refused, by which condition refused them. No repository name: the reason is what an operator acts on.",
+		}, []string{"reason"}),
 	}
 
 	registry.MustRegister(
 		m.WebhooksReceived, m.EventsPublished, m.PublishFailures,
 		m.JobsTotal, m.JobDuration, m.JobsInFlight,
 		m.AgentTokens, m.AgentToolCalls, m.ReferenceDocs,
-		m.CommentsPosted, m.FindingsDropped,
+		m.CommentsPosted, m.FindingsDropped, m.ImplementRefused,
 	)
 	return m
 }

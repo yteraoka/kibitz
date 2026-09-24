@@ -188,7 +188,6 @@ func TestNormalizeIgnoresUninterestingDeliveries(t *testing.T) {
 	}{
 		{"ping", "ping.json", "ping"},
 		{"label added", "pull_request.labeled.json", "pull_request"},
-		{"comment on an issue", "issue_comment.created_on_issue.json", "issue_comment"},
 		{"unhandled event type", "pull_request.opened.json", "check_run"},
 	}
 
@@ -379,5 +378,47 @@ func TestNormalizeLeavesHumanCommentsUnattributed(t *testing.T) {
 	}
 	if ev.Comment.Author.AppID != "" {
 		t.Errorf("app id = %q, want none", ev.Comment.Author.AppID)
+	}
+}
+
+// TestACommentOnAnIssueBecomesAnIssueEvent covers what implement mode is
+// asked through. GitHub fires the same delivery for an issue and for a pull
+// request, and only the pull_request member tells them apart; reading an
+// issue as a pull request would send the worker looking for a diff that does
+// not exist.
+func TestACommentOnAnIssueBecomesAnIssueEvent(t *testing.T) {
+	body := fixture(t, "issue_comment.created_on_issue.json")
+
+	ev, err := newHandler().Normalize(request("issue_comment", "d1", body), body)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if ev == nil {
+		t.Fatal("a comment on an issue produced no event")
+	}
+
+	if ev.Kind != event.KindIssueComment {
+		t.Errorf("kind is %q, want %q", ev.Kind, event.KindIssueComment)
+	}
+	if ev.PullRequest != nil {
+		t.Errorf("an issue was read as pull request %+v", ev.PullRequest)
+	}
+	if ev.Issue == nil {
+		t.Fatal("the issue is missing")
+	}
+	if ev.Issue.Number != 12 {
+		t.Errorf("issue number is %d, want 12", ev.Issue.Number)
+	}
+	if ev.Issue.Title != "Support Azure DevOps" {
+		t.Errorf("issue title is %q", ev.Issue.Title)
+	}
+	if ev.Comment == nil || ev.Comment.Body == "" {
+		t.Errorf("the comment is missing: %+v", ev.Comment)
+	}
+
+	// The ordering key has to separate issue 12 from pull request 12: they
+	// are different things, and one must not wait on the other.
+	if got := ev.Key(); !strings.Contains(got, "issue/12") {
+		t.Errorf("key is %q, want it to name the issue", got)
 	}
 }

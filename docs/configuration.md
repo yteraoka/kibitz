@@ -177,7 +177,7 @@ KIBITZ_REPO_BUDGETS=acme/payments=200,acme/*=50,*=10
 
 | 性質 | 理由 |
 | --- | --- |
-| **デプロイ側の設定にしかない** | リポジトリ側から上限を上げられるなら、それは上限ではない。`.kibitz.yaml` では設定できない ([ADR-0011](adr/0011-repository-settings-from-the-default-branch-one-way.md)) |
+| **デプロイ側の設定にしかない** | リポジトリ側から上限を上げられるなら、それは上限ではない。`.kibitz.yaml` では設定できない ([ADR-0011](adr/0011-repository-settings-from-the-default-branch.md)) |
 | **暦月で数え、月初に自動で戻る** | 集計キーに年月が入っているだけなので、リセットする操作は要らない |
 | **止めるのは「次の」レビュー** | 1 回のレビューの費用は払い終えるまで分からない。途中で打ち切っても請求はされるので、超過分を少し許して次から止める |
 | **止めたことを PR に書く** | 黙って止まるボットは壊れたボットと見分けが付かない。通知は 1 PR につき 1 つで、push のたびには増えない |
@@ -195,6 +195,59 @@ KIBITZ_REPO_BUDGETS=acme/payments=200,acme/*=50,*=10
 > 計上できないものを 0 円として数えると、上限に**到達しないまま超過する**。
 > 予算を設定していて単価が無い場合は警告ログを出す。
 > `KIBITZ_MODEL_PRICES` に `*=入力/出力` のフォールバックを入れておくのが確実。
+
+### 実装モード (Phase 8、既定は無効)
+
+Issue の指示でコードを書くモード。**4 つの条件がすべて揃ったときだけ**動く。
+
+| 条件 | どこで決まるか |
+| --- | --- |
+| `KIBITZ_IMPLEMENT_ENABLED=true` | **運用側**。false ならリポジトリ側で何を書いても動かない |
+| `implement.enabled: true` | リポジトリの `.kibitz.yaml`（デフォルトブランチ） |
+| 指示者が `implement.allowed_actors` に含まれる | 同上。**空なら誰も許可されない** |
+| `implement.paths_allow` が 1 つ以上ある | 同上。**空なら何も書けない** |
+
+```yaml
+version: 1
+implement:
+  enabled: true
+  allowed_actors: [alice, bob]
+  paths_allow:
+    - "internal/**"
+    - "cmd/*/main.go"
+  commands_allow:
+    - "go build ./..."
+    - "go test ./..."
+  branch_prefix: kibitz/
+```
+
+**指示者を見る。Issue を書いた人ではない。** Issue の本文を書いた人物と
+`/kibitz implement` と指示した人物が違う場合、許可を判定するのは**指示した側**で、
+本文はあくまでデータとして扱う（[ADR-0010](adr/0010-data-and-instruction-positions.md)）。
+
+#### 設定に関わらず編集できないもの
+
+`paths_allow` に `**` と書いても、次は編集できない。
+
+| 分類 | 例 |
+| --- | --- |
+| CI 設定 | `.github/workflows/**`、`.gitlab-ci.yml`、`azure-pipelines.yml`、`Jenkinsfile` |
+| kibitz 自身の設定 | `.kibitz.yaml`、`.kibitz/**`、`AGENTS.md` |
+| 依存定義 | `go.mod`、`package.json`、`Cargo.toml`、各種ロックファイル |
+| 資格情報 | `**/*.pem`、`**/*.key`、`.env` |
+
+**これらを書き換えられると、以後の実行環境そのものを乗っ取られる。**
+とくに `.kibitz.yaml` は「編集してよいパスの一覧」そのものなので、
+リポジトリ側から上書きできる設定にすると意味を失う。だから設定ではなく固定。
+
+照合は**大文字小文字を区別しない**。大文字小文字を区別しないチェックアウトでは
+`.github/Workflows/ci.yml` が本物のワークフローファイルになるため。
+
+#### この kibitz での実装状況
+
+**判定までが入っている。** 上記の条件判定・パスの拒否・Issue への応答は動く。
+ブランチ作成・エージェント実行・サンドボックス・draft PR の作成は未実装で、
+条件を満たした指示にはその旨を Issue に返す。
 
 ### 設計文書 (ADR) の参照
 

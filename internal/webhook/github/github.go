@@ -147,14 +147,25 @@ func (h *Handler) normalizeIssueComment(name, delivery string, body []byte) (*ev
 	if err := unmarshal(body, &p); err != nil {
 		return nil, err
 	}
-	// The same event fires for issues; only the pull_request member tells them
-	// apart.
-	if p.Action != "created" || p.Issue.PullRequest == nil {
+	if p.Action != "created" {
 		return nil, nil
 	}
 
-	ev := h.newEvent(name, p.Action, delivery, event.KindCommentCreated, p.Repository, p.Sender)
-	ev.PullRequest = p.Issue.normalize()
+	// The same event fires for issues and for pull requests; only the
+	// pull_request member tells them apart. An issue is not a smaller pull
+	// request — there is no diff and nothing to review — so it becomes an
+	// issue event, which only implement mode acts on.
+	kind := event.KindCommentCreated
+	if p.Issue.PullRequest == nil {
+		kind = event.KindIssueComment
+	}
+
+	ev := h.newEvent(name, p.Action, delivery, kind, p.Repository, p.Sender)
+	if kind == event.KindIssueComment {
+		ev.Issue = p.Issue.normalizeIssue()
+	} else {
+		ev.PullRequest = p.Issue.normalize()
+	}
 	ev.Comment = &event.Comment{
 		ID:     strconv.FormatInt(p.Comment.ID, 10),
 		Body:   p.Comment.Body,

@@ -86,6 +86,14 @@ func (f *fakeForge) UpsertSummary(_ context.Context, _ forge.PRRef, marker, body
 	return nil
 }
 
+// UpsertIssueComment makes the fake an issue client as well, which is what
+// the real GitHub client is: one credential, one set of paths.
+func (f *fakeForge) UpsertIssueComment(_ context.Context, _ forge.IssueRef, marker, body string) error {
+	f.summaries = append(f.summaries, body)
+	f.markers = append(f.markers, marker)
+	return nil
+}
+
 func (f *fakeForge) ReplyToThread(_ context.Context, _ forge.PRRef, _, body string) error {
 	f.replies = append(f.replies, body)
 	return nil

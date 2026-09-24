@@ -45,11 +45,18 @@ func (j *ReviewJob) defaults() repoconfig.Settings {
 	return repoconfig.Settings{
 		ReviewEnabled: true,
 		AnswerEnabled: true,
-		SkipDraft:     j.SkipDraft,
-		Language:      j.Language,
-		Limits:        limits,
-		Model:         j.Model,
-		Guidelines:    j.Guidelines,
+		// The ceiling, and only the ceiling. Enabled stays false here on
+		// purpose: a repository with no settings file never reaches Apply, so
+		// whatever these defaults hold is what it ends up with. Written into
+		// Enabled, the operator's switch silently meant "this repository
+		// asked for it", and the refusal then blamed the actor list on a
+		// repository that had never written one.
+		Implement:  repoconfig.ImplementSettings{DeploymentAllows: j.ImplementEnabled},
+		SkipDraft:  j.SkipDraft,
+		Language:   j.Language,
+		Limits:     limits,
+		Model:      j.Model,
+		Guidelines: j.Guidelines,
 	}
 }
 
