@@ -6,11 +6,15 @@ import (
 	"log/slog"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/repoconfig"
+	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/workspace"
 )
 
 // Implement mode is the one that writes code, and it is the one place where
@@ -276,18 +280,21 @@ func (j *ReviewJob) issueCommand(ctx context.Context, client forge.Client, ev *e
 			return j.refuse(ctx, ev, ref, refused)
 		}
 
-		// Everything the gate can check has passed. What comes next -- the
-		// branch, the agent, the sandbox, the draft pull request -- is not
-		// built yet, and saying so is better than silence on an issue
-		// somebody is waiting on.
+		if name == policy.CommandPlan {
+			return j.plan(ctx, client, ref, ev, settings)
+		}
+
+		// The gate has passed. What writing the change needs -- the branch,
+		// the sandbox, the draft pull request -- is not built yet, and saying
+		// so is better than silence on an issue somebody is waiting on.
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "implement mode was allowed but is not implemented yet",
 			slog.String("ref", ref.String()),
 			slog.String("actor", ev.Actor.Login),
-			slog.String("command", name),
 		)
 		return j.sayOnIssue(ctx, ev, ref,
 			"実装モードの実行条件は満たしていますが、**この kibitz のビルドではまだ実装処理が入っていません**。\n\n"+
-				"許可の判定 (運用側の有効化・リポジトリ側の有効化・指示者・編集可能パス) までは通っています。\n")
+				"許可の判定 (運用側の有効化・リポジトリ側の有効化・指示者・編集可能パス) までは通っています。\n"+
+				"計画だけなら `"+j.mention()+" plan` で出せます。\n")
 
 	default:
 		return nil
@@ -363,4 +370,118 @@ implement:
 
 CI 設定・`+"`%s`"+`・依存定義ファイルは、設定に関わらず編集できません。
 `, mention, mention, mention, repoconfig.Path, repoconfig.Path)
+}
+
+// plan writes what implementing an issue would take, and says so on the issue.
+//
+// It writes no code and creates no branch, so it needs none of what implement
+// mode still lacks: the agent runs under the same read-only permissions that
+// answer a question, on a checkout of the default branch.
+func (j *ReviewJob) plan(ctx context.Context, client forge.Client, ref forge.IssueRef, ev *event.ReviewEvent, settings resolved) error {
+	ctx, span := telemetry.Tracer().Start(ctx, "issue.plan")
+	defer span.End()
+
+	ws, err := j.prepareIssueWorkspace(ctx, client, ref, ev)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := ws.Close(); err != nil {
+			j.Logger.LogAttrs(context.WithoutCancel(ctx), slog.LevelWarn, "could not remove the workspace",
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
+
+	result, err := j.Engine.Run(ctx, reviewer.Request{
+		Mode:         reviewer.ModePlan,
+		WorkspaceDir: ws.Dir,
+		Event:        ev,
+		Issue:        ev.Issue,
+		References:   j.referenceDocs(ctx, ws),
+		Language:     settings.Language,
+		Model:        settings.Model,
+		Guidelines:   settings.Guidelines,
+		MCP:          settings.mcp,
+		HeadSHA:      ws.HeadSHA,
+	})
+	if err != nil {
+		return err
+	}
+
+	pass := pass{Model: settings.Model, Usage: result.Usage}
+	j.Logger.LogAttrs(ctx, slog.LevelInfo, "planned an issue",
+		slog.String("repository", ev.Repository.FullName),
+		slog.String("model", settings.Model),
+		slog.String("ref", ref.String()),
+		slog.String("head", ws.HeadSHA),
+		slog.Int("input_tokens", result.Usage.Input()),
+		slog.Int("output_tokens", result.Usage.Output()),
+		slog.Int("total_tokens", result.Usage.Tokens()),
+		slog.Int("tool_calls", result.Tools.Total()),
+		slog.Attr{Key: "cost", Value: costValue(j.cost(pass))},
+	)
+	j.recordTools(result.Tools)
+	j.charge(ctx, ev, pass)
+
+	return j.sayOnIssue(ctx, ev, ref, j.planComment(result, ws.HeadSHA, settings, pass))
+}
+
+// planComment wraps the plan in what a reader needs to judge it: that a model
+// wrote it, which commit it was written against, and what it cost.
+func (j *ReviewJob) planComment(result *reviewer.Result, headSHA string, settings resolved, p pass) string {
+	var b strings.Builder
+
+	b.WriteString("## 実装の計画\n\n")
+	b.WriteString("**これは AI が書いた計画で、コードはまだ何も変更していません。**\n")
+	b.WriteString("実装するかどうか、この形でよいかは人が判断してください。\n\n")
+	b.WriteString(strings.TrimSpace(result.Reply))
+	b.WriteString("\n\n---\n")
+	if headSHA != "" {
+		fmt.Fprintf(&b, "対象: `%s` (デフォルトブランチ)", shortSHA(headSHA))
+	}
+	if result.Usage.Duration > 0 {
+		fmt.Fprintf(&b, " / 所要 %s", result.Usage.Duration.Round(time.Second))
+	}
+	b.WriteString("\n")
+	j.writeUsage(&b, result.Usage, p)
+	writeSettingsNotes(&b, settings)
+	return b.String()
+}
+
+// prepareIssueWorkspace checks out the default branch.
+//
+// An issue has no branch of its own, and the default branch is the one a
+// change would be based on. Nothing from the issue chooses what is checked
+// out: a ref named in the issue's text would be somebody else's code running
+// under kibitz's credentials.
+func (j *ReviewJob) prepareIssueWorkspace(ctx context.Context, client forge.Client, ref forge.IssueRef, ev *event.ReviewEvent) (*workspace.Workspace, error) {
+	ctx, span := telemetry.Tracer().Start(ctx, "issue.workspace")
+	defer span.End()
+
+	cred, err := client.CloneAuth(ctx, ref.Repository())
+	if err != nil {
+		return nil, fmt.Errorf("getting clone credentials for %s: %w", ref, err)
+	}
+	if ev.Repository.CloneURL == "" {
+		return nil, fmt.Errorf("no clone url for %s", ref)
+	}
+
+	branch := ev.Repository.DefaultBranch
+	if branch == "" {
+		// Not worth guessing: a wrong branch reads as an empty repository,
+		// and a plan written against nothing is worse than no plan.
+		return nil, Permanent(fmt.Errorf("%s: the event does not say what the default branch is", ref))
+	}
+
+	ws, err := workspace.Prepare(ctx, j.Workspace, workspace.Spec{
+		CloneURL:   ev.Repository.CloneURL,
+		HeadRef:    "refs/heads/" + branch,
+		BaseBranch: branch,
+		Credential: cred,
+	}, j.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("preparing a workspace for %s: %w", ref, err)
+	}
+	return ws, nil
 }

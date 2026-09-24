@@ -34,6 +34,8 @@ type Config struct {
 	// use.
 	ReviewAgent string
 	AnswerAgent string
+	// PlanAgent names the definition that plans a change without making one.
+	PlanAgent   string
 	TriageAgent string
 	// MCPServers are the servers to enable, already filtered against the
 	// operator's allow list.
@@ -165,6 +167,9 @@ func New(cfg Config, logger *slog.Logger) *Runner {
 	if cfg.AnswerAgent == "" {
 		cfg.AnswerAgent = "kibitz-answer"
 	}
+	if cfg.PlanAgent == "" {
+		cfg.PlanAgent = "kibitz-plan"
+	}
 	if cfg.TriageAgent == "" {
 		cfg.TriageAgent = "kibitz-triage"
 	}
@@ -236,10 +241,13 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		result.SessionID = transcript.sessionID
 	}
 
-	if req.Mode == reviewer.ModeAnswer {
+	// Both of these produce prose on stdout rather than a document: there is
+	// no schema for a plan, and inventing one would turn a judgement into a
+	// form to fill in.
+	if req.Mode == reviewer.ModeAnswer || req.Mode == reviewer.ModePlan {
 		result.Reply = strings.TrimSpace(transcript.text)
 		if result.Reply == "" {
-			return nil, errors.New("opencode: the agent produced no answer")
+			return nil, fmt.Errorf("opencode: the agent produced no %s", outputNameFor(req.Mode))
 		}
 		return result, nil
 	}
@@ -332,6 +340,15 @@ func outputPathFor(mode reviewer.Mode) string {
 
 // isMissingSession reports whether opencode refused because the session id it
 // was given no longer exists.
+// outputNameFor names what was expected, so an empty run says which kind of
+// run was empty.
+func outputNameFor(mode reviewer.Mode) string {
+	if mode == reviewer.ModePlan {
+		return "plan"
+	}
+	return "answer"
+}
+
 func isMissingSession(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "session not found")
 }
@@ -343,6 +360,8 @@ func (r *Runner) args(req reviewer.Request) []string {
 	switch req.Mode {
 	case reviewer.ModeAnswer:
 		agent = r.cfg.AnswerAgent
+	case reviewer.ModePlan:
+		agent = r.cfg.PlanAgent
 	case reviewer.ModeTriage:
 		agent = r.cfg.TriageAgent
 	}
