@@ -21,6 +21,10 @@ const (
 	ModeReview Mode = "review"
 	// ModeAnswer answers a question asked in a comment thread.
 	ModeAnswer Mode = "answer"
+	// ModePlan reads an issue and writes what implementing it would take.
+	// It writes no code: the output is prose, and the permissions it runs
+	// under allow nothing else.
+	ModePlan Mode = "plan"
 	// ModeTriage picks which files of a very large change are worth
 	// reviewing. It reads the list of changed files, not their contents.
 	ModeTriage Mode = "triage"
@@ -86,7 +90,11 @@ type Request struct {
 	WorkspaceDir string
 	Event        *event.ReviewEvent
 	PullRequest  *event.PullRequest
-	Diff         *forge.Diff
+	// Issue is what [ModePlan] works from. Its text is data: whoever wrote
+	// it and whoever asked for it to be acted on may be different people
+	// (ADR-0010).
+	Issue *event.Issue
+	Diff  *forge.Diff
 	// ExistingComments are the comments already on the pull request, so the
 	// agent does not repeat a point someone has made.
 	ExistingComments []forge.Comment

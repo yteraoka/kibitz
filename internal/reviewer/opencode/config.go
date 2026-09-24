@@ -79,7 +79,10 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 		Permission: reviewPermissions(),
 		MCP:        servers,
 	}
-	if req.Mode == reviewer.ModeAnswer {
+	// Answering a question and planning a change both read and write
+	// nothing, so both run under the narrower profile. A plan that could edit
+	// would be an implementation.
+	if req.Mode == reviewer.ModeAnswer || req.Mode == reviewer.ModePlan {
 		cfg.Permission = answerPermissions()
 	}
 

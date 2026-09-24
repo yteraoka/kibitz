@@ -681,3 +681,57 @@ func TestTheCheckoutCannotWriteTheAgentsInstructions(t *testing.T) {
 		t.Errorf("OPENCODE_DISABLE_PROJECT_CONFIG = %q, want 1", got)
 	}
 }
+
+// TestPlanModeIsReadOnly is the property that lets this mode run without the
+// sandbox implement mode still needs. A plan that could edit would be an
+// implementation, and the permission block is where that is decided — not the
+// agent's instructions, which are a request rather than a rule.
+func TestPlanModeIsReadOnly(t *testing.T) {
+	h := newHarness(t, `
+cp "$OPENCODE_CONFIG" .kibitz/config-copy.json
+echo '{"type":"text","text":"internal/forge/writer.go を追加します。"}'
+`)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModePlan)
+	req.Issue = &event.Issue{Number: 12, Title: "Support Azure DevOps"}
+
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(result.Reply, "writer.go") {
+		t.Errorf("Reply = %q, want the agent's plan", result.Reply)
+	}
+
+	cfg := h.config(t)
+	permission := cfg["permission"].(map[string]any)
+	if permission["edit"] != "deny" {
+		t.Errorf("edit = %v, want deny: a plan writes prose, not code", permission["edit"])
+	}
+	if permission["webfetch"] != "deny" {
+		t.Errorf("webfetch = %v, want deny", permission["webfetch"])
+	}
+	if permission["*"] != "deny" {
+		t.Errorf("default = %v, want deny", permission["*"])
+	}
+
+	args := strings.Join(h.args(t), " ")
+	if !strings.Contains(args, "--agent kibitz-plan") {
+		t.Errorf("the plan agent was not selected: %s", args)
+	}
+}
+
+// TestPlanModeReportsAnEmptyRun: a plan is prose on stdout, so an agent that
+// said nothing has to be an error rather than an empty comment on an issue.
+func TestPlanModeReportsAnEmptyRun(t *testing.T) {
+	h := newHarness(t, `echo '{"type":"step_finish","tokens":{"input":1,"output":1}}'`)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModePlan)
+	req.Issue = &event.Issue{Number: 12, Title: "Support Azure DevOps"}
+
+	if _, err := runner.Run(context.Background(), req); err == nil {
+		t.Fatal("an agent that produced nothing was reported as success")
+	}
+}

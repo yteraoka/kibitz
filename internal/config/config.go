@@ -303,6 +303,8 @@ type OpenCode struct {
 	// worker image. An empty value falls back to OpenCode's default agent.
 	ReviewAgent string
 	AnswerAgent string
+	// PlanAgent names the definition that plans a change without making one.
+	PlanAgent   string
 	TriageAgent string
 	// ProviderEnv names environment variables to forward to the agent, for
 	// providers that authenticate with an API key (ZHIPU_API_KEY for GLM,
@@ -492,6 +494,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			},
 			ReviewAgent:    l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent:    l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
+			PlanAgent:      l.str("KIBITZ_OPENCODE_PLAN_AGENT", "kibitz-plan"),
 			TriageAgent:    l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
 			ProviderEnv:    l.list("KIBITZ_PROVIDER_ENV", nil),
 			EnvPassthrough: l.list("KIBITZ_AGENT_ENV_PASSTHROUGH", nil),

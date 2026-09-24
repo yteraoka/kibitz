@@ -172,6 +172,7 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - `internal/event` に `issue.comment` / `issue.command` を追加 **(GitHub 分完了)**。
   `issue.assigned` は未着手（コマンドと同じ機構の 2 つ目の入口で、完了条件には含まれない）
 - `forge.Writer` — ブランチ作成 / push / PR 作成 (GitHub → GitLab → Azure DevOps の順)
+- `kibitz-plan` エージェント **(完了)** — 計画だけを書く。読み取りのみの権限なのでサンドボックス不要
 - `kibitz-implement` エージェントと、編集パス・実行コマンドのホワイトリスト権限
 - 使い捨てサンドボックスでのビルド・テスト実行 (gVisor / Firecracker / 専用ノード)
 - 生成物は常に draft PR。元 Issue へのリンク、実行コマンドと結果を本文に明記

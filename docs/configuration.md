@@ -77,6 +77,7 @@
 | `KIBITZ_MENTION` | `/kibitz` | ヘルプ本文に出す呼びかた。サーバーと同じ値にする (判定はサーバー側で行う) |
 | `KIBITZ_OPENCODE_REVIEW_AGENT` | `kibitz-review` | レビュー用エージェント定義名 |
 | `KIBITZ_OPENCODE_ANSWER_AGENT` | `kibitz-answer` | 回答用エージェント定義名 |
+| `KIBITZ_OPENCODE_PLAN_AGENT` | `kibitz-plan` | 計画用エージェント定義名 (`/kibitz plan`)。読み取りのみの権限で動く |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
 | `KIBITZ_REFERENCE_DOCS` | `docs/adr/**/*.md,docs/decisions/**/*.md,adr/**/*.md` | 設計文書 (ADR) の場所。索引をプロンプトに載せ、本文はツールで読ませる。`off` で無効 (下記) |
@@ -243,11 +244,25 @@ implement:
 照合は**大文字小文字を区別しない**。大文字小文字を区別しないチェックアウトでは
 `.github/Workflows/ci.yml` が本物のワークフローファイルになるため。
 
+#### `/kibitz plan` — 計画だけを出す
+
+**コードを書かないので、サンドボックスを要しない。** 条件は `implement` と同じ
+（plan もコードを読んでモデル呼び出しを消費するため、指示してよい人は同じ）。
+
+デフォルトブランチをチェックアウトし、**読み取りのみの権限**でエージェントを動かして、
+計画を Issue にコメントする。Issue 本文が別の ref を指定していても、
+チェックアウト先は**常にデフォルトブランチ**（本文はデータであって指示ではない）。
+
+コメントの冒頭には「AI が書いた計画で、コードはまだ何も変更していない」ことを明記する。
+計画が変更履歴のように読めると、作業が済んだと誤解されるため。
+
 #### この kibitz での実装状況
 
-**判定までが入っている。** 上記の条件判定・パスの拒否・Issue への応答は動く。
-ブランチ作成・エージェント実行・サンドボックス・draft PR の作成は未実装で、
-条件を満たした指示にはその旨を Issue に返す。
+| | |
+| --- | --- |
+| 条件判定・パスの拒否・Issue への応答 | 完了 |
+| `/kibitz plan` | 完了 |
+| ブランチ作成・実装・サンドボックス・draft PR | **未実装**。条件を満たした `implement` にはその旨を Issue に返す |
 
 ### 設計文書 (ADR) の参照
 
