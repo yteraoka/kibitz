@@ -2,8 +2,11 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +24,15 @@ const (
 	RequestObject   = "request.json"
 	ResultObject    = "result.json"
 )
+
+// ErrNotFound reports that an object is not there.
+//
+// It has to be its own answer rather than one error among others, because the
+// worker waits for the runner's result by asking for it: "not written yet" is
+// worth waiting through and "the bucket refused us" is not, and treating the
+// second as the first would turn a misconfigured deployment into a job that
+// times out.
+var ErrNotFound = errors.New("sandbox: the object does not exist")
 
 // Store is where a run's three objects live. The worker writes the first two,
 // the runner reads them and writes the third.
@@ -78,6 +90,9 @@ func (d *dirStore) Get(_ context.Context, name string) (io.ReadCloser, error) {
 	}
 	f, err := os.Open(path) //nolint:gosec // checked by path
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+		}
 		return nil, fmt.Errorf("sandbox: reading %s: %w", name, err)
 	}
 	return f, nil
@@ -131,6 +146,10 @@ func (g *gcsStore) object(name string) string {
 func (g *gcsStore) Get(ctx context.Context, name string) (io.ReadCloser, error) {
 	resp, err := g.svc.Objects.Get(g.bucket, g.object(name)).Context(ctx).Download()
 	if err != nil {
+		var apiErr *googleapi.Error
+		if errors.As(err, &apiErr) && apiErr.Code == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: gs://%s/%s", ErrNotFound, g.bucket, g.object(name))
+		}
 		return nil, fmt.Errorf("sandbox: downloading gs://%s/%s: %w", g.bucket, g.object(name), err)
 	}
 	return resp.Body, nil

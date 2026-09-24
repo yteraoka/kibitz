@@ -304,8 +304,11 @@ type OpenCode struct {
 	ReviewAgent string
 	AnswerAgent string
 	// PlanAgent names the definition that plans a change without making one.
-	PlanAgent   string
-	TriageAgent string
+	PlanAgent string
+	// ImplementAgent names the definition that writes the change. It is the
+	// only one that runs with permission to edit files.
+	ImplementAgent string
+	TriageAgent    string
 	// ProviderEnv names environment variables to forward to the agent, for
 	// providers that authenticate with an API key (ZHIPU_API_KEY for GLM,
 	// OPENROUTER_API_KEY, and so on). Only the names are configured; the
@@ -385,6 +388,9 @@ type Worker struct {
 	GitLab           GitLabAuth
 	AzureDevOps      AzureDevOpsAuth
 	ImplementEnabled bool
+	// Implement configures the mode that writes code. None of it does anything
+	// unless ImplementEnabled is set.
+	Implement Implement
 	// SkipDraft leaves draft pull requests alone until they are marked ready.
 	SkipDraft bool
 	// SessionTTL is how long the agent's conversation about one pull request,
@@ -495,6 +501,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			ReviewAgent:    l.str("KIBITZ_OPENCODE_REVIEW_AGENT", "kibitz-review"),
 			AnswerAgent:    l.str("KIBITZ_OPENCODE_ANSWER_AGENT", "kibitz-answer"),
 			PlanAgent:      l.str("KIBITZ_OPENCODE_PLAN_AGENT", "kibitz-plan"),
+			ImplementAgent: l.str("KIBITZ_OPENCODE_IMPLEMENT_AGENT", "kibitz-implement"),
 			TriageAgent:    l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
 			ProviderEnv:    l.list("KIBITZ_PROVIDER_ENV", nil),
 			EnvPassthrough: l.list("KIBITZ_AGENT_ENV_PASSTHROUGH", nil),
@@ -526,13 +533,22 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			TokenIsBearer:   l.bool("KIBITZ_AZDO_TOKEN_IS_BEARER", false),
 		},
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
-		SkipDraft:        l.bool("KIBITZ_SKIP_DRAFT", true),
-		SessionTTL:       l.duration("KIBITZ_SESSION_TTL", 7*24*time.Hour),
-		Language:         l.str("KIBITZ_LANGUAGE", "日本語"),
-		Mention:          l.str("KIBITZ_MENTION", policy.DefaultMention),
-		MaxDeliveries:    l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),
-		MaxPostsPerHour:  l.positiveInt("KIBITZ_MAX_POSTS_PER_HOUR", 10),
-		BotLogins:        l.list("KIBITZ_BOT_LOGINS", nil),
+		Implement: Implement{
+			SandboxLocation:  l.str("KIBITZ_SANDBOX_LOCATION", ""),
+			SandboxJob:       l.str("KIBITZ_SANDBOX_JOB", ""),
+			SandboxContainer: l.str("KIBITZ_SANDBOX_CONTAINER", ""),
+			VerifyTimeout:    l.duration("KIBITZ_IMPLEMENT_VERIFY_TIMEOUT", 15*time.Minute),
+			BranchPrefix:     l.str("KIBITZ_IMPLEMENT_BRANCH_PREFIX", "kibitz/"),
+			CommitName:       l.str("KIBITZ_COMMIT_NAME", "kibitz"),
+			CommitEmail:      l.str("KIBITZ_COMMIT_EMAIL", "kibitz@users.noreply.github.com"),
+		},
+		SkipDraft:       l.bool("KIBITZ_SKIP_DRAFT", true),
+		SessionTTL:      l.duration("KIBITZ_SESSION_TTL", 7*24*time.Hour),
+		Language:        l.str("KIBITZ_LANGUAGE", "日本語"),
+		Mention:         l.str("KIBITZ_MENTION", policy.DefaultMention),
+		MaxDeliveries:   l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),
+		MaxPostsPerHour: l.positiveInt("KIBITZ_MAX_POSTS_PER_HOUR", 10),
+		BotLogins:       l.list("KIBITZ_BOT_LOGINS", nil),
 	}
 
 	// A GitHub App is either fully configured or not configured at all; half of
@@ -689,4 +705,37 @@ func loadBlob(l *loader) Blob {
 	}
 	l.requireIf(b.Backend != BlobNone, "KIBITZ_BLOBSTORE_BUCKET", b.Bucket, "when a blob store backend is selected")
 	return b
+}
+
+// Implement configures the mode that writes code.
+//
+// The sandbox settings are the ones worth reading twice. With no location
+// configured the mode refuses to run at all, rather than skipping the
+// verification: a change kibitz wrote and nothing built is not something to put
+// in front of a reviewer, and a deployment that half-configured the mode should
+// find that out on the first instruction (ADR-0019).
+type Implement struct {
+	// SandboxLocation stages one verification's tree, commands and result:
+	// "gs://bucket/prefix" for Cloud Storage, or a directory for a deployment
+	// that runs on one machine.
+	SandboxLocation string
+	// SandboxJob is the Cloud Run job the verification runs as, in the form
+	// projects/P/locations/L/jobs/J. Empty runs it in the worker's own process,
+	// which is not a sandbox and is only appropriate where every repository
+	// kibitz is installed on is already trusted with everything kibitz can
+	// reach (see sandbox.Local).
+	SandboxJob string
+	// SandboxContainer names the container in that job the environment override
+	// applies to. Empty is right for a job with one container declared without
+	// a name, which is what kibitz's own terraform produces.
+	SandboxContainer string
+	// VerifyTimeout bounds one verification.
+	VerifyTimeout time.Duration
+	// BranchPrefix starts the branch names the mode pushes, where a repository
+	// has not named its own.
+	BranchPrefix string
+	// CommitName and CommitEmail attribute the commits. The address should not
+	// be a real mailbox: nobody wrote these commits.
+	CommitName  string
+	CommitEmail string
 }

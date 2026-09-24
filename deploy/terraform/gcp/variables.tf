@@ -422,6 +422,13 @@ variable "worker_env" {
       "KIBITZ_MODEL_PRICES",
       "KIBITZ_MODEL_PRICE_CURRENCY",
       "KIBITZ_REPO_BUDGETS",
+      "KIBITZ_IMPLEMENT_ENABLED",
+      "KIBITZ_SANDBOX_LOCATION",
+      "KIBITZ_SANDBOX_JOB",
+      "KIBITZ_IMPLEMENT_VERIFY_TIMEOUT",
+      "KIBITZ_IMPLEMENT_BRANCH_PREFIX",
+      "KIBITZ_COMMIT_NAME",
+      "KIBITZ_COMMIT_EMAIL",
     ])) == 0
     error_message = "worker_env may not set a variable this configuration already sets; use the variable for it instead."
   }
@@ -466,4 +473,32 @@ variable "implement_verify_memory" {
   description = "Memory for one verification."
   type        = string
   default     = "4Gi"
+}
+
+variable "implement_branch_prefix" {
+  description = <<-EOT
+    What the branch names implement mode pushes start with. The default puts
+    everything kibitz creates in one namespace, which is what a branch
+    protection rule or a person cleaning up can select on.
+
+    A repository may set its own in .kibitz.yaml.
+  EOT
+  type        = string
+  default     = "kibitz/"
+}
+
+variable "implement_commit_name" {
+  description = "The author name on the commits implement mode makes."
+  type        = string
+  default     = "kibitz"
+}
+
+variable "implement_commit_email" {
+  description = <<-EOT
+    The author address on those commits. It should not be a real mailbox:
+    nobody wrote them, and an address that looked like a person's would be a
+    claim about authorship that is not true.
+  EOT
+  type        = string
+  default     = "kibitz@users.noreply.github.com"
 }

@@ -180,6 +180,14 @@ const (
 	refusedNoPaths         = "implement_no_paths_allowed"
 	refusedNotAnIssue      = "implement_not_an_issue"
 	refusedNotACommand     = "implement_not_a_command"
+	refusedNoCommands      = "implement_no_commands_allowed"
+	// The three below are counted after the agent has run, which is why they
+	// are counted apart: the model call has been paid for and there is still no
+	// pull request. Together they are what tells an operator whether the mode
+	// is being refused by its configuration or by its own output.
+	refusedNoChanges      = "implement_no_changes"
+	refusedPathNotAllowed = "implement_path_not_allowed"
+	refusedVerifyFailed   = "implement_verification_failed"
 )
 
 // allowImplement decides whether an instruction may run, and says why not
@@ -242,15 +250,31 @@ func (j *ReviewJob) allowImplement(ev *event.ReviewEvent, settings repoconfig.Im
 		}
 	}
 
+	// Only writing needs a way of being checked. A plan is prose, and nothing
+	// verifies prose.
+	//
+	// It is required rather than defaulted because a change kibitz wrote and
+	// nothing built must not become a pull request, and there is no command
+	// kibitz could guess: "go test ./..." is wrong in a repository that is not
+	// Go, and a default that silently verified nothing would be worse than
+	// refusing to run.
+	if ev.Command.Name == policy.CommandImplement && len(settings.CommandsAllow) == 0 {
+		return &refusal{
+			Reason: refusedNoCommands,
+			Say: "検証に使うコマンドが宣言されていません。`" + repoconfig.Path +
+				"` の `implement.commands_allow` に、ビルドとテストのコマンドを書いてください。\n\n" +
+				"書いた変更がそれらを通らなければ、プルリクエストは作りません。",
+		}
+	}
+
 	return nil
 }
 
 // issueCommand handles an instruction given on an issue.
 //
-// Today every path through it ends in a refusal: the gate is here and the
-// work is not. That is deliberate — the conditions under which this mode may
-// write code are worth having settled, and tested, before there is anything
-// that writes.
+// The gate above decides whether anything happens at all; what happens once it
+// has is in implement_run.go. Nothing reaches that which has not passed every
+// check in [ReviewJob.allowImplement].
 func (j *ReviewJob) issueCommand(ctx context.Context, client forge.Client, ev *event.ReviewEvent) error {
 	ref, ok := forge.IssueRefOf(ev)
 	if !ok {
@@ -284,17 +308,7 @@ func (j *ReviewJob) issueCommand(ctx context.Context, client forge.Client, ev *e
 			return j.plan(ctx, client, ref, ev, settings)
 		}
 
-		// The gate has passed. What writing the change needs -- the branch,
-		// the sandbox, the draft pull request -- is not built yet, and saying
-		// so is better than silence on an issue somebody is waiting on.
-		j.Logger.LogAttrs(ctx, slog.LevelInfo, "implement mode was allowed but is not implemented yet",
-			slog.String("ref", ref.String()),
-			slog.String("actor", ev.Actor.Login),
-		)
-		return j.sayOnIssue(ctx, ev, ref,
-			"実装モードの実行条件は満たしていますが、**この kibitz のビルドではまだ実装処理が入っていません**。\n\n"+
-				"許可の判定 (運用側の有効化・リポジトリ側の有効化・指示者・編集可能パス) までは通っています。\n"+
-				"計画だけなら `"+j.mention()+" plan` で出せます。\n")
+		return j.implement(ctx, client, ref, ev, settings)
 
 	default:
 		return nil
@@ -355,7 +369,7 @@ func issueHelpText(mention string) string {
 | コマンド | 内容 |
 | --- | --- |
 | `+"`%s implement`"+` | Issue の内容からコードを書き、draft PR を作る (既定は無効) |
-| `+"`%s plan`"+` | 同上の計画だけを書く (未実装) |
+| `+"`%s plan`"+` | 同上の計画だけを書く (コードは変更しない) |
 | `+"`%s help`"+` | これ |
 
 実装モードを使うには、デフォルトブランチの `+"`%s`"+` に次が要ります。
@@ -363,12 +377,14 @@ func issueHelpText(mention string) string {
 `+"```yaml"+`
 implement:
   enabled: true
-  allowed_actors: [alice, bob]   # 指示してよい人
-  paths_allow: ["internal/**"]   # 編集してよいパス
-  commands_allow: ["go test ./..."]
+  allowed_actors: [alice, bob]       # 指示してよい人
+  paths_allow: ["internal/**"]       # 編集してよいパス
+  commands_allow: ["go test ./..."]  # 検証に使うコマンド
 `+"```"+`
 
 CI 設定・`+"`%s`"+`・依存定義ファイルは、設定に関わらず編集できません。
+
+`+"`commands_allow`"+` が通らなかった変更は、プルリクエストになりません。
 `, mention, mention, mention, repoconfig.Path, repoconfig.Path)
 }
 

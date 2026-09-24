@@ -331,15 +331,47 @@ implement:
 	}
 }
 
-func TestEverythingInPlaceGetsPastTheGate(t *testing.T) {
-	f := implementSettings(t, workingSettings)
+func TestImplementIsRefusedWithNoVerifyCommands(t *testing.T) {
+	f := implementSettings(t, `
+version: 1
+implement:
+  enabled: true
+  allowed_actors: [alice]
+  paths_allow: ["internal/**"]
+`)
 	j := implementJob(t, f, true)
 
 	if err := j.Handle(context.Background(), queued(issueCommand("implement", "alice"))); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if !strings.Contains(said(f), "実行条件は満たしています") {
-		t.Errorf("a correctly configured instruction was refused:\n%s", said(f))
+	if !strings.Contains(said(f), "commands_allow") {
+		t.Errorf("the refusal does not say that nothing would check the change:\n%s", said(f))
+	}
+}
+
+// A plan is prose, and nothing verifies prose. It must not be held to the
+// setting that only writing needs.
+func TestPlanDoesNotNeedVerifyCommands(t *testing.T) {
+	origin, _, _ := originRepo(t)
+	f := implementSettings(t, `
+version: 1
+implement:
+  enabled: true
+  allowed_actors: [alice]
+  paths_allow: ["internal/**"]
+`)
+	e := &fakeEngine{results: []*reviewer.Result{{Reply: "まず forge.Client を読む。"}}}
+	j := newJob(t, f, e)
+	j.ImplementEnabled = true
+
+	if err := j.Handle(context.Background(), queued(issueCommandIn("plan", "alice", origin))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if strings.Contains(said(f), "commands_allow") {
+		t.Errorf("a plan was refused for having no verify commands:\n%s", said(f))
+	}
+	if !strings.Contains(said(f), "forge.Client を読む") {
+		t.Errorf("the plan was not posted:\n%s", said(f))
 	}
 }
 
