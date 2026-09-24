@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -366,4 +368,89 @@ func hostileArchive(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// A tree that did not arrive whole must not extract as though it had. The
+// review that raised this described the failure as io.EOF being swallowed;
+// what a cut-short archive actually produces is io.ErrUnexpectedEOF, so the
+// case was already an error. The test is here to keep it one, and to record
+// which error it is.
+func TestUnpackRefusesATruncatedArchive(t *testing.T) {
+	var raw bytes.Buffer
+	tw := tar.NewWriter(&raw)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "internal/queue/queue.go", Mode: 0o644, Size: 1000, Typeflag: tar.TypeReg,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Ten bytes where the header promised a thousand, and then the stream
+	// stops: a transfer that was cut off mid-file.
+	if _, err := tw.Write([]byte("package qu")); err != nil {
+		t.Fatal(err)
+	}
+
+	var archive bytes.Buffer
+	zw := gzip.NewWriter(&archive)
+	if _, err := zw.Write(raw.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	err := sandbox.Unpack(&archive, dir)
+	if err == nil {
+		t.Fatal("Unpack accepted an archive that was cut short")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("error = %v, want one wrapping io.ErrUnexpectedEOF", err)
+	}
+}
+
+// Empty files are ordinary, and reporting every error from the copy must not
+// turn one into a failure.
+func TestUnpackKeepsEmptyFiles(t *testing.T) {
+	var raw bytes.Buffer
+	tw := tar.NewWriter(&raw)
+	for _, header := range []*tar.Header{
+		{Name: "empty", Mode: 0o644, Size: 0, Typeflag: tar.TypeReg},
+		{Name: "one", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg},
+	} {
+		if err := tw.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Size > 0 {
+			if _, err := tw.Write([]byte("x")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var archive bytes.Buffer
+	zw := gzip.NewWriter(&archive)
+	if _, err := zw.Write(raw.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := sandbox.Unpack(&archive, dir); err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	for name, want := range map[string]int64{"empty": 0, "one": 1} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if info.Size() != want {
+			t.Errorf("%s is %d bytes, want %d", name, info.Size(), want)
+		}
+	}
 }

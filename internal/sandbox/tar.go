@@ -175,7 +175,13 @@ func writeFile(target string, r io.Reader, header *tar.Header) error {
 
 	// Bounded by the header rather than by the reader: a stream that claims a
 	// small size and keeps going is the other half of the same trick.
-	if _, err := io.CopyN(f, r, header.Size); err != nil && !errors.Is(err, io.EOF) {
+	//
+	// Every error is reported, io.EOF included. CopyN returns io.EOF only when
+	// the reader ran out before header.Size bytes -- a short file -- so the
+	// guard that used to exclude it could never have suppressed anything but a
+	// truncated extraction. A zero-size entry is not affected: CopyN with n of
+	// zero returns nil, and empty files are ordinary.
+	if _, err := io.CopyN(f, r, header.Size); err != nil {
 		return fmt.Errorf("sandbox: writing %s: %w", header.Name, err)
 	}
 	return nil

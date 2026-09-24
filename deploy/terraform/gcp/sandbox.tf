@@ -92,6 +92,12 @@ resource "google_cloud_run_v2_job" "runner" {
   location = var.region
   labels   = var.labels
 
+  # Off, as it is on every other Cloud Run resource here. It defaults to on,
+  # and this job is the one resource in the configuration that is meant to be
+  # destroyed routinely: turning implement_enabled back off has to work, and
+  # with protection on it would fail the apply instead.
+  deletion_protection = false
+
   template {
     template {
       service_account = google_service_account.runner[0].email
