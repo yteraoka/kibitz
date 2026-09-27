@@ -186,7 +186,7 @@ App をリネームした後に旧アカウント名も無視したい、とい�
 イメージを push する先と、シークレットの入れ物が先に要る。3 段階に分けて apply する。
 
 ```bash
-terraform init
+terraform init   # 既存の作業ディレクトリでプロバイダのメジャーが上がったら terraform init -upgrade
 
 # 段階 1: Artifact Registry とシークレット (の箱) だけ
 terraform apply \
