@@ -207,6 +207,7 @@ Issue の指示でコードを書くモード。**4 つの条件がすべて揃�
 | `implement.enabled: true` | リポジトリの `.kibitz.yaml`（デフォルトブランチ） |
 | 指示者が `implement.allowed_actors` に含まれる | 同上。**空なら誰も許可されない** |
 | `implement.paths_allow` が 1 つ以上ある | 同上。**空なら何も書けない** |
+| `implement.commands_allow` が 1 つ以上ある | 同上。**空なら検証できないので動かない**（`plan` は不要） |
 
 ```yaml
 version: 1
@@ -291,14 +292,51 @@ runner_image      = "asia-northeast1-docker.pkg.dev/my-project/kibitz/kibitz-run
 失敗した最初のコマンドで止まる（コンパイルが通っていないのにテストを走らせても
 雑音しか出ない）。出力は**末尾 16 KB を残して切る** — 失敗の理由は末尾にある。
 
-#### この kibitz での実装状況
+#### `/kibitz implement` が何をするか
 
-| | |
-| --- | --- |
-| 条件判定・パスの拒否・Issue への応答 | 完了 |
-| `/kibitz plan` | 完了 |
-| ビルドとテストを走らせるサンドボックス (`kibitz-runner`) | 完了 (下記) |
-| ブランチ作成・実装本体・draft PR | **未実装**。条件を満たした `implement` にはその旨を Issue に返す |
+順番がそのまま設計です。**何かを費やす前に「やらない」と言える判定を先に置き、
+PR ができるかどうかを決める 2 つの判定（何を編集したか・ビルドが通るか）を
+push より前に置いています。**
+
+| # | すること | ここで止まったら |
+| --- | --- | --- |
+| 1 | 既にこの Issue の PR があるか確認 | その PR を返す。**モデルは呼ばない** |
+| 2 | デフォルトブランチをチェックアウト | — |
+| 3 | 同名のブランチがリモートに無いか確認 | **上書きせずに**その旨を返す |
+| 4 | エージェントを実行（`paths_allow` の範囲を伝える） | — |
+| 5 | git に**実際に何が変わったか**を聞く | 変更が無ければ、その理由を Issue に返す |
+| 6 | 変更パスを `paths_allow` と固定の拒否リストで照合 | **変更を全部破棄**。許可された分だけ残すことはしない |
+| 7 | `commands_allow` を別ジョブで実行 | **PR を作らない。** 失敗した出力をそのまま Issue に返す |
+| 8 | commit → push → draft PR | — |
+
+> **エージェントに伝えたパスの一覧は、制約ではありません。** 制約は 6 の照合です。
+> ルールを伝えられたモデルは、ルールではありません。
+
+**検証する場所が設定されていなければ、実装モードは動きません。** 検証を省略して
+PR を作ることはしません（`KIBITZ_SANDBOX_LOCATION` 未設定なら、その旨を Issue に返す）。
+
+**kibitz が作った PR に kibitz はレビューしません。** PR を開いたのは kibitz 自身の
+アカウントなので、既存のループ防止（イベントの actor が自分なら捨てる）がそのまま効きます。
+人がそのブランチに push した場合は、その人の変更としてレビューします。
+
+#### 実装モードの環境変数
+
+| 変数 | 既定 | 意味 |
+| --- | --- | --- |
+| `KIBITZ_IMPLEMENT_ENABLED` | `false` | 運用側の switch。これが false なら何を書いても動かない |
+| `KIBITZ_SANDBOX_LOCATION` | (なし) | 検証の受け渡し場所。`gs://bucket/prefix` か、ディレクトリ |
+| `KIBITZ_SANDBOX_JOB` | (なし) | `projects/P/locations/L/jobs/J`。**空ならワーカー内で実行される (サンドボックスではない)** |
+| `KIBITZ_SANDBOX_CONTAINER` | (なし) | 環境変数を上書きするコンテナ名。名前なしの単一コンテナなら空で正しい |
+| `KIBITZ_IMPLEMENT_VERIFY_TIMEOUT` | `15m` | 1 回の検証の上限 |
+| `KIBITZ_IMPLEMENT_BRANCH_PREFIX` | `kibitz/` | ブランチ名の先頭。リポジトリ側の `branch_prefix` が優先 |
+| `KIBITZ_COMMIT_NAME` | `kibitz` | commit の author 名 |
+| `KIBITZ_COMMIT_EMAIL` | `kibitz@users.noreply.github.com` | 同 address。**実在するメールボックスにしないこと** |
+| `KIBITZ_OPENCODE_IMPLEMENT_AGENT` | `kibitz-implement` | 実装用エージェント定義名。**唯一、書き込み権限で動く** |
+
+> **`KIBITZ_SANDBOX_JOB` が空のとき、検証はワーカー自身のプロセスで走ります。**
+> それはサンドボックスではありません（起動時に警告ログを出します）。docker compose や
+> 単一ノードの構成向けで、**kibitz が触れるすべてを、インストール先の全リポジトリに
+> 預けてよい場合にだけ**使ってください。
 
 ### 設計文書 (ADR) の参照
 
@@ -497,8 +535,11 @@ guidelines: |
 | `guidelines` | 運用側の guidelines に**追記**される (置き換えではない) |
 | `mcp.allow` | 有効にする MCP サーバー名。運用側が定義し許可したものだけ ([上記](#mcp-サーバー)) |
 
-**まだ効かないキー**: `budget` (Phase 9)、`implement` (Phase 8)、
-`review.allow_verdict`、`answer.mention`。書いてもログとサマリに「効きません」と出るだけ。
+**まだ効かないキー**: `budget`、`review.allow_verdict`、`answer.mention`。
+書いてもログとサマリに「効きません」と出るだけ。
+
+`budget` はリポジトリ側から月の上限を宣言するキーで、まだ実装していません。
+予算そのものは運用側の `KIBITZ_REPO_BUDGETS` で効きます。
 
 `answer.mention` をリポジトリ側で変えられないのは、メンションの判定が
 **publish 前のサーバー側**で行われ、そこでは `.kibitz.yaml` を読んでいないため。

@@ -28,6 +28,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 	"github.com/yteraoka/kibitz/internal/run"
+	"github.com/yteraoka/kibitz/internal/sandbox"
 	"github.com/yteraoka/kibitz/internal/store"
 	storefirestore "github.com/yteraoka/kibitz/internal/store/firestore"
 	storememory "github.com/yteraoka/kibitz/internal/store/memory"
@@ -117,7 +118,7 @@ func realMain() error {
 
 	metrics := telemetry.NewMetrics()
 
-	job, err := newReviewJob(cfg, logger, state, metrics)
+	job, err := newReviewJob(ctx, cfg, logger, state, metrics)
 	if err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func botLogins(ctx context.Context, cfg *config.Worker, job *worker.ReviewJob, l
 	return append(logins, login)
 }
 
-func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics) (*worker.ReviewJob, error) {
+func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics) (*worker.ReviewJob, error) {
 	forges := make(map[event.Platform]forge.Client)
 
 	if cfg.GitHub.AppID != 0 {
@@ -321,6 +322,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		ReviewAgent:    cfg.OpenCode.ReviewAgent,
 		AnswerAgent:    cfg.OpenCode.AnswerAgent,
 		PlanAgent:      cfg.OpenCode.PlanAgent,
+		ImplementAgent: cfg.OpenCode.ImplementAgent,
 		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
 		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
@@ -328,6 +330,11 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		MCPServers:     mcp,
 		CustomProvider: vertexMaaSProvider(cfg, logger),
 	}, logger)
+
+	verifier, err := newVerifier(ctx, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	return &worker.ReviewJob{
 		Forges:         forges,
@@ -355,6 +362,11 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Mention:          cfg.Mention,
 		SkipDraft:        cfg.SkipDraft,
 		ImplementEnabled: cfg.ImplementEnabled,
+		Sandbox:          verifier,
+		VerifyTimeout:    cfg.Implement.VerifyTimeout,
+		BranchPrefix:     cfg.Implement.BranchPrefix,
+		CommitName:       cfg.Implement.CommitName,
+		CommitEmail:      cfg.Implement.CommitEmail,
 		SessionTTL:       cfg.SessionTTL,
 		Store:            state,
 		MaxPostsPerHour:  cfg.MaxPostsPerHour,
@@ -463,4 +475,50 @@ func offOrList(configured []string) []string {
 		return []string{}
 	}
 	return configured
+}
+
+// newVerifier builds where a written change's own build and tests run.
+//
+// Nothing is built unless implement mode is enabled, and nothing is guessed: a
+// deployment with the mode on and no location configured gets a nil verifier,
+// and the mode then refuses on the first instruction with a message naming the
+// variable. That is better than a verification that quietly did not happen
+// (ADR-0019).
+func newVerifier(ctx context.Context, cfg *config.Worker, logger *slog.Logger) (sandbox.Runner, error) {
+	if !cfg.ImplementEnabled {
+		return nil, nil
+	}
+	location := strings.TrimSpace(cfg.Implement.SandboxLocation)
+	if location == "" {
+		logger.LogAttrs(ctx, slog.LevelWarn, "implement mode is enabled but no sandbox location is configured; it will refuse to run",
+			slog.String("variable", "KIBITZ_SANDBOX_LOCATION"),
+		)
+		return nil, nil
+	}
+
+	if job := strings.TrimSpace(cfg.Implement.SandboxJob); job != "" {
+		executor, err := sandbox.NewCloudRun(ctx, sandbox.CloudRunConfig{
+			Job:       job,
+			Container: cfg.Implement.SandboxContainer,
+			Logger:    logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "verifications run in a separate job",
+			slog.String("job", job),
+			slog.String("location", location),
+		)
+		return &sandbox.Job{Location: location, Executor: executor, Logger: logger}, nil
+	}
+
+	// Said loudly, every time. This runs a repository's own test suite in the
+	// process that holds the GitHub App's private key and the credentials for
+	// everything else kibitz talks to, and a test file is a place anybody who
+	// can open a pull request may put code.
+	logger.LogAttrs(ctx, slog.LevelWarn, "verifications run in this process, which is NOT a sandbox",
+		slog.String("variable", "KIBITZ_SANDBOX_JOB"),
+		slog.String("consequence", "a repository's own tests run with this worker's credentials"),
+	)
+	return sandbox.Local{}, nil
 }

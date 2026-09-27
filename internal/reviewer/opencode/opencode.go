@@ -35,8 +35,11 @@ type Config struct {
 	ReviewAgent string
 	AnswerAgent string
 	// PlanAgent names the definition that plans a change without making one.
-	PlanAgent   string
-	TriageAgent string
+	PlanAgent string
+	// ImplementAgent names the definition that writes the change. It is the
+	// only one that runs with permission to edit files.
+	ImplementAgent string
+	TriageAgent    string
 	// MCPServers are the servers to enable, already filtered against the
 	// operator's allow list.
 	MCPServers map[string]MCPServer
@@ -170,6 +173,9 @@ func New(cfg Config, logger *slog.Logger) *Runner {
 	if cfg.PlanAgent == "" {
 		cfg.PlanAgent = "kibitz-plan"
 	}
+	if cfg.ImplementAgent == "" {
+		cfg.ImplementAgent = "kibitz-implement"
+	}
 	if cfg.TriageAgent == "" {
 		cfg.TriageAgent = "kibitz-triage"
 	}
@@ -249,6 +255,15 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		if result.Reply == "" {
 			return nil, fmt.Errorf("opencode: the agent produced no %s", outputNameFor(req.Mode))
 		}
+		return result, nil
+	}
+
+	// Implement mode's result is on disk: the files it edited. What it wrote to
+	// stdout is the account of what it did, and an empty one is not a failed
+	// run -- the caller looks at the working tree to find out whether anything
+	// happened, and says so itself when nothing did.
+	if req.Mode == reviewer.ModeImplement {
+		result.Reply = strings.TrimSpace(transcript.text)
 		return result, nil
 	}
 
@@ -362,6 +377,8 @@ func (r *Runner) args(req reviewer.Request) []string {
 		agent = r.cfg.AnswerAgent
 	case reviewer.ModePlan:
 		agent = r.cfg.PlanAgent
+	case reviewer.ModeImplement:
+		agent = r.cfg.ImplementAgent
 	case reviewer.ModeTriage:
 		agent = r.cfg.TriageAgent
 	}

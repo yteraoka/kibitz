@@ -735,3 +735,105 @@ func TestPlanModeReportsAnEmptyRun(t *testing.T) {
 		t.Fatal("an agent that produced nothing was reported as success")
 	}
 }
+
+// Implement mode is the only one that may write, and it may write only where
+// the repository said. The patterns here are opencode's matching rather than
+// kibitz's, which is why they are the cheap layer and not the one the feature
+// relies on -- the worker checks what actually changed. This test is about the
+// cheap layer being there at all, and about the two things that must not be:
+// bash and webfetch.
+func TestImplementModeMayWriteOnlyWhereTheRepositoryAllows(t *testing.T) {
+	h := newHarness(t, `
+cp "$OPENCODE_CONFIG" .kibitz/config-copy.json
+echo '{"type":"text","text":"internal/queue/sqs.go を追加しました。"}'
+`)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeImplement)
+	req.Issue = &event.Issue{Number: 12, Title: "Support SQS"}
+	req.EditablePaths = []string{"internal/**", "docs/**"}
+
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(result.Reply, "sqs.go") {
+		t.Errorf("Reply = %q, want the agent's account of what it did", result.Reply)
+	}
+
+	permission := h.config(t)["permission"].(map[string]any)
+	if permission["*"] != "deny" {
+		t.Errorf("default = %v, want deny", permission["*"])
+	}
+	if permission["webfetch"] != "deny" {
+		t.Errorf("webfetch = %v, want deny", permission["webfetch"])
+	}
+
+	edit, ok := permission["edit"].(map[string]any)
+	if !ok {
+		t.Fatalf("edit = %v, want a pattern map", permission["edit"])
+	}
+	if edit["*"] != "deny" {
+		t.Errorf("edit default = %v, want deny", edit["*"])
+	}
+	for _, pattern := range []string{"internal/**", "docs/**"} {
+		if edit[pattern] != "allow" {
+			t.Errorf("edit[%q] = %v, want allow", pattern, edit[pattern])
+		}
+	}
+
+	// The build and the tests run where kibitz holds no credentials, so the
+	// agent must not be able to run them here (ADR-0019).
+	bash, ok := permission["bash"].(map[string]any)
+	if !ok || bash["*"] != "deny" {
+		t.Errorf("bash = %v, want deny by default", permission["bash"])
+	}
+	if bash["go test*"] == "allow" || bash["*"] == "allow" {
+		t.Errorf("the agent can run the verification itself: %v", bash)
+	}
+
+	if args := strings.Join(h.args(t), " "); !strings.Contains(args, "--agent kibitz-implement") {
+		t.Errorf("the implement agent was not selected: %s", args)
+	}
+}
+
+// A repository that named no paths gets a profile that allows nothing, not one
+// that allows everything.
+func TestImplementModeWithNoPathsAllowsNoWriting(t *testing.T) {
+	h := newHarness(t, `
+cp "$OPENCODE_CONFIG" .kibitz/config-copy.json
+echo '{"type":"text","text":"何も変更していません。"}'
+`)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeImplement)
+	req.Issue = &event.Issue{Number: 12, Title: "Support SQS"}
+
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edit := h.config(t)["permission"].(map[string]any)["edit"].(map[string]any)
+	if len(edit) != 1 || edit["*"] != "deny" {
+		t.Errorf("edit = %v, want nothing but a deny", edit)
+	}
+}
+
+// Implement mode's result is on disk. An agent that wrote no account of itself
+// is not a failed run: the worker looks at the working tree to find out whether
+// anything happened.
+func TestImplementModeAcceptsARunWithNoAccount(t *testing.T) {
+	h := newHarness(t, `echo '{"type":"step_finish","tokens":{"input":1,"output":1}}'`)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeImplement)
+	req.Issue = &event.Issue{Number: 12, Title: "Support SQS"}
+
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Reply != "" {
+		t.Errorf("Reply = %q, want empty", result.Reply)
+	}
+}

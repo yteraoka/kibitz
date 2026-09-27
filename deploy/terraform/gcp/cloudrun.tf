@@ -454,6 +454,61 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         }
       }
 
+      # Implement mode. The switch and the place a written change is verified
+      # travel together on purpose: the worker refuses the mode outright when it
+      # has nowhere to verify (ADR-0019), so sending one without the other would
+      # deploy a mode that can only say no.
+      dynamic "env" {
+        for_each = local.sandbox_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_IMPLEMENT_ENABLED"
+          value = "true"
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled ? [1] : []
+        content {
+          name = "KIBITZ_SANDBOX_LOCATION"
+          # One prefix, under which each run gets a directory of its own.
+          value = "gs://${google_storage_bucket.sandbox[0].name}/runs"
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_SANDBOX_JOB"
+          value = "projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner[0].name}"
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_IMPLEMENT_VERIFY_TIMEOUT"
+          value = var.implement_verify_timeout
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled && var.implement_branch_prefix != "" ? [1] : []
+        content {
+          name  = "KIBITZ_IMPLEMENT_BRANCH_PREFIX"
+          value = var.implement_branch_prefix
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled && var.implement_commit_name != "" ? [1] : []
+        content {
+          name  = "KIBITZ_COMMIT_NAME"
+          value = var.implement_commit_name
+        }
+      }
+      dynamic "env" {
+        for_each = local.sandbox_enabled && var.implement_commit_email != "" ? [1] : []
+        content {
+          name  = "KIBITZ_COMMIT_EMAIL"
+          value = var.implement_commit_email
+        }
+      }
+
       # See server_env.
       dynamic "env" {
         for_each = var.worker_env

@@ -14,6 +14,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
+	"github.com/yteraoka/kibitz/internal/sandbox"
 	"github.com/yteraoka/kibitz/internal/store"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -91,6 +92,22 @@ type ReviewJob struct {
 	// code. Off means no repository can turn it on: what a repository
 	// controls is whether it is used here, not whether it exists.
 	ImplementEnabled bool
+	// Sandbox runs the change's own build and tests. It may be nil, and when it
+	// is, implement mode refuses rather than opening a pull request nothing
+	// built: the verification is not an extra, it is the reason a change kibitz
+	// wrote is worth a person's attention (ADR-0019).
+	Sandbox sandbox.Runner
+	// VerifyTimeout bounds one verification. Zero means the sandbox's own
+	// default.
+	VerifyTimeout time.Duration
+	// BranchPrefix starts the branch names implement mode pushes, where a
+	// repository has not named its own. Empty means
+	// [DefaultBranchPrefix].
+	BranchPrefix string
+	// CommitName and CommitEmail attribute the commits it makes. Empty means
+	// [DefaultCommitName] and [DefaultCommitEmail].
+	CommitName  string
+	CommitEmail string
 	// Store remembers which commits have already been reviewed and how much
 	// has been posted lately. It may be nil, in which case neither check runs.
 	Store store.Store

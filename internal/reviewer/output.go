@@ -10,10 +10,18 @@ import (
 // OutputSchemaVersion is the version of the JSON contract the agent writes.
 const OutputSchemaVersion = 1
 
+// ScratchDir is where kibitz puts its own files inside the checkout: the
+// prompt it wrote and whatever the agent is asked to write back.
+//
+// It is named here because implement mode has to take it out again. That mode
+// decides what the agent changed by asking git, and kibitz's own prompt sitting
+// in the working tree is a change the agent did not make.
+const ScratchDir = ".kibitz"
+
 // OutputPath is where the agent writes its findings, relative to the
 // workspace. Reading a file is far more reliable than parsing prose out of the
 // agent's stdout, and it keeps the contract explicit.
-const OutputPath = ".kibitz/out/review.json"
+const OutputPath = ScratchDir + "/out/review.json"
 
 // Output is the JSON document the agent produces.
 type Output struct {

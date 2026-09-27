@@ -256,3 +256,44 @@ type Client interface {
 	// CloneAuth returns a short-lived credential for fetching the code.
 	CloneAuth(ctx context.Context, ref PRRef) (CloneCredential, error)
 }
+
+// NewPullRequest describes a pull request to open.
+type NewPullRequest struct {
+	// Head is the branch the change is on. It is always a branch of the
+	// repository itself: kibitz pushes where it was installed, and a fork
+	// would need an account of its own to push to.
+	Head string
+	// Base is the branch the change is proposed against.
+	Base  string
+	Title string
+	Body  string
+	// Draft asks for a pull request nobody is being asked to merge yet, which
+	// is what implement mode opens: the change was written by a model and read
+	// by nobody.
+	Draft bool
+}
+
+// PullRequestInfo is a pull request that exists.
+type PullRequestInfo struct {
+	Number int
+	URL    string
+	// Draft reports what is actually there. A repository whose plan does not
+	// offer draft pull requests gets an ordinary one, and whoever is about to
+	// be notified should be told which of the two they are getting.
+	Draft bool
+}
+
+// Writer opens pull requests. It is separate from [Client] because reviewing
+// needs none of it: a deployment that only reviews should not be holding a
+// credential that can open pull requests, and a platform kibitz can review on
+// but not write to is a client that simply does not implement this.
+type Writer interface {
+	// FindPullRequest returns the open pull request whose head is this branch,
+	// or nil when there is none. It is how a redelivered job finds what its
+	// first attempt already created instead of creating a second one.
+	FindPullRequest(ctx context.Context, ref PRRef, head string) (*PullRequestInfo, error)
+
+	// CreatePullRequest opens one. A branch that already has an open pull
+	// request returns that one rather than failing.
+	CreatePullRequest(ctx context.Context, ref PRRef, req NewPullRequest) (*PullRequestInfo, error)
+}

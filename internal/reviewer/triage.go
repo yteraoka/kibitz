@@ -9,7 +9,7 @@ import (
 // TriageOutputPath is where the triage agent writes its selection, relative
 // to the workspace. It is a separate file from the review's, so that a triage
 // run cannot be mistaken for a review that found nothing.
-const TriageOutputPath = ".kibitz/out/triage.json"
+const TriageOutputPath = ScratchDir + "/out/triage.json"
 
 // TriageOutput is the JSON document the triage agent produces: which files of
 // a very large change are worth a reviewer's attention.
