@@ -248,8 +248,13 @@ func TestThePlanRunsOnTheDefaultBranchAndReadsOnly(t *testing.T) {
 	if req.PullRequest != nil {
 		t.Errorf("a plan was given a pull request: %+v", req.PullRequest)
 	}
-	if req.HeadSHA != baseSHA && req.HeadSHA == "" {
-		t.Errorf("no commit was recorded for the plan")
+	// The assertion this test exists for. It was written as
+	// "!= baseSHA && == \"\"" and caught nothing but an empty value: a
+	// checkout that had followed the issue's text would have put that branch's
+	// commit here, which is not empty, so the whole condition was false and the
+	// test passed. The one case it had to catch was the one it let through.
+	if req.HeadSHA != baseSHA {
+		t.Errorf("HeadSHA = %q, want the default branch's commit %q", req.HeadSHA, baseSHA)
 	}
 }
 
