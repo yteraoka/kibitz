@@ -396,8 +396,8 @@ Terraform が `${name_prefix}: reviews, cost and backlog` を作る
 
 | タイル | 出どころ |
 | --- | --- |
-| リポジトリ別のコスト (日次) | ログ `cost` |
-| リポジトリ別のトークン (日次) | ログ `total_tokens` |
+| リポジトリ別のコスト (直近 24 時間) | ログ `cost` |
+| リポジトリ別のトークン (直近 24 時間) | ログ `total_tokens` |
 | エージェントの所要時間 (p50 / p95) | ログ `agent_duration` |
 | 指摘数と、諦めたジョブ | ログ `findings` / `giving up on the job` |
 | バックログ (最古の未 ack) | Pub/Sub |
@@ -409,6 +409,13 @@ Terraform が `${name_prefix}: reviews, cost and backlog` を作る
 と出る。合計から除外されるので、**コストのグラフだけを見ていると
 「誰も単価を設定していない 1 か月」が「無料だった 1 か月」に見える**。
 その枚数を隣に置いてある。
+
+**コスト・トークン・指摘数は分布 (DISTRIBUTION) のメトリクス**で、グラフは
+PromQL で分布の合計 (`_sum`) を足している。ログベースメトリクスがログの値を
+取り出せるのは分布だけで、カウンタは「一致したログの件数」しか数えられない
+(値を取り出そうとすると `A value extractor can only be specified for a
+DISTRIBUTION value type` で作成に失敗する)。バケットはヒートマップ用で、
+合計は分布が持つ正確な和から出る。
 
 所要時間は**ナノ秒**のまま。`EXTRACT()` は計算をしないので、
 slog が書いた単位がそのまま出る (バケットは 1 秒から始めてある)。

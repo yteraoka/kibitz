@@ -19,7 +19,23 @@ locals {
   run_filter = <<-EOT
     jsonPayload.msg=("review produced findings" OR "answered a question")
   EOT
+
+  # A log-based metric's name as PromQL spells it: the first "/" becomes ":"
+  # and anything else that is not a letter, digit or underscore becomes "_".
+  # A distribution is a histogram there, so its values are summed through
+  # the "_sum" series.
+  promql_prefix       = "logging_googleapis_com:user_"
+  run_cost_sum        = "${local.promql_prefix}${replace(google_logging_metric.run_cost.name, "/[^A-Za-z0-9_]/", "_")}_sum"
+  run_tokens_sum      = "${local.promql_prefix}${replace(google_logging_metric.run_tokens.name, "/[^A-Za-z0-9_]/", "_")}_sum"
+  findings_posted_sum = "${local.promql_prefix}${replace(google_logging_metric.findings_posted.name, "/[^A-Za-z0-9_]/", "_")}_sum"
 }
+
+# Why cost, tokens and findings are distributions rather than counters: a
+# log-based metric can take its value from a field only when it is a
+# distribution. A counter counts matching entries, and the API refuses one
+# with a value extractor ("A value extractor can only be specified for a
+# DISTRIBUTION value type"). The buckets only shape the heatmap; the total
+# comes from the distribution's own sum, which is exact.
 
 # What each repository is spending. This is the metric the monthly budget is
 # measured against, and the one worth looking at before raising a ceiling.
@@ -34,7 +50,7 @@ resource "google_logging_metric" "run_cost" {
 
   metric_descriptor {
     metric_kind = "DELTA"
-    value_type  = "DOUBLE"
+    value_type  = "DISTRIBUTION"
     unit        = "1"
 
     labels {
@@ -53,6 +69,16 @@ resource "google_logging_metric" "run_cost" {
   label_extractors = {
     repository = "EXTRACT(jsonPayload.repository)"
     model      = "EXTRACT(jsonPayload.model)"
+  }
+
+  # From a tenth of a cent up to several hundred, in whatever currency the
+  # prices are quoted in.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 20
+      growth_factor      = 2
+      scale              = 0.001
+    }
   }
 }
 
@@ -89,7 +115,7 @@ resource "google_logging_metric" "run_tokens" {
 
   metric_descriptor {
     metric_kind = "DELTA"
-    value_type  = "INT64"
+    value_type  = "DISTRIBUTION"
     unit        = "1"
 
     labels {
@@ -101,6 +127,15 @@ resource "google_logging_metric" "run_tokens" {
   value_extractor = "EXTRACT(jsonPayload.total_tokens)"
   label_extractors = {
     repository = "EXTRACT(jsonPayload.repository)"
+  }
+
+  # A thousand tokens to about thirty million.
+  bucket_options {
+    exponential_buckets {
+      num_finite_buckets = 16
+      growth_factor      = 2
+      scale              = 1000
+    }
   }
 }
 
@@ -141,7 +176,7 @@ resource "google_logging_metric" "findings_posted" {
 
   metric_descriptor {
     metric_kind = "DELTA"
-    value_type  = "INT64"
+    value_type  = "DISTRIBUTION"
     unit        = "1"
 
     labels {
@@ -153,6 +188,15 @@ resource "google_logging_metric" "findings_posted" {
   value_extractor = "EXTRACT(jsonPayload.findings)"
   label_extractors = {
     repository = "EXTRACT(jsonPayload.repository)"
+  }
+
+  # One bucket per finding up to 20, which is KIBITZ_MAX_COMMENTS's default.
+  bucket_options {
+    linear_buckets {
+      num_finite_buckets = 20
+      width              = 1
+      offset             = 0
+    }
   }
 }
 
@@ -215,21 +259,13 @@ resource "google_monitoring_dashboard" "kibitz" {
         {
           width = 6, height = 4, xPos = 0, yPos = 0
           widget = {
-            title = "Cost per repository (daily)"
+            title = "Cost per repository (last 24 hours)"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
-                  timeSeriesFilter = {
-                    filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.run_cost.name}\""
-                    aggregation = {
-                      alignmentPeriod    = "86400s"
-                      perSeriesAligner   = "ALIGN_SUM"
-                      crossSeriesReducer = "REDUCE_SUM"
-                      groupByFields      = ["metric.label.repository"]
-                    }
-                  }
+                  prometheusQuery = "sum by (repository) (increase(${local.run_cost_sum}[1d]))"
                 }
-                plotType = "STACKED_BAR"
+                plotType = "STACKED_AREA"
               }]
               yAxis = { label = "cost", scale = "LINEAR" }
             }
@@ -238,21 +274,13 @@ resource "google_monitoring_dashboard" "kibitz" {
         {
           width = 6, height = 4, xPos = 6, yPos = 0
           widget = {
-            title = "Tokens per repository (daily)"
+            title = "Tokens per repository (last 24 hours)"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
-                  timeSeriesFilter = {
-                    filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.run_tokens.name}\""
-                    aggregation = {
-                      alignmentPeriod    = "86400s"
-                      perSeriesAligner   = "ALIGN_SUM"
-                      crossSeriesReducer = "REDUCE_SUM"
-                      groupByFields      = ["metric.label.repository"]
-                    }
-                  }
+                  prometheusQuery = "sum by (repository) (increase(${local.run_tokens_sum}[1d]))"
                 }
-                plotType = "STACKED_BAR"
+                plotType = "STACKED_AREA"
               }]
               yAxis = { label = "tokens", scale = "LINEAR" }
             }
@@ -301,14 +329,7 @@ resource "google_monitoring_dashboard" "kibitz" {
               dataSets = [
                 {
                   timeSeriesQuery = {
-                    timeSeriesFilter = {
-                      filter = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.findings_posted.name}\""
-                      aggregation = {
-                        alignmentPeriod    = "3600s"
-                        perSeriesAligner   = "ALIGN_SUM"
-                        crossSeriesReducer = "REDUCE_SUM"
-                      }
-                    }
+                    prometheusQuery = "sum(increase(${local.findings_posted_sum}[1h]))"
                   }
                   plotType = "LINE"
                 },
