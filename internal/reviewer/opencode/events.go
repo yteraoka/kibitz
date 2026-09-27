@@ -22,6 +22,9 @@ type transcript struct {
 	// tools is what the agent did with the tools it was given, which is how
 	// the reference material in the prompt is shown to be worth its space.
 	tools reviewer.ToolUse
+	// steps counts the model's turns, which says whether a run that produced
+	// nothing did any work at all.
+	steps int
 }
 
 // parseEvents reads `opencode run --format json` output.
@@ -61,6 +64,9 @@ func parseEvents(stdout []byte, logger *slog.Logger) transcript {
 			t.sessionID = id
 		}
 		t.usage = t.usage.Add(usageFrom(ev))
+		if part, ok := ev["part"].(map[string]any); ok && stringField(part, "type") == "step-finish" {
+			t.steps++
+		}
 		t.recordTool(ev)
 		if s := textFrom(ev); s != "" {
 			text.WriteString(s)

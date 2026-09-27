@@ -321,6 +321,9 @@ type OpenCode struct {
 	// secrets, the GitHub App key — stay in the worker; this is the escape
 	// hatch for a deployment that needs one more variable.
 	EnvPassthrough []string
+	// LogLevel is how much of opencode's own log reaches the worker's log when
+	// a run fails or complains: DEBUG, INFO, WARN or ERROR.
+	LogLevel string
 	// ContextBin is the kibitz-mcp binary, shipped in the same image. It
 	// serves the agent facts about the pull request that the prompt does not
 	// carry. Setting it to "off" leaves it out.
@@ -503,6 +506,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			PlanAgent:      l.str("KIBITZ_OPENCODE_PLAN_AGENT", "kibitz-plan"),
 			ImplementAgent: l.str("KIBITZ_OPENCODE_IMPLEMENT_AGENT", "kibitz-implement"),
 			TriageAgent:    l.str("KIBITZ_OPENCODE_TRIAGE_AGENT", "kibitz-triage"),
+			LogLevel:       l.enum("KIBITZ_OPENCODE_LOG_LEVEL", "WARN", "DEBUG", "INFO", "WARN", "ERROR"),
 			ProviderEnv:    l.list("KIBITZ_PROVIDER_ENV", nil),
 			EnvPassthrough: l.list("KIBITZ_AGENT_ENV_PASSTHROUGH", nil),
 			ContextBin:     l.str("KIBITZ_MCP_CONTEXT_BIN", "kibitz-mcp"),

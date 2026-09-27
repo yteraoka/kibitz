@@ -674,6 +674,10 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	b.WriteString(oneLine(cause.Error(), 500))
 	b.WriteString("\n```\n\n")
 	fmt.Fprintf(&b, "`%s review` で再実行できます。\n", j.mention())
+	// The comment says what failed; the worker's log says why, in more detail
+	// than belongs on a pull request. This is the key that finds it -- every
+	// line the job wrote carries it.
+	fmt.Fprintf(&b, "\n<sub>運用者向け: ワーカーのログを `event_id=%s` で検索すると詳細が見られます。</sub>\n", ev.ID)
 
 	return client.UpsertSummary(ctx, forge.RefOf(ev), FailureMarker, b.String())
 }
