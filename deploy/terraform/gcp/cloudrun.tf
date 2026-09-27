@@ -9,11 +9,29 @@ resource "google_cloud_run_v2_service" "server" {
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
 
+  # The instance limits live on the service, not on the revision. That is
+  # where Cloud Run and gcloud keep them now, and where a deploy from the
+  # release workflow leaves them; declaring them only on the template made
+  # Terraform and a deploy describe the same limit in two places.
+  #
+  # The mode is written out because it is not a computed field: once the
+  # service carries it, leaving it out of the configuration would read as a
+  # request to remove it on every plan.
+  scaling {
+    scaling_mode       = "AUTOMATIC"
+    min_instance_count = 0
+    max_instance_count = var.server_max_instances
+  }
+
   template {
     service_account = google_service_account.server.email
 
+    # The revision-level maximum is kept at the same number, not dropped.
+    # Earlier applies set it, and the provider treats it as computed: left
+    # out of the configuration, the old value would stay on every new
+    # revision, and raising server_max_instances would change the service's
+    # limit while the stale revision limit went on capping it.
     scaling {
-      min_instance_count = 0
       max_instance_count = var.server_max_instances
     }
 

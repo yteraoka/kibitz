@@ -3,8 +3,11 @@ terraform {
 
   required_providers {
     google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
+      source = "hashicorp/google"
+      # 7.x is what can say the server's instance limit where Cloud Run and
+      # gcloud keep it: 6.x has no service-level max_instance_count (see the
+      # server in cloudrun.tf).
+      version = "~> 7.0"
     }
   }
 }
