@@ -17,6 +17,23 @@ import (
 // It is the only thing the job is given (see deploy/terraform/gcp/sandbox.tf).
 const RunnerLocationEnv = "KIBITZ_RUNNER_LOCATION"
 
+// TaskTimeout is how long the execution itself may run, given how long its
+// commands may.
+//
+// The commands are not all the runner does. Before them it downloads and
+// unpacks the tree, and after them it uploads the result -- including the
+// result that says the commands ran out of time. A task given only the
+// commands' budget is killed while the last of them is still running, the
+// result that would have said so is never written, and the worker sees a
+// failed task and retries a verification that will fail the same way every
+// time.
+func TaskTimeout(commands time.Duration) time.Duration {
+	if commands <= 0 {
+		commands = DefaultTimeout
+	}
+	return commands + DefaultGrace
+}
+
 // How long the worker waits for a result, beyond the run's own timeout.
 const (
 	// DefaultPoll is how often the result is looked for.
@@ -160,12 +177,25 @@ func (j *Job) upload(ctx context.Context, store Store, dir string) error {
 	_ = pr.Close()
 	packErr := <-packed
 
-	// The pack error is reported first when there is one: an upload that
-	// failed because the thing being uploaded failed should say so.
-	if packErr != nil {
+	switch {
+	case packErr != nil && !errors.Is(packErr, io.ErrClosedPipe):
+		// The packer failed on its own -- a file that vanished, a tree over
+		// the limits -- and the upload failed because of it. The cause is
+		// the more useful of the two.
 		return fmt.Errorf("sandbox: packing the workspace: %w", packErr)
+	case putErr != nil:
+		// The store gave up first, and closing the pipe to unblock the packer
+		// made the packer fail too. That second failure is a consequence;
+		// reporting it would send whoever reads the log looking at the local
+		// tree for a problem that is in the bucket.
+		return putErr
+	case packErr != nil:
+		// The store said it succeeded but stopped reading before the archive
+		// was finished. Whatever it kept is truncated, and a truncated tree
+		// that verifies is worse than no verification.
+		return fmt.Errorf("sandbox: the store stopped reading before the workspace was written: %w", packErr)
 	}
-	return putErr
+	return nil
 }
 
 // await waits for the runner's result.
@@ -179,10 +209,11 @@ func (j *Job) upload(ctx context.Context, store Store, dir string) error {
 // the kind of bug that stays in for a while.
 func (j *Job) await(ctx context.Context, store Store, timeout time.Duration, finished bool) (*Result, error) {
 	// A finished execution has had its time; an unfinished one may still be
-	// using it.
+	// using it, and the time it may use is the task's, which is longer than
+	// the commands' (see TaskTimeout).
 	wait := j.grace()
 	if !finished {
-		wait += timeout
+		wait += TaskTimeout(timeout)
 	}
 	deadline := time.Now().Add(wait)
 

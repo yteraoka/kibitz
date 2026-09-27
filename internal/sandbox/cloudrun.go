@@ -88,10 +88,12 @@ func (c *CloudRun) Execute(ctx context.Context, env map[string]string, timeout t
 			// and a second copy of it would be the same answer twice.
 			TaskCount: 1,
 			// The job's own timeout is replaced rather than relied on: the
-			// request says how long this verification may take, and the
-			// platform has to agree or it will kill the container before the
-			// runner can write down what happened.
-			Timeout: strconv.Itoa(int(timeout.Seconds())) + "s",
+			// request says how long the commands may take, and the platform
+			// has to allow more than that or it kills the container before
+			// the runner can write down what happened. This line used to
+			// pass the commands' budget straight through, under a comment
+			// that said exactly why it must not.
+			Timeout: strconv.Itoa(int(TaskTimeout(timeout).Seconds())) + "s",
 		},
 	}).Context(ctx).Do()
 	if err != nil {
@@ -110,9 +112,9 @@ func (c *CloudRun) Execute(ctx context.Context, env map[string]string, timeout t
 // so by returning false, and the caller waits for the result instead of
 // deciding there is none.
 func (c *CloudRun) wait(ctx context.Context, op *run.GoogleLongrunningOperation, timeout time.Duration) (bool, error) {
-	// The execution's own timeout, plus room for the platform to start the
+	// The task's own timeout, plus room for the platform to start the
 	// container and to mark the execution complete afterwards.
-	deadline := time.Now().Add(timeout + DefaultGrace)
+	deadline := time.Now().Add(TaskTimeout(timeout) + DefaultGrace)
 
 	for !op.Done {
 		if !time.Now().Before(deadline) {
