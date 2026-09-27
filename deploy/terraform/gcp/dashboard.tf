@@ -248,6 +248,10 @@ resource "google_logging_metric" "budget_exhausted" {
   }
 }
 
+# The dashboard is written the way the API hands it back, or every plan
+# shows it changing: the API drops a tile position of 0 (a proto3 default is
+# not stored) and fills in targetAxis on every data set. The etag and name it
+# adds are ignored by the provider once the rest matches.
 resource "google_monitoring_dashboard" "kibitz" {
   project = var.project_id
 
@@ -257,7 +261,7 @@ resource "google_monitoring_dashboard" "kibitz" {
       columns = 12
       tiles = [
         {
-          width = 6, height = 4, xPos = 0, yPos = 0
+          width = 6, height = 4
           widget = {
             title = "Cost per repository (last 24 hours)"
             xyChart = {
@@ -265,14 +269,15 @@ resource "google_monitoring_dashboard" "kibitz" {
                 timeSeriesQuery = {
                   prometheusQuery = "sum by (repository) (increase(${local.run_cost_sum}[1d]))"
                 }
-                plotType = "STACKED_AREA"
+                plotType   = "STACKED_AREA"
+                targetAxis = "Y1"
               }]
               yAxis = { label = "cost", scale = "LINEAR" }
             }
           }
         },
         {
-          width = 6, height = 4, xPos = 6, yPos = 0
+          width = 6, height = 4, xPos = 6
           widget = {
             title = "Tokens per repository (last 24 hours)"
             xyChart = {
@@ -280,14 +285,15 @@ resource "google_monitoring_dashboard" "kibitz" {
                 timeSeriesQuery = {
                   prometheusQuery = "sum by (repository) (increase(${local.run_tokens_sum}[1d]))"
                 }
-                plotType = "STACKED_AREA"
+                plotType   = "STACKED_AREA"
+                targetAxis = "Y1"
               }]
               yAxis = { label = "tokens", scale = "LINEAR" }
             }
           }
         },
         {
-          width = 6, height = 4, xPos = 0, yPos = 4
+          width = 6, height = 4, yPos = 4
           widget = {
             title = "Agent duration (50th / 95th percentile)"
             xyChart = {
@@ -302,7 +308,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                       }
                     }
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
                 {
                   timeSeriesQuery = {
@@ -314,7 +321,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                       }
                     }
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
               ]
               yAxis = { label = "nanoseconds", scale = "LINEAR" }
@@ -331,7 +339,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                   timeSeriesQuery = {
                     prometheusQuery = "sum(increase(${local.findings_posted_sum}[1h]))"
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
                 {
                   timeSeriesQuery = {
@@ -344,7 +353,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                       }
                     }
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
               ]
               yAxis = { label = "count", scale = "LINEAR" }
@@ -352,7 +362,7 @@ resource "google_monitoring_dashboard" "kibitz" {
           }
         },
         {
-          width = 6, height = 4, xPos = 0, yPos = 8
+          width = 6, height = 4, yPos = 8
           widget = {
             title = "Backlog: oldest unacknowledged message"
             xyChart = {
@@ -370,7 +380,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                     }
                   }
                 }
-                plotType = "LINE"
+                plotType   = "LINE"
+                targetAxis = "Y1"
               }]
               yAxis = { label = "seconds", scale = "LINEAR" }
             }
@@ -396,14 +407,15 @@ resource "google_monitoring_dashboard" "kibitz" {
                     }
                   }
                 }
-                plotType = "LINE"
+                plotType   = "LINE"
+                targetAxis = "Y1"
               }]
               yAxis = { label = "messages", scale = "LINEAR" }
             }
           }
         },
         {
-          width = 6, height = 4, xPos = 0, yPos = 12
+          width = 6, height = 4, yPos = 12
           widget = {
             title = "Worker instances"
             xyChart = {
@@ -422,7 +434,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                     }
                   }
                 }
-                plotType = "STACKED_AREA"
+                plotType   = "STACKED_AREA"
+                targetAxis = "Y1"
               }]
               yAxis = { label = "instances", scale = "LINEAR" }
             }
@@ -445,7 +458,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                       }
                     }
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
                 {
                   timeSeriesQuery = {
@@ -458,7 +472,8 @@ resource "google_monitoring_dashboard" "kibitz" {
                       }
                     }
                   }
-                  plotType = "LINE"
+                  plotType   = "LINE"
+                  targetAxis = "Y1"
                 },
               ]
               yAxis = { label = "count", scale = "LINEAR" }
