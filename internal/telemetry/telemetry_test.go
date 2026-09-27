@@ -2,6 +2,7 @@ package telemetry_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -178,5 +179,48 @@ func TestTextFormat(t *testing.T) {
 	}
 	if strings.Contains(out, "ghp_") {
 		t.Errorf("text handler leaked a token: %s", out)
+	}
+}
+
+// Every record written with a job's context carries the job's identity,
+// whoever writes it. That is what makes "search the log for event_id" find
+// the whole job rather than the two lines that remembered to say it.
+func TestContextAttrsReachEveryRecord(t *testing.T) {
+	var buf bytes.Buffer
+	logger := telemetry.New(&buf, telemetry.Options{Format: "json"})
+
+	ctx := telemetry.WithLogAttrs(context.Background(), slog.String("event_id", "github:e1"))
+	ctx = telemetry.WithLogAttrs(ctx, slog.Int("pull_request", 42))
+
+	logger.LogAttrs(ctx, slog.LevelInfo, "reviewed")
+	// A call site that names the key itself keeps its own value, once.
+	logger.LogAttrs(ctx, slog.LevelInfo, "explicit", slog.String("event_id", "github:other"))
+	// Without the context, nothing is added.
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "unscoped")
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d records", len(lines))
+	}
+	if !strings.Contains(lines[0], `"event_id":"github:e1"`) || !strings.Contains(lines[0], `"pull_request":42`) {
+		t.Errorf("the scoped record lacks the context's attributes: %s", lines[0])
+	}
+	if strings.Count(lines[1], `"event_id"`) != 1 || !strings.Contains(lines[1], `"github:other"`) {
+		t.Errorf("an explicit key was duplicated or overridden: %s", lines[1])
+	}
+	if strings.Contains(lines[2], "event_id") {
+		t.Errorf("an unscoped record picked up attributes: %s", lines[2])
+	}
+}
+
+// Attributes from the context go through the same redaction as everything
+// else: they are strings from events, and events carry whatever was sent.
+func TestContextAttrsAreRedacted(t *testing.T) {
+	var buf bytes.Buffer
+	logger := telemetry.New(&buf, telemetry.Options{Format: "json"})
+	ctx := telemetry.WithLogAttrs(context.Background(), slog.String("note", "token ghp_0123456789abcdefghijklmnopqrstuvwxyzAB"))
+	logger.LogAttrs(ctx, slog.LevelInfo, "x")
+	if strings.Contains(buf.String(), "ghp_0123456789") {
+		t.Errorf("a credential in a context attribute reached the log: %s", buf.String())
 	}
 }

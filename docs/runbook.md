@@ -157,6 +157,41 @@ Redeliver)。
 
 ## 3. アラートにならない事故
 
+### 3-0. ジョブが失敗した理由を調べる
+
+PR に「レビューに失敗しました」と書かれたら、その末尾にある `event_id` で
+ワーカーのログを検索する。**ジョブが書いたログはすべてこのキーを持っている**。
+
+```bash
+gcloud logging read 'jsonPayload.event_id="github:0f3c…"' --limit 50 --format json
+```
+
+エージェント (opencode) が失敗した場合は `msg="the agent failed"` のレコードが
+1 件あり、そこにすべて揃っている。
+
+| フィールド | 中身 |
+| --- | --- |
+| `cause` | **原因**。opencode 自身のログから、エラーイベントの `ref` で突き合わせたもの |
+| `error_name` / `error_ref` | stdout に出たエラーイベント。メッセージは常に「サーバーログを見よ」なので、`cause` のほうを読む |
+| `notices` | opencode が人向けに出した行。`Session not found`、エージェント定義が無くて既定のエージェントで動いた、など |
+| `problems` | opencode のログの WARN / ERROR 行 (最大 20 行) |
+| `status` / `exit_code` / `timed_out` / `duration` | プロセスの終わり方 |
+| `events` | stdout のイベントを種類ごとに数えたもの。**中身は残さない** (エージェントが読んだコードと書いた文章なので) |
+| `stderr` | stderr の末尾 32 KB |
+
+`cause` が空で `notices` も無いときは、`KIBITZ_OPENCODE_LOG_LEVEL=INFO` か `DEBUG` に
+上げて再実行すると、opencode のログがもっと残る。
+
+> **エージェント定義が見つからないと、opencode は既定のエージェントで黙って動く。**
+> 失敗にはならないので、`msg="the agent reported problems but finished"` の
+> `notices` に `agent "kibitz-…" not found. Falling back to default agent` と
+> 出ていないかを見る。ワーカーのイメージに `deploy/opencode/agents/` が
+> 入っていないと、こうなる。
+
+エージェントは完了したのにレビュー結果のファイルが無い場合は
+`msg="the agent finished without writing its output"` で、`said_instead` に
+エージェントが代わりに書いた文章の末尾 1000 字が入る。
+
 ### 3-1. モデルが応答しない
 
 ジョブは `KIBITZ_MAX_DELIVERIES` 回まで再試行され、そこで諦めて **PR に失敗を

@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/jobcontext"
@@ -58,6 +59,10 @@ type Config struct {
 	EnvPassthrough []string
 	// CustomProvider declares a provider OpenCode's catalog does not list.
 	CustomProvider *CustomProvider
+	// LogLevel is how much of its own log opencode writes to stderr, where the
+	// runner reads it: DEBUG, INFO, WARN or ERROR. Empty means WARN, which is
+	// enough to explain a failure and quiet on success.
+	LogLevel string
 }
 
 // MCP server types.
@@ -269,7 +274,24 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 
 	data, err := os.ReadFile(outputPath) //nolint:gosec // a path this process just built
 	if err != nil {
-		return nil, fmt.Errorf("opencode: the agent did not write %s: %w", outputPathFor(req.Mode), err)
+		// The run succeeded and the document is not there. What the agent
+		// said instead is usually the explanation -- a refusal, a question, a
+		// complaint about a tool -- so the end of it goes in the log. Only the
+		// end, and only in the log: it is the model's text about somebody's
+		// code, and it has no business in an error that reaches a comment.
+		attrs := []slog.Attr{
+			slog.String("mode", string(req.Mode)),
+			slog.String("expected", outputPathFor(req.Mode)),
+			slog.Int("steps", transcript.steps),
+			slog.Int("tool_calls", transcript.tools.Total()),
+			slog.String("said_instead", tail(strings.TrimSpace(transcript.text), 1000)),
+		}
+		if req.Event != nil {
+			attrs = append([]slog.Attr{slog.String("event_id", req.Event.ID)}, attrs...)
+		}
+		r.logger.LogAttrs(ctx, slog.LevelError, "the agent finished without writing its output", attrs...)
+		return nil, fmt.Errorf("opencode: the agent finished without writing %s (%d steps, %d tool calls): %w",
+			outputPathFor(req.Mode), transcript.steps, transcript.tools.Total(), err)
 	}
 
 	if req.Mode == reviewer.ModeTriage {
@@ -327,21 +349,57 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 
 	setupProcessGroup(cmd)
 
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stderr := &tailBuffer{max: maxStderr}
+	cmd.Stderr = stderr
 
+	started := time.Now()
 	stdout, err := cmd.Output()
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	diagnosis := diagnose(stdout, stderr.Bytes(), err, timedOut, time.Since(started))
+
+	attrs := append([]slog.Attr{
+		slog.String("mode", string(req.Mode)),
+		slog.String("agent", args[agentArg(args)]),
+		slog.String("model", r.modelFor(req)),
+		slog.String("session_id", req.SessionID),
+	}, diagnosis.Attrs()...)
+	if req.Event != nil {
+		// The same key the worker's own job log carries, so one search finds
+		// both halves of a failure.
+		attrs = append([]slog.Attr{slog.String("event_id", req.Event.ID)}, attrs...)
+	}
+
 	if err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if len(detail) > 4000 {
-			detail = detail[:4000] + "…"
-		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("opencode: timed out: %s", detail)
-		}
-		return nil, fmt.Errorf("opencode: %w: %s", err, detail)
+		r.logger.LogAttrs(ctx, slog.LevelError, "the agent failed", attrs...)
+		return nil, &RunError{Diagnosis: diagnosis}
+	}
+
+	// A run that succeeded can still have gone wrong in a way that matters:
+	// opencode falls back to its default agent when the one named is missing,
+	// and says so only on stderr. That is a deployment missing a file, and
+	// nothing else would ever mention it.
+	if len(diagnosis.Notices) > 0 || len(diagnosis.Problems) > 0 {
+		r.logger.LogAttrs(ctx, slog.LevelWarn, "the agent reported problems but finished", attrs...)
 	}
 	return stdout, nil
+}
+
+// agentArg is the index of the agent's name in args.
+func agentArg(args []string) int {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--agent" {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// modelFor is the model a request runs on.
+func (r *Runner) modelFor(req reviewer.Request) string {
+	if req.Model != "" {
+		return req.Model
+	}
+	return r.cfg.Model
 }
 
 // outputPathFor is the file the agent writes for this mode. Triage writes its
@@ -391,6 +449,10 @@ func (r *Runner) args(req reviewer.Request) []string {
 		// Permissions are decided in the config file. Without this, any rule
 		// that resolves to "ask" would block forever in a headless run.
 		"--auto",
+		// Its log on stderr, where the runner can read it. Without this the
+		// log goes to a file inside the container and a failure reaches
+		// stdout only as "Unexpected server error. Check server logs".
+		"--print-logs", "--log-level", r.logLevel(),
 	}
 	model := req.Model
 	if model == "" {
@@ -415,6 +477,15 @@ func (r *Runner) args(req reviewer.Request) []string {
 	return args
 }
 
+func (r *Runner) logLevel() string {
+	switch level := strings.ToUpper(strings.TrimSpace(r.cfg.LogLevel)); level {
+	case "DEBUG", "INFO", "WARN", "ERROR":
+		return level
+	default:
+		return "WARN"
+	}
+}
+
 // fullDiff is the whole pull request when the caller narrowed what the prompt
 // carries, and the prompt's own diff otherwise. It is what makes a file triage
 // left out still reachable through a tool.
@@ -423,4 +494,16 @@ func fullDiff(req reviewer.Request) *forge.Diff {
 		return req.FullDiff
 	}
 	return req.Diff
+}
+
+// tail keeps the last n bytes of s without splitting a character.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := len(s) - n
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return "…" + s[cut:]
 }

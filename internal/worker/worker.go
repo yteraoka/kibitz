@@ -81,18 +81,28 @@ func (w *Worker) process(ctx context.Context, msg *queue.Message) error {
 	ev := msg.Event
 	start := time.Now()
 
-	logger := w.logger.With(
+	// On the context rather than on a logger, so that every record the job
+	// writes carries them -- the review, the agent's runner, the guard -- and
+	// not only the two written here. The failure notice on a pull request
+	// tells an operator to search for event_id; that search has to find
+	// everything the job said.
+	scope := []slog.Attr{
 		slog.String("event_id", ev.ID),
 		slog.String("kind", string(ev.Kind)),
 		slog.String("repository", ev.Repository.FullName),
 		slog.String("message_id", msg.ID),
-	)
+	}
 	if ev.PullRequest != nil {
-		logger = logger.With(slog.Int("pull_request", ev.PullRequest.Number))
+		scope = append(scope, slog.Int("pull_request", ev.PullRequest.Number))
+	}
+	if ev.Issue != nil {
+		scope = append(scope, slog.Int("issue", ev.Issue.Number))
 	}
 	if msg.Deliveries > 1 {
-		logger = logger.With(slog.Int("delivery", msg.Deliveries))
+		scope = append(scope, slog.Int("delivery", msg.Deliveries))
 	}
+	ctx = telemetry.WithLogAttrs(ctx, scope...)
+	logger := w.logger
 
 	// A job that outlives its timeout is worse than a failed one: it holds a
 	// lease the queue will eventually take back and redeliver, so two copies

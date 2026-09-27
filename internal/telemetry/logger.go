@@ -57,11 +57,53 @@ func (h *redactHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 func (h *redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	clone := slog.NewRecord(r.Time, r.Level, Redact(r.Message), r.PC)
+	var seen map[string]bool
+	scoped := ContextAttrs(ctx)
+	if len(scoped) > 0 {
+		seen = make(map[string]bool, r.NumAttrs())
+	}
 	r.Attrs(func(a slog.Attr) bool {
+		if seen != nil {
+			seen[a.Key] = true
+		}
 		clone.AddAttrs(redactAttr(a))
 		return true
 	})
+	// A record that names a key itself keeps its own value: the call site
+	// knows better than the context what it is talking about.
+	for _, a := range scoped {
+		if !seen[a.Key] {
+			clone.AddAttrs(redactAttr(a))
+		}
+	}
 	return h.inner.Handle(ctx, clone)
+}
+
+type contextAttrsKey struct{}
+
+// WithLogAttrs returns a context whose log records all carry attrs.
+//
+// It is how one job's records come to share a key. The worker puts the event
+// id here when it takes a message off the queue, and every record written
+// with that context -- by the job, by the agent's runner, by the guard --
+// carries it, without each of them having to remember to. The failure notice
+// on a pull request tells an operator to search for that key, which is only
+// useful if it finds everything.
+func WithLogAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
+	prev := ContextAttrs(ctx)
+	merged := make([]slog.Attr, 0, len(prev)+len(attrs))
+	merged = append(merged, prev...)
+	merged = append(merged, attrs...)
+	return context.WithValue(ctx, contextAttrsKey{}, merged)
+}
+
+// ContextAttrs returns the attributes [WithLogAttrs] attached to ctx.
+func ContextAttrs(ctx context.Context) []slog.Attr {
+	if ctx == nil {
+		return nil
+	}
+	attrs, _ := ctx.Value(contextAttrsKey{}).([]slog.Attr)
+	return attrs
 }
 
 func (h *redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

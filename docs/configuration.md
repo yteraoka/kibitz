@@ -80,6 +80,7 @@
 | `KIBITZ_OPENCODE_PLAN_AGENT` | `kibitz-plan` | 計画用エージェント定義名 (`/kibitz plan`)。読み取りのみの権限で動く |
 | `KIBITZ_MAX_DIFF_LINES` | `10000` | この行数を超えたら triage パスでレビュー対象を選抜する。0 で無効 ([worker.md](worker.md#巨大な-pr-の-triage)) |
 | `KIBITZ_OPENCODE_TRIAGE_AGENT` | `kibitz-triage` | 選抜用エージェント定義名 |
+| `KIBITZ_OPENCODE_LOG_LEVEL` | `WARN` | opencode 自身のログをどこまでワーカーのログに残すか (`DEBUG` / `INFO` / `WARN` / `ERROR`)。失敗の原因はこのログにしか書かれない ([runbook §3-0](runbook.md#3-0-ジョブが失敗した理由を調べる)) |
 | `KIBITZ_REFERENCE_DOCS` | `docs/adr/**/*.md,docs/decisions/**/*.md,adr/**/*.md` | 設計文書 (ADR) の場所。索引をプロンプトに載せ、本文はツールで読ませる。`off` で無効 (下記) |
 | `KIBITZ_REPO_GUIDELINE_FILES` | `AGENTS.md,.kibitz/guidelines.md` | リポジトリの規約ファイル。**デフォルトブランチ側から**読む。`off` で無効 (下記) |
 | `KIBITZ_MCP_CONTEXT_BIN` | `kibitz-mcp` | kibitz 自身の MCP サーバーのパス。`off` で無効 |
