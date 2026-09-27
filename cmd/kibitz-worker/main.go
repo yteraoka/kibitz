@@ -320,6 +320,7 @@ func newReviewJob(cfg *config.Worker, logger *slog.Logger, state store.Store, me
 		Model:          cfg.OpenCode.Model,
 		ReviewAgent:    cfg.OpenCode.ReviewAgent,
 		AnswerAgent:    cfg.OpenCode.AnswerAgent,
+		PlanAgent:      cfg.OpenCode.PlanAgent,
 		TriageAgent:    cfg.OpenCode.TriageAgent,
 		Env:            agentEnv(cfg, logger),
 		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
