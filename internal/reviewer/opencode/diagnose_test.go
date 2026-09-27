@@ -260,3 +260,31 @@ func testRequest(workspace string) reviewer.Request {
 		HeadSHA: "abc1234",
 	}
 }
+
+// Gemini ended a turn with a reason opencode does not know, opencode asked
+// again with the model's turn last, and Vertex AI refused. Captured from the
+// pinned binary against a server answering as Gemini does, with finishReason
+// OTHER; the log lines are the ones production wrote.
+func TestAModelTurnThatBrokeOffIsRecognized(t *testing.T) {
+	stdout, stderr := fixture(t, "modelturn")
+	d := diagnose(stdout, stderr, exitError(t, "1"), false, time.Second)
+
+	if !d.EndedOnModelTurn() {
+		t.Fatalf("EndedOnModelTurn() = false for %q / %q", d.ErrorMessage, d.Cause)
+	}
+	if d.Finish != "unknown" {
+		t.Errorf("Finish = %q, want unknown", d.Finish)
+	}
+	if !strings.HasPrefix(d.SessionID, "ses_") {
+		t.Errorf("SessionID = %q, want the session the run was in", d.SessionID)
+	}
+}
+
+func TestOtherFailuresAreNotTakenForABrokenTurn(t *testing.T) {
+	for _, name := range []string{"badmodel", "nocreds", "nosession", "noagent"} {
+		stdout, stderr := fixture(t, name)
+		if d := diagnose(stdout, stderr, exitError(t, "1"), false, time.Second); d.EndedOnModelTurn() {
+			t.Errorf("%s was taken for a broken turn", name)
+		}
+	}
+}

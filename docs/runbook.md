@@ -182,6 +182,7 @@ gcloud logging read 'jsonPayload.event_id="github:0f3c…"' --limit 50 --format 
 | `notices` | opencode が人向けに出した行。`Session not found`、エージェント定義が無くて既定のエージェントで動いた、など |
 | `problems` | opencode のログの WARN / ERROR 行 (最大 20 行) |
 | `status` / `exit_code` / `timed_out` / `duration` | プロセスの終わり方 |
+| `finish` | 最後のステップをモデルがどう終えたか (`stop` / `tool-calls` / `unknown` など)。`unknown` は下の「途中で打ち切られた応答」 |
 | `events` | stdout のイベントを種類ごとに数えたもの。**中身は残さない** (エージェントが読んだコードと書いた文章なので) |
 | `stderr` | stderr の末尾 32 KB |
 
@@ -194,6 +195,20 @@ gcloud logging read 'jsonPayload.event_id="github:0f3c…"' --limit 50 --format 
 > 出ていないかを見る。ワーカーのイメージに `deploy/opencode/agents/` が
 > 入っていないと、こうなる。
 
+> **`Requests ending with a model turn are not supported.` は自動で立て直す。**
+> Gemini が opencode の知らない理由 (`OTHER`、`UNEXPECTED_TOOL_CALL`、
+> `TOO_MANY_TOOL_CALLS` など) で応答を終えると、opencode はそれを `unknown` と
+> 記録し、**何も足さずにもう一度問い合わせる**。その要求は最後がモデル自身の
+> 発言になっていて、Vertex AI に拒否される。opencode 側の問題で、kibitz からは
+> 直せない。
+>
+> kibitz はこの失敗だけを見分けて、**同じセッションに「続けて」と送り直す** (最大 2 回)。
+> それまでの作業はセッションに残っているので、最初からやり直すより安い。
+> 立て直したときは `msg="the model stopped for a reason opencode does not handle; resuming the session"`
+> が WARN で出る。直前の `the agent failed` は立て直しの前の記録なので、
+> 続けて成功していれば対応は不要。2 回とも失敗したらジョブの失敗になり、
+> ジョブごと再試行される。
+
 エージェントは完了したのにレビュー結果のファイルが無い場合は
 `msg="the agent finished without writing its output"` で、`said_instead` に
 エージェントが代わりに書いた文章の末尾 1000 字が入る。
@@ -203,8 +218,8 @@ gcloud logging read 'jsonPayload.event_id="github:0f3c…"' --limit 50 --format 
 ジョブは `KIBITZ_MAX_DELIVERIES` 回まで再試行され、そこで諦めて **PR に失敗を
 書く**。黙って消えることはない。
 
-`KIBITZ_MODEL_FALLBACK` を設定していれば代替モデルに切り替わる。設定していない
-場合、暫定対応は `KIBITZ_MODEL` の差し替え。
+暫定対応は `KIBITZ_MODEL` の差し替え。`KIBITZ_MODEL_FALLBACK` は読み込まれるが、
+**まだどこでも使われていない** (代替モデルへの自動切り替えは未実装)。
 
 ### 3-2. 同じ PR にコメントが増え続ける
 
