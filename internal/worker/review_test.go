@@ -31,8 +31,10 @@ type fakeForge struct {
 	prErr     error
 	reviewErr error
 
-	summaries  []string
-	markers    []string
+	summaries []string
+	markers   []string
+	// progress are the "reviewing" notices, in the order they were written.
+	progress   []string
 	reviews    []forge.Review
 	replies    []string
 	compared   []string
@@ -88,6 +90,15 @@ func (f *fakeForge) CreateReview(_ context.Context, _ forge.PRRef, r forge.Revie
 }
 
 func (f *fakeForge) UpsertSummary(_ context.Context, _ forge.PRRef, marker, body string) error {
+	// The "reviewing" notice is the summary comment in its first state, not a
+	// comment of its own, and it does not count towards the posting limit.
+	// It is kept apart so that what the tests call the summary is what the
+	// comment ends up saying. The tests that check a skipped review posts
+	// nothing check this list too (see TestASkippedReviewDoesNotAnnounce).
+	if strings.Contains(body, "🔄 レビュー中") {
+		f.progress = append(f.progress, body)
+		return nil
+	}
 	f.summaries = append(f.summaries, body)
 	f.markers = append(f.markers, marker)
 	return nil

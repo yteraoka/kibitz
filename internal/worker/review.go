@@ -126,6 +126,7 @@ type ReviewJob struct {
 // Handle implements [Handler].
 func (j *ReviewJob) Handle(ctx context.Context, job *Job) error {
 	ev := job.Event
+	ctx = withAttempt(ctx, job.Deliveries)
 	client, ok := j.Forges[ev.Source.Platform]
 	if !ok {
 		// Acknowledged rather than retried: a platform this build cannot talk
@@ -277,6 +278,29 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	// against, so a comment can never land outside it.
 	changed, since := j.incremental(ctx, client, ref, ev, diff, pr.Source.SHA)
 
+	// The posting limit is checked here, before anything expensive, rather
+	// than just before posting as it used to be. Checked late, a review over
+	// the limit ran the model to the end and threw the result away -- and
+	// with the "reviewing" notice below, it would also have left that notice
+	// up for good, because the summary that replaces it would never be
+	// written.
+	allowed, err := j.allowPost(ctx, ev)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		// The last line of defence against a comment loop, so it is loud
+		// rather than silent.
+		j.Logger.LogAttrs(ctx, slog.LevelError, "posting limit reached; not reviewing",
+			slog.String("ref", ref.String()),
+		)
+		return nil
+	}
+
+	// Every reason not to review has been ruled out and nothing expensive has
+	// happened yet: this is where the pull request is told.
+	j.announce(ctx, client, ref, scope{head: pr.Source.SHA, since: since, files: len(changed.Files)})
+
 	// Existing comments are context, not a hard requirement: failing the whole
 	// review because they could not be listed would be worse than repeating a
 	// point someone already made.
@@ -384,7 +408,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	ctx, postSpan := telemetry.Tracer().Start(ctx, "review.post",
 		trace.WithAttributes(telemetry.AttrFindings.Int(len(sanitized.Findings))))
 	defer postSpan.End()
-	return j.post(ctx, client, ref, ev, result, sanitized, ws.HeadSHA, since, selection, settings)
+	return j.post(ctx, client, ref, result, sanitized, ws.HeadSHA, since, selection, settings)
 }
 
 // incremental narrows the diff to what has been pushed since the last review,
@@ -580,21 +604,10 @@ func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, 
 }
 
 // post writes the review back to the pull request: one summary comment that is
-// replaced on every run, plus the findings as one review.
-func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged, settings resolved) error {
-	allowed, err := j.allowPost(ctx, ev)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		// Refusing to post is the last line of defence against a comment
-		// loop, so it is loud rather than silent.
-		j.Logger.LogAttrs(ctx, slog.LevelError, "posting limit reached; not writing to the pull request",
-			slog.String("ref", ref.String()),
-		)
-		return nil
-	}
-
+// replaced on every run, plus the findings as one review. The posting limit
+// was checked when the review started (see review), so that a review over it
+// never ran.
+func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged, settings resolved) error {
 	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings)); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
@@ -613,7 +626,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 		})
 	}
 
-	err = client.CreateReview(ctx, ref, review)
+	err := client.CreateReview(ctx, ref, review)
 	if err == nil {
 		return nil
 	}
@@ -666,6 +679,13 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	client, ok := j.Forges[ev.Source.Platform]
 	if !ok || ev.PullRequest == nil {
 		return nil
+	}
+
+	// A review said it had started in the summary comment, and that comment
+	// has to stop saying so. Anything else keeps its own notice, because it
+	// never touched the summary and must not replace it.
+	if isReview(ev) {
+		return client.UpsertSummary(ctx, forge.RefOf(ev), SummaryMarker, j.failedBody(ev, cause))
 	}
 
 	var b strings.Builder
