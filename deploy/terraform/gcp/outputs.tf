@@ -50,6 +50,15 @@ output "azure_devops_secret_names" {
   } : {}) : {}
 }
 
+output "sandbox" {
+  description = "Where a repository's build and tests run, or empty when implement mode is off. The runner's service account holds nothing but this bucket, which is the point."
+  value = var.implement_enabled ? {
+    bucket          = google_storage_bucket.sandbox[0].name
+    job             = google_cloud_run_v2_job.runner[0].name
+    service_account = google_service_account.runner[0].email
+  } : {}
+}
+
 output "service_accounts" {
   description = "Identities the two components run as."
   value = {

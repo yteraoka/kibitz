@@ -174,7 +174,9 @@ DLQ に入るメッセージの種類の明確化 ([queue.md](queue.md))、失�
 - `forge.Writer` — ブランチ作成 / push / PR 作成 (GitHub → GitLab → Azure DevOps の順)
 - `kibitz-plan` エージェント **(完了)** — 計画だけを書く。読み取りのみの権限なのでサンドボックス不要
 - `kibitz-implement` エージェントと、編集パス・実行コマンドのホワイトリスト権限
-- 使い捨てサンドボックスでのビルド・テスト実行 (gVisor / Firecracker / 専用ノード)
+- ビルド・テストを**資格情報を持たない別の Cloud Run ジョブ**で実行 **(完了 — `kibitz-runner`、[ADR-0019](adr/0019-run-repository-code-in-a-credential-less-job.md))**。
+  gVisor / Firecracker は GKE を意味し ADR-0014 に反するため採らなかった
+  (Cloud Run 自体が gVisor 上で動くのでホスト分離は済んでいる)
 - 生成物は常に draft PR。元 Issue へのリンク、実行コマンドと結果を本文に明記
 - 指示者の限定 (`implement.allowed_actors`) **(完了)**、実行回数・トークンの上限
 - CI 設定・`.kibitz.yaml`・依存定義ファイルの編集禁止 **(完了 — 設定不可の固定リスト)**

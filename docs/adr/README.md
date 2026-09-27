@@ -29,6 +29,7 @@ kibitz が**なぜそう作られているか**の記録。
 | [0016](0016-kibitz-mcp-holds-no-credential.md) | kibitz-mcp に資格情報を持たせない | 採用 |
 | [0017](0017-index-decision-records-serve-bodies-as-tools.md) | 設計文書は索引をプロンプトに載せ、本文はツールで読ませる | 採用 |
 | [0018](0018-measure-whether-the-index-is-used.md) | 索引が使われたかを計測し、ツール名はエンジンの呼び方のまま記録する | 採用 |
+| [0019](0019-run-repository-code-in-a-credential-less-job.md) | リポジトリのコードは、資格情報を持たない別ジョブで実行する | 採用 |
 
 **[ADR-0010](0010-data-and-instruction-positions.md) が中核**で、
 0011・0015・0016・0017 はいずれもその原則を各所に適用した結果になっている。
