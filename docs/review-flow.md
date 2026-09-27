@@ -35,6 +35,9 @@ sequenceDiagram
         Server->>Queue: publish、ordering key は PR 単位
         Server-)Scaler: Wake、インスタンス数 0 からの起動を促す
         Server-->>Forge: 202 Accepted
+        opt コメントだった
+            Server->>Forge: 👀 リアクション、受け取った合図
+        end
     end
 
     Queue->>Worker: 配送、at-least-once
@@ -88,7 +91,10 @@ sequenceDiagram
     alt publish 失敗
         R-->>Forge: 503、Forge 側の再送とログに残す
     else
-        R-->>Forge: 202
+        R-->>Forge: 202、Content-Length 0 で flush
+        opt コメントで、そのプラットフォームの資格情報がある
+            R->>Forge: React、👀 か like。既定 3 秒で打ち切り、失敗しても配送は成功のまま
+        end
     end
 ```
 
@@ -98,6 +104,12 @@ sequenceDiagram
 
 publish 失敗に 503 を返すのは、**GitHub が自動で再送しないから**。
 せめて hook の delivery log に失敗として残し、手動の Redeliver ができるようにする。
+
+リアクションは **202 を返して flush したあと**に付ける。forge を待たせないためで、
+goroutine に逃がさないのは、応答を返したあとのインスタンスに Cloud Run が CPU を
+割り当て続ける保証が無いから。これがサーバーが forge に書く唯一のもので、
+そのために持つ資格情報と、それを絞る範囲は
+[ADR-0020](adr/0020-the-server-reacts-at-receipt.md) にある。
 
 ## 3. ワーカー側 — Guard
 

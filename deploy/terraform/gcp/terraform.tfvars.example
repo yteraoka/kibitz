@@ -45,6 +45,13 @@ trigger_keywords = []
 # 上限を決めるためのもの。burst で webhook が弾かれるようなら上げる。
 server_max_instances = 1
 
+# コメントで kibitz に頼まれたら、受信した時点でそのコメントに 👀 を付ける。
+# そのために server も forge の資格情報 (GitHub App の秘密鍵など) を持つ。
+# GitHub ではトークンを issues / pull_requests の書き込みだけに絞るので push は
+# できないが、秘密鍵そのものは絞れない。server に資格情報を一切持たせたくない
+# なら false (docs/adr/0020-the-server-reacts-at-receipt.md)。
+server_reactions = true
+
 # worker のインスタンス数は Pub/Sub のバックログから決まる。0 は「キューが空なら
 # 何も動かさない」で、これが既定。常時 1 台温めておきたい場合だけ 1 にする。
 worker_min_instances         = 0

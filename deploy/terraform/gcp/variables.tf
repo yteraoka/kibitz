@@ -200,6 +200,22 @@ variable "github_installation_id" {
   type        = string
 }
 
+variable "server_reactions" {
+  description = <<-EOT
+    React to a comment that asked kibitz for something the moment the server
+    has queued it, so the person who wrote it knows at once that it was
+    heard.
+
+    This gives the server, which is on the public internet, the same forge
+    credentials the worker has. On GitHub the tokens it mints are narrowed to
+    issues and pull requests, so a token taken from it cannot push; the App's
+    private key itself cannot be narrowed. Set false to keep the server
+    without any forge credential (ADR-0020).
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "worker_concurrency" {
   description = "Reviews one worker instance runs at once. It also bounds how many messages it leases."
   type        = number
@@ -396,6 +412,14 @@ variable "server_env" {
       "KIBITZ_SCALE_BACKEND",
       "KIBITZ_SCALE_REGION",
       "KIBITZ_SCALE_WORKER_POOL",
+      "KIBITZ_REACTIONS",
+      "KIBITZ_GITHUB_INSTALLATION_ID",
+      "KIBITZ_GITHUB_PRIVATE_KEY",
+      "KIBITZ_GITLAB_BASE_URL",
+      "KIBITZ_GITLAB_TOKEN",
+      "KIBITZ_AZDO_ORG_URL",
+      "KIBITZ_AZDO_TOKEN",
+      "KIBITZ_AZDO_TOKEN_IS_BEARER",
     ])) == 0
     error_message = "server_env may not set a variable this configuration already sets; use the variable for it instead."
   }

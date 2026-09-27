@@ -47,7 +47,9 @@ resource "google_secret_manager_secret_iam_member" "worker_model_api_key" {
 }
 
 # The server verifies webhooks, so it reads the webhook secrets; the worker
-# calls the API, so it reads the App key. Neither reads the other's.
+# calls the API, so it reads the App key. The worker never reads the webhook
+# secrets. The server reads the App key only to react to comments, and only
+# with server_reactions on (ADR-0020).
 resource "google_secret_manager_secret_iam_member" "server_webhook" {
   secret_id = google_secret_manager_secret.github_webhook.id
   role      = "roles/secretmanager.secretAccessor"
@@ -58,4 +60,12 @@ resource "google_secret_manager_secret_iam_member" "worker_private_key" {
   secret_id = google_secret_manager_secret.github_private_key.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.worker.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "server_private_key" {
+  count = var.server_reactions ? 1 : 0
+
+  secret_id = google_secret_manager_secret.github_private_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.server.email}"
 }

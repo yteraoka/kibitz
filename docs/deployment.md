@@ -128,7 +128,7 @@ App の所有者によって作成ページが違う。**所有者は後から�
 | --- | --- | --- |
 | Contents | Read-only | PR のコードを clone する |
 | Pull requests | Read and write | 差分の取得、レビューとコメントの投稿 |
-| Issues | Read and write | PR のコメント (GitHub では PR も issue として扱われる) |
+| Issues | Read and write | PR のコメント (GitHub では PR も issue として扱われる)。受信時のリアクションもこれと Pull requests で付ける ([ADR-0020](adr/0020-the-server-reacts-at-receipt.md)) |
 | Metadata | Read-only | 必須 (自動で付く) |
 
 **Subscribe to events**

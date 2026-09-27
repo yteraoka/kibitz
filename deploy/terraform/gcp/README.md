@@ -74,8 +74,11 @@ progress.
 GitHub is always wired. The other two are off by default and turned on with
 `gitlab_enabled` and `azure_devops_enabled`, which create that platform's
 secrets and grant each service account exactly what it needs — the server
-verifies deliveries, the worker calls the API, and neither reads the other's
-credential.
+verifies deliveries and the worker calls the API. The worker never reads the
+delivery credentials. With `server_reactions` on (the default) the server
+also reads the API credentials, to put a reaction on a comment the moment it
+is queued; set it to `false` to keep the server without any
+([ADR-0020](../../../docs/adr/0020-the-server-reacts-at-receipt.md)).
 
 `terraform output gitlab_secret_names` and `azure_devops_secret_names` print
 what to fill in with `gcloud secrets versions add`. They come back empty when

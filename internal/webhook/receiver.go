@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/event"
+	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/httpx"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue"
@@ -35,6 +36,8 @@ type Receiver struct {
 	now             func() time.Time
 	metrics         *telemetry.Metrics
 	waker           Waker
+	reactor         forge.Reactor
+	reactTimeout    time.Duration
 }
 
 // Waker is told that something was queued. On a platform where the worker has
@@ -104,6 +107,7 @@ func NewReceiver(h Handler, pub queue.Publisher, pol *policy.Engine, logger *slo
 		publishTimeout:  5 * time.Second,
 		publishAttempts: 3,
 		publishBackoff:  50 * time.Millisecond,
+		reactTimeout:    3 * time.Second,
 		now:             time.Now,
 	}
 	for _, opt := range opts {
@@ -203,7 +207,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.String("message_id", msgID),
 		)...,
 	)
-	w.WriteHeader(http.StatusAccepted)
+	rc.answerAndReact(w, r, ev)
 }
 
 func (rc *Receiver) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {

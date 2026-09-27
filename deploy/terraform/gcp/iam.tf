@@ -1,6 +1,8 @@
 # One identity per component: the server may publish and read its webhook
 # secrets, the worker may consume, write state, call Vertex AI and read the
-# GitHub App key. Neither can do the other's job.
+# GitHub App key. Neither can do the other's job. The one overlap is the forge
+# credentials, which the server also reads -- to react to a comment at
+# receipt, and only with server_reactions on (ADR-0020).
 
 resource "google_service_account" "server" {
   account_id   = "${var.name_prefix}-server"

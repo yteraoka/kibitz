@@ -257,6 +257,68 @@ func (a AzureDevOpsAuth) Configured() bool {
 	return a.Token != "" && a.OrganizationURL != ""
 }
 
+// Forges holds the credentials for each platform kibitz talks to. A platform
+// with none is one kibitz does not call.
+type Forges struct {
+	GitHub      GitHubApp
+	GitLab      GitLabAuth
+	AzureDevOps AzureDevOpsAuth
+}
+
+// loadForges reads the forge credentials. The worker and the server read the
+// same variables, so a deployment configures each credential once.
+func loadForges(l *loader) Forges {
+	return Forges{
+		GitHub: GitHubApp{
+			AppID:          l.int64("KIBITZ_GITHUB_APP_ID", 0),
+			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),
+			PrivateKey:     l.secret("KIBITZ_GITHUB_PRIVATE_KEY"),
+			BaseURL:        l.str("KIBITZ_GITHUB_BASE_URL", ""),
+		},
+		GitLab: GitLabAuth{
+			BaseURL: l.str("KIBITZ_GITLAB_BASE_URL", ""),
+			Token:   l.secret("KIBITZ_GITLAB_TOKEN"),
+		},
+		AzureDevOps: AzureDevOpsAuth{
+			OrganizationURL: l.str("KIBITZ_AZDO_ORG_URL", ""),
+			Token:           l.secret("KIBITZ_AZDO_TOKEN"),
+			TokenIsBearer:   l.bool("KIBITZ_AZDO_TOKEN_IS_BEARER", false),
+		},
+	}
+}
+
+// requireForges refuses half a credential, which would otherwise fail at the
+// first API call instead of at startup.
+func requireForges(l *loader, f Forges) {
+	// A GitHub App is either fully configured or not configured at all.
+	if f.GitHub.AppID != 0 || f.GitHub.PrivateKey != "" {
+		l.requireIf(f.GitHub.AppID == 0, "KIBITZ_GITHUB_APP_ID", "", "when a GitHub App private key is set")
+		l.requireIf(f.GitHub.PrivateKey == "", "KIBITZ_GITHUB_PRIVATE_KEY", "", "when a GitHub App ID is set")
+	}
+
+	// Azure DevOps needs both halves. A token with no instance has nothing to
+	// authenticate against, and an instance with no token cannot be read.
+	if f.AzureDevOps.OrganizationURL != "" || f.AzureDevOps.Token != "" {
+		l.requireIf(f.AzureDevOps.OrganizationURL == "", "KIBITZ_AZDO_ORG_URL", "", "when an Azure DevOps token is set")
+		l.requireIf(f.AzureDevOps.Token == "", "KIBITZ_AZDO_TOKEN", "", "when an Azure DevOps organization URL is set")
+	}
+}
+
+// Reactions configures the reaction the server puts on a comment the moment
+// it has queued the work the comment asked for (ADR-0020).
+type Reactions struct {
+	// Enabled switches the reaction on. It takes effect only for the
+	// platforms Forges has a credential for.
+	Enabled bool
+	// Timeout bounds one reaction. The forge already has its answer by then,
+	// but the request is held open until the reaction returns.
+	Timeout time.Duration
+	// Forges are the credentials the reaction is made with. On GitHub the
+	// token is narrowed to what a reaction needs; see ADR-0020 for what that
+	// does and does not protect.
+	Forges
+}
+
 // Vertex holds the Google Cloud settings OpenCode needs to reach Vertex AI.
 // Authentication is ADC (Workload Identity), so there is no key.
 type Vertex struct {
@@ -359,6 +421,8 @@ type Server struct {
 	// Scale lets the server start the worker the moment it publishes,
 	// instead of leaving it to wait for the next metrics sample.
 	Scale Scale
+	// Reactions acknowledges a comment at receipt.
+	Reactions Reactions
 }
 
 // Worker is the kibitz-worker configuration.
@@ -386,10 +450,9 @@ type Worker struct {
 	// ReferenceDocs are glob patterns for the repository's decision records,
 	// indexed from the checkout so the agent knows what it can consult. Nil
 	// uses the built-in list; "off" indexes none.
-	ReferenceDocs    []string
-	GitHub           GitHubApp
-	GitLab           GitLabAuth
-	AzureDevOps      AzureDevOpsAuth
+	ReferenceDocs []string
+	// Forges are the credentials the worker reads and writes with.
+	Forges
 	ImplementEnabled bool
 	// Implement configures the mode that writes code. None of it does anything
 	// unless ImplementEnabled is set.
@@ -449,6 +512,14 @@ func LoadServer(env Lookup) (*Server, error) {
 			MaxEventAge:  l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
 		},
 		Scale: loadScale(l),
+		Reactions: Reactions{
+			Enabled: l.bool("KIBITZ_REACTIONS", true),
+			Timeout: l.duration("KIBITZ_REACTION_TIMEOUT", 3*time.Second),
+		},
+	}
+	if cfg.Reactions.Enabled {
+		cfg.Reactions.Forges = loadForges(l)
+		requireForges(l, cfg.Reactions.Forges)
 	}
 
 	if cfg.MetricsAddr == "off" {
@@ -517,25 +588,11 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			CloneDepth:   l.positiveInt("KIBITZ_CLONE_DEPTH", 50),
 			MinSeverity:  l.enum("KIBITZ_MIN_SEVERITY", "medium", "critical", "high", "medium", "low", "info"),
 		},
-		MCPServers:     l.str("KIBITZ_MCP_SERVERS", ""),
-		MCPAllowlist:   l.list("KIBITZ_MCP_ALLOWLIST", nil),
-		GuidelineFiles: l.list("KIBITZ_REPO_GUIDELINE_FILES", nil),
-		ReferenceDocs:  l.list("KIBITZ_REFERENCE_DOCS", nil),
-		GitHub: GitHubApp{
-			AppID:          l.int64("KIBITZ_GITHUB_APP_ID", 0),
-			InstallationID: l.int64("KIBITZ_GITHUB_INSTALLATION_ID", 0),
-			PrivateKey:     l.secret("KIBITZ_GITHUB_PRIVATE_KEY"),
-			BaseURL:        l.str("KIBITZ_GITHUB_BASE_URL", ""),
-		},
-		GitLab: GitLabAuth{
-			BaseURL: l.str("KIBITZ_GITLAB_BASE_URL", ""),
-			Token:   l.secret("KIBITZ_GITLAB_TOKEN"),
-		},
-		AzureDevOps: AzureDevOpsAuth{
-			OrganizationURL: l.str("KIBITZ_AZDO_ORG_URL", ""),
-			Token:           l.secret("KIBITZ_AZDO_TOKEN"),
-			TokenIsBearer:   l.bool("KIBITZ_AZDO_TOKEN_IS_BEARER", false),
-		},
+		MCPServers:       l.str("KIBITZ_MCP_SERVERS", ""),
+		MCPAllowlist:     l.list("KIBITZ_MCP_ALLOWLIST", nil),
+		GuidelineFiles:   l.list("KIBITZ_REPO_GUIDELINE_FILES", nil),
+		ReferenceDocs:    l.list("KIBITZ_REFERENCE_DOCS", nil),
+		Forges:           loadForges(l),
 		ImplementEnabled: l.bool("KIBITZ_IMPLEMENT_ENABLED", false),
 		Implement: Implement{
 			SandboxLocation:  l.str("KIBITZ_SANDBOX_LOCATION", ""),
@@ -555,20 +612,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		BotLogins:       l.list("KIBITZ_BOT_LOGINS", nil),
 	}
 
-	// A GitHub App is either fully configured or not configured at all; half of
-	// one fails at the first API call instead of at startup.
-	if cfg.GitHub.AppID != 0 || cfg.GitHub.PrivateKey != "" {
-		l.requireIf(cfg.GitHub.AppID == 0, "KIBITZ_GITHUB_APP_ID", "", "when a GitHub App private key is set")
-		l.requireIf(cfg.GitHub.PrivateKey == "", "KIBITZ_GITHUB_PRIVATE_KEY", "", "when a GitHub App ID is set")
-	}
-
-	// Azure DevOps needs both halves. A token with no instance has nothing to
-	// authenticate against, and an instance with no token cannot be read;
-	// either on its own fails at the first API call rather than at startup.
-	if cfg.AzureDevOps.OrganizationURL != "" || cfg.AzureDevOps.Token != "" {
-		l.requireIf(cfg.AzureDevOps.OrganizationURL == "", "KIBITZ_AZDO_ORG_URL", "", "when an Azure DevOps token is set")
-		l.requireIf(cfg.AzureDevOps.Token == "", "KIBITZ_AZDO_TOKEN", "", "when an Azure DevOps organization URL is set")
-	}
+	requireForges(l, cfg.Forges)
 
 	if err := errors.Join(l.errs...); err != nil {
 		return nil, err

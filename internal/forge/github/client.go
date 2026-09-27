@@ -39,6 +39,11 @@ type Config struct {
 	BaseURL string
 	// MaxFiles bounds how many changed files are fetched. Zero means 300.
 	MaxFiles int
+	// Permissions narrows the installation tokens this client mints, as
+	// GitHub's access_tokens endpoint accepts them -- {"issues": "write"}.
+	// Nil means everything the app was granted. The webhook server sets it:
+	// the tokens it holds can react to a comment and cannot push a commit.
+	Permissions map[string]string
 }
 
 // Client talks to the GitHub REST API.
@@ -93,6 +98,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 			baseURL:        baseURL,
 			httpClient:     httpClient,
 			now:            time.Now,
+			permissions:    cfg.Permissions,
 		},
 		http:     httpClient,
 		baseURL:  baseURL,
