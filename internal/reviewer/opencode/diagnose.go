@@ -65,6 +65,14 @@ type Diagnosis struct {
 	// Problems are the warnings and errors from its log.
 	Problems []string
 
+	// SessionID is the session the run was in. A run that broke off can be
+	// resumed in it.
+	SessionID string
+	// Finish is how the model ended its last step, as opencode recorded it:
+	// "stop", "tool-calls", "unknown". "unknown" is the one to look for; see
+	// [Diagnosis.EndedOnModelTurn].
+	Finish string
+
 	// Events counts the event stream by type. It is a count and not the
 	// stream itself: the stream carries the code the agent read and the text
 	// it wrote, which belong to the repository and not in a log.
@@ -130,6 +138,7 @@ func (d *Diagnosis) Attrs() []slog.Attr {
 	add("error_message", d.ErrorMessage)
 	add("error_ref", d.ErrorRef)
 	add("cause", d.Cause)
+	add("finish", d.Finish)
 	if len(d.Notices) > 0 {
 		attrs = append(attrs, slog.Any("notices", d.Notices))
 	}
@@ -143,10 +152,35 @@ func (d *Diagnosis) Attrs() []slog.Attr {
 	return attrs
 }
 
+// modelTurn is how Gemini refuses a request whose history ends with its own
+// turn.
+const modelTurn = "ending with a model turn"
+
+// EndedOnModelTurn reports the one failure that is opencode's own doing and
+// that resuming the session gets past.
+//
+// Gemini ends some turns with a reason the AI SDK does not know -- OTHER,
+// FINISH_REASON_UNSPECIFIED, UNEXPECTED_TOOL_CALL, TOO_MANY_TOOL_CALLS --
+// and opencode records every such turn as "unknown", which it treats like a
+// tool call: it asks again. Nothing was added to the conversation in
+// between, so the request it sends ends with the model's own turn, and
+// Vertex AI refuses it. Reproduced against the pinned version with a server
+// answering as Gemini does; STOP, MAX_TOKENS, SAFETY and
+// MALFORMED_FUNCTION_CALL do not do it.
+//
+// The session is intact up to the turn that broke off. A new message from
+// the user is all the request lacked.
+func (d *Diagnosis) EndedOnModelTurn() bool {
+	return strings.Contains(strings.ToLower(d.ErrorMessage+"\n"+d.Cause), modelTurn)
+}
+
 // RunError is a run of the agent that failed. Its message is the summary; the
 // rest is in Diagnosis, for the log.
 type RunError struct {
 	Diagnosis *Diagnosis
+	// stdout is what the run wrote before it failed. It is kept so the
+	// tokens it spent are still counted when the run is resumed.
+	stdout []byte
 }
 
 func (e *RunError) Error() string { return "opencode: " + e.Diagnosis.Summary() }
@@ -183,7 +217,12 @@ func (d *Diagnosis) readEvents(stdout []byte) {
 			continue
 		}
 		var ev struct {
-			Type  string `json:"type"`
+			Type      string `json:"type"`
+			SessionID string `json:"sessionID"`
+			Part      *struct {
+				Type   string `json:"type"`
+				Reason string `json:"reason"`
+			} `json:"part"`
 			Error *struct {
 				Name string `json:"name"`
 				Data struct {
@@ -199,6 +238,12 @@ func (d *Diagnosis) readEvents(stdout []byte) {
 			d.Events = map[string]int{}
 		}
 		d.Events[ev.Type]++
+		if ev.SessionID != "" {
+			d.SessionID = ev.SessionID
+		}
+		if ev.Part != nil && ev.Part.Type == "step-finish" && ev.Part.Reason != "" {
+			d.Finish = ev.Part.Reason
+		}
 		if ev.Type == "error" && ev.Error != nil {
 			// The last one wins: it is the one that ended the run.
 			d.ErrorName = ev.Error.Name

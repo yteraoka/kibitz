@@ -64,7 +64,7 @@
 | `KIBITZ_MODEL_PRICES` | - | サマリコメントに概算コストを出すための単価。`モデル=入力/出力[/キャッシュ読み[/キャッシュ書き]]` を**100 万トークンあたり**でカンマ区切り。`*` は既定値。未設定ならトークン数だけを出し、金額は出さない |
 | `KIBITZ_REPO_BUDGETS` | - | リポジトリ 1 か月あたりの上限額。`パターン=金額` をカンマ区切り。パターンは `KIBITZ_ALLOWED_REPOS` と同じワイルドカードで `owner/name` に照合し、**最初に一致したものが効く**ので具体的なものを `*` より前に置く。金額の通貨は `KIBITZ_MODEL_PRICES` と同じ。未設定なら上限なし。**デプロイ側の設定で、リポジトリ側からは変更できない** |
 | `KIBITZ_MODEL_PRICE_CURRENCY` | `$` | 上記の単価の通貨記号 |
-| `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替 |
+| `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替。**未実装**: 読み込まれるだけで、まだ使われない |
 | `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
 | `VERTEX_LOCATION` | `global` | Vertex AI のリージョン。データ所在地要件があれば `asia-northeast1` 等を指定 |
 | `KIBITZ_VERTEX_MAAS_PROVIDER_ID` | `vertex-maas` | Vertex Model Garden のパートナーモデル (GLM など) 用に宣言するプロバイダ ID |

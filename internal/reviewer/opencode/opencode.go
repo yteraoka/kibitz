@@ -239,12 +239,29 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		req.SessionID = ""
 		stdout, err = r.exec(ctx, configPath, req, servers)
 	}
+	// What the runs that broke off spent. They are billed like any other.
+	var broken transcript
+	for resumed := 0; err != nil && resumed < maxResumes; resumed++ {
+		var runErr *RunError
+		if !errors.As(err, &runErr) || !runErr.Diagnosis.EndedOnModelTurn() || runErr.Diagnosis.SessionID == "" {
+			break
+		}
+		broken.absorb(parseEvents(runErr.stdout, r.logger))
+		r.logger.LogAttrs(ctx, slog.LevelWarn, "the model stopped for a reason opencode does not handle; resuming the session",
+			slog.String("session_id", runErr.Diagnosis.SessionID),
+			slog.String("finish", runErr.Diagnosis.Finish),
+			slog.Int("resume", resumed+1),
+		)
+		req.SessionID = runErr.Diagnosis.SessionID
+		stdout, err = r.execResume(ctx, configPath, req, servers)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	result := &reviewer.Result{SessionID: req.SessionID}
 	transcript := parseEvents(stdout, r.logger)
+	transcript.absorb(broken)
 	result.Usage = transcript.usage
 	result.Usage.Duration = time.Since(start)
 	result.Tools = transcript.tools
@@ -326,10 +343,32 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	return result, nil
 }
 
+// maxResumes is how many times one run is resumed after the model's turn
+// broke off (see [Diagnosis.EndedOnModelTurn]). Each resume is a new chance
+// of the same thing, so there is a limit; past it the job fails and is
+// retried whole.
+const maxResumes = 2
+
+// resumeMessage is what the agent is told when its session is resumed. The
+// instructions are already in the session, so they are not attached again.
+// A mode that answers in prose has its answer read from the last run alone,
+// which is why the whole answer is asked for rather than the rest of it.
+const resumeMessage = "直前の応答は、モデルの応答が途中で打ち切られたため中断されました。" +
+	"最初の指示 (.kibitz/prompt.md) の作業を続けて、最後までやり遂げてください。" +
+	"文章で回答する指示だった場合は、回答全体を最初から書き直してください。"
+
 // exec runs the CLI and returns its stdout.
 func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer) ([]byte, error) {
-	args := r.args(req)
+	return r.run(ctx, configPath, req, servers, r.args(req, false))
+}
 
+// execResume continues req's session with [resumeMessage].
+func (r *Runner) execResume(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer) ([]byte, error) {
+	return r.run(ctx, configPath, req, servers, r.args(req, true))
+}
+
+// run starts the CLI with args and returns its stdout.
+func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
 	cmd.Dir = req.WorkspaceDir
 	cmd.Env = r.childEnv(servers)
@@ -361,7 +400,9 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 		slog.String("mode", string(req.Mode)),
 		slog.String("agent", args[agentArg(args)]),
 		slog.String("model", r.modelFor(req)),
-		slog.String("session_id", req.SessionID),
+		// The session the run was actually in: a new run has none until
+		// opencode makes one, and that is the one to look up afterwards.
+		slog.String("session_id", firstNonEmpty(req.SessionID, diagnosis.SessionID)),
 	}, diagnosis.Attrs()...)
 	if req.Event != nil {
 		// The same key the worker's own job log carries, so one search finds
@@ -371,7 +412,7 @@ func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Reque
 
 	if err != nil {
 		r.logger.LogAttrs(ctx, slog.LevelError, "the agent failed", attrs...)
-		return nil, &RunError{Diagnosis: diagnosis}
+		return nil, &RunError{Diagnosis: diagnosis, stdout: stdout}
 	}
 
 	// A run that succeeded can still have gone wrong in a way that matters:
@@ -428,7 +469,10 @@ func isMissingSession(err error) bool {
 
 // args builds the command line. It is separate so that the invocation can be
 // asserted in tests without running anything.
-func (r *Runner) args(req reviewer.Request) []string {
+//
+// resume continues the session with [resumeMessage] instead of the
+// instructions, which the session already has.
+func (r *Runner) args(req reviewer.Request, resume bool) []string {
 	agent := r.cfg.ReviewAgent
 	switch req.Mode {
 	case reviewer.ModeAnswer:
@@ -465,6 +509,9 @@ func (r *Runner) args(req reviewer.Request) []string {
 		// Continuing the session is what lets a follow-up question refer to an
 		// earlier finding.
 		args = append(args, "--session", req.SessionID)
+	}
+	if resume {
+		return append(args, resumeMessage)
 	}
 	// The message comes before --file, and --file goes last. opencode takes
 	// --file as an array, so anything after it is read as another path to

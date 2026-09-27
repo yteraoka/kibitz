@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -835,5 +836,107 @@ func TestImplementModeAcceptsARunWithNoAccount(t *testing.T) {
 	}
 	if result.Reply != "" {
 		t.Errorf("Reply = %q, want empty", result.Reply)
+	}
+}
+
+// brokenTurnCLI fails the way opencode does when a Gemini turn breaks off --
+// the captured output of the real binary -- for its first failures calls,
+// then behaves. Each call's arguments are kept apart, since the point is
+// what the later calls were asked.
+func brokenTurnCLI(t *testing.T, fixture string, failures int) harness {
+	t.Helper()
+	dir, err := filepath.Abs(filepath.Join("testdata", "failures"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+n=$(cat .kibitz/calls 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > .kibitz/calls
+printf '%s\n' "$@" > ".kibitz/args.$n"
+if [ "$n" -le ` + strconv.Itoa(failures) + ` ]; then
+  cat '` + filepath.Join(dir, fixture+".stdout") + `'
+  cat '` + filepath.Join(dir, fixture+".stderr") + `' >&2
+  exit 1
+fi
+` + writeOutput
+	return newHarness(t, script)
+}
+
+func (h harness) calls(t *testing.T) int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(h.workspace, ".kibitz", "calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func (h harness) argsOf(t *testing.T, call int) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(h.workspace, ".kibitz", "args."+strconv.Itoa(call)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+func TestARunWhoseModelTurnBrokeOffIsResumed(t *testing.T) {
+	h := brokenTurnCLI(t, "modelturn", 1)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	result, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Findings) != 1 {
+		t.Errorf("findings = %+v, want the resumed run's", result.Findings)
+	}
+	if n := h.calls(t); n != 2 {
+		t.Fatalf("%d calls, want the run and one resume", n)
+	}
+
+	// The resume continues the broken session with a new message, and does
+	// not attach the instructions again: the session has them.
+	resume := strings.Join(h.argsOf(t, 2), " ")
+	if !strings.Contains(resume, "--session ses_f1d2364f6ffeJlQVy94cUkyanK") {
+		t.Errorf("the resume did not continue the broken session: %s", resume)
+	}
+	if strings.Contains(resume, "--file") {
+		t.Errorf("the resume attached the instructions again: %s", resume)
+	}
+
+	// The broken run's tokens were spent and are counted: 10 in, 2 out.
+	if result.Usage.InputTokens != 1510 || result.Usage.OutputTokens != 402 {
+		t.Errorf("usage = %+v, want both runs counted", result.Usage)
+	}
+}
+
+func TestResumingStopsAtItsLimit(t *testing.T) {
+	h := brokenTurnCLI(t, "modelturn", 100)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	_, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview))
+	if err == nil || !strings.Contains(err.Error(), "model turn") {
+		t.Fatalf("err = %v, want the broken turn reported", err)
+	}
+	if n := h.calls(t); n != 3 {
+		t.Errorf("%d calls, want the run and two resumes", n)
+	}
+}
+
+// Only the broken turn is resumed. Anything else fails as it did, and the job
+// is retried whole or reported.
+func TestOtherFailuresAreNotResumed(t *testing.T) {
+	h := brokenTurnCLI(t, "badmodel", 100)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err == nil {
+		t.Fatal("Run succeeded")
+	}
+	if n := h.calls(t); n != 1 {
+		t.Errorf("%d calls, want 1", n)
 	}
 }

@@ -234,3 +234,29 @@ func textFrom(ev map[string]any) string {
 	}
 	return ""
 }
+
+// absorb adds what another run of the same job did: the tokens it spent, the
+// tools it called and the steps it took. Its text is not taken -- the answer
+// is whatever the last run said.
+func (t *transcript) absorb(o transcript) {
+	t.usage = t.usage.Add(o.usage)
+	t.steps += o.steps
+	for name, n := range o.tools.Calls {
+		if t.tools.Calls == nil {
+			t.tools.Calls = map[string]int{}
+		}
+		t.tools.Calls[name] += n
+	}
+	for name, n := range o.tools.Failed {
+		if t.tools.Failed == nil {
+			t.tools.Failed = map[string]int{}
+		}
+		t.tools.Failed[name] += n
+	}
+	for _, doc := range o.tools.Documents {
+		if !slices.Contains(t.tools.Documents, doc) {
+			t.tools.Documents = append(t.tools.Documents, doc)
+		}
+	}
+	t.tools.Searches += o.tools.Searches
+}
