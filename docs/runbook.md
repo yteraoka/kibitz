@@ -68,11 +68,16 @@ printf '%s' "$NEW" | gcloud secrets versions add kibitz-github-webhook-secrets -
 
 | 変数 | 影響 | やりかた |
 | --- | --- | --- |
-| `KIBITZ_GITHUB_PRIVATE_KEY` | clone と投稿 | GitHub App は**鍵を複数持てる**。新しい鍵を生成 → Secret 更新 → リビジョン更新 → 古い鍵を削除。**この順なら無停止** |
+| `KIBITZ_GITHUB_PRIVATE_KEY` | clone と投稿、サーバーのリアクション | GitHub App は**鍵を複数持てる**。新しい鍵を生成 → Secret 更新 → リビジョン更新 → 古い鍵を削除。**この順なら無停止** |
 | `KIBITZ_GITLAB_TOKEN` | 同上 | 新しいトークンを発行 → Secret 更新 → リビジョン更新 → 古いトークンを失効。切り替え中に走っていたジョブは失敗しうるが、**再試行で拾われる** |
 | `KIBITZ_AZDO_TOKEN` | 同上 | 同上 |
 
 いずれも**キューを止めてから**やると、失敗するジョブが出ない。
+
+> **サーバーも同じ資格情報を読む** (リアクション用、[ADR-0020](adr/0020-the-server-reacts-at-receipt.md))。
+> ワーカーと一緒にサーバーのリビジョンも更新しないと、サーバーは古い鍵や
+> トークンを持ち続け、失効させた時点からリアクションだけが失敗する
+> (`kibitz_reactions_total{outcome="failed"}`)。レビューには影響しない。
 
 ```bash
 # ワーカーを 0 台にする (キューには溜まる)
@@ -91,6 +96,7 @@ gcloud run worker-pools update kibitz-worker --region "$REGION" --max-instances 
 | Webhook secret が漏れた | 偽の配送が作れる。**即座に**入れ替え、`kibitz_webhooks_received_total` の急増を確認する |
 | GitLab / Azure DevOps の API トークンが漏れた | **コードの読み取りと書き込み**ができる。先に失効させてから新しいものを入れる。順序が逆 |
 | GitHub App の秘密鍵が漏れた | 同上。App の設定ページから該当の鍵を削除する |
+| サーバーが乗っ取られた | 署名の偽造に加えて、**秘密鍵とトークンも漏れたものとして扱う** (リアクションのためにサーバーも持っている)。上の 2 行を両方やる |
 
 ## 2. アラート別の対応
 
@@ -260,6 +266,24 @@ curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_findings_dro
 `out_of_diff` が多いのは、モデルが行番号を間違えているか、差分の解釈が
 ずれている。Azure DevOps では差分を kibitz 自身が計算しているので、
 そちらを疑う ([ADR-0004](adr/0004-platform-differences-live-in-two-places.md))。
+
+### 3-6. 👀 が付かない
+
+**レビューには影響しない。** リアクションは受け取った合図で、失敗しても
+配送は成功扱いのまま ([ADR-0020](adr/0020-the-server-reacts-at-receipt.md))。
+
+```bash
+curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_reactions_total
+gcloud run services logs read kibitz-server --region "$REGION" --limit 100 | \
+  grep -E "could not react|reacting to comments at receipt"
+```
+
+| 見え方 | 原因 |
+| --- | --- |
+| 起動時の `reacting to comments at receipt` にそのプラットフォームが無い | サーバーに資格情報が無い、または `KIBITZ_REACTIONS=false` |
+| `could not react` に `422` や `permissions` | GitHub App に `Issues` / `Pull requests` の書き込みが無い。サーバーはトークンをこの 2 つに絞って発行するので、App に無い権限は要求できない |
+| `could not react` に `401` | 鍵やトークンを入れ替えたあと、サーバーのリビジョンを更新していない (§1-2) |
+| `could not react` に `context deadline exceeded` | forge の API が遅い。`KIBITZ_REACTION_TIMEOUT` を延ばす (forge への応答は先に返っているので、配送のタイムアウトには効かない) |
 
 ## 4. 止める・戻す
 

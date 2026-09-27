@@ -4,7 +4,9 @@
 # the common case and a secret nobody fills in is a secret somebody has to
 # explain later. Turning one on creates its secrets and grants the two
 # service accounts what each needs: the server verifies deliveries, the
-# worker calls the API, and neither reads the other's credential.
+# worker calls the API. The worker never reads the delivery credentials; the
+# server reads the API token too, but only with server_reactions on, to react
+# to comments (ADR-0020).
 #
 # As everywhere else here, the values are added with `gcloud secrets versions
 # add` rather than by Terraform, so they never enter the state file.
@@ -67,6 +69,14 @@ resource "google_secret_manager_secret_iam_member" "server_gitlab_signing_tokens
   count = var.gitlab_enabled ? 1 : 0
 
   secret_id = google_secret_manager_secret.gitlab_signing_tokens[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.server.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "server_gitlab_token" {
+  count = var.gitlab_enabled && var.server_reactions ? 1 : 0
+
+  secret_id = google_secret_manager_secret.gitlab_token[0].id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.server.email}"
 }
@@ -137,6 +147,14 @@ resource "google_secret_manager_secret_iam_member" "server_azure_devops_header_v
   count = var.azure_devops_enabled && var.azure_devops_header_name != "" ? 1 : 0
 
   secret_id = google_secret_manager_secret.azure_devops_header_values[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.server.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "server_azure_devops_token" {
+  count = var.azure_devops_enabled && var.server_reactions ? 1 : 0
+
+  secret_id = google_secret_manager_secret.azure_devops_token[0].id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.server.email}"
 }

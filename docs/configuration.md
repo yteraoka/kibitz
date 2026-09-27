@@ -36,6 +36,11 @@
 | `KIBITZ_SCALE_REGION` | - | ワーカーのリージョン (backend=cloudrun で必須) |
 | `KIBITZ_SCALE_WORKER_POOL` | - | ワーカーの Cloud Run worker pool 名 (同上) |
 | `KIBITZ_SCALE_WAKE_COOLDOWN` | `30s` | 起動要求をまとめる間隔。初回は待たない |
+| `KIBITZ_REACTIONS` | `true` | kibitz 宛てのコメントを publish したら、その場で 👀 (Azure DevOps では like) を付ける。付けるには下の資格情報が要り、**持っているプラットフォームにだけ**付く。`false` にすると資格情報の変数を読まない ([ADR-0020](adr/0020-the-server-reacts-at-receipt.md)) |
+| `KIBITZ_REACTION_TIMEOUT` | `3s` | リアクション 1 回の上限。forge には先に 202 を返しているので、配送のタイムアウトには影響しない |
+| `KIBITZ_GITHUB_APP_ID` / `_INSTALLATION_ID` / `_PRIVATE_KEY` / `_BASE_URL` | - | リアクション用。ワーカーと同じ変数。**サーバーが発行するトークンは `issues` / `pull_requests` の書き込みだけに絞る**。リアクションが有効なら `_APP_ID` は数字として読む (App の設定 URL の数字) |
+| `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
+| `KIBITZ_AZDO_ORG_URL` / `_TOKEN` / `_TOKEN_IS_BEARER` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
 
 ## 2. kibitz-worker (環境変数)
 

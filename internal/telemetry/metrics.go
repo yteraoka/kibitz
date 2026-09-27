@@ -19,6 +19,10 @@ type Metrics struct {
 	WebhooksReceived *prometheus.CounterVec
 	EventsPublished  *prometheus.CounterVec
 	PublishFailures  *prometheus.CounterVec
+	// Reactions counts the reactions the server put on comments it queued
+	// work for, by whether they landed. A reaction that fails costs nothing
+	// but the acknowledgement, so this is the only place a broken one shows.
+	Reactions *prometheus.CounterVec
 
 	// Worker side.
 	JobsTotal       *prometheus.CounterVec
@@ -65,6 +69,10 @@ func NewMetrics() *Metrics {
 			Name: "kibitz_publish_failures_total",
 			Help: "Events that could not be published. Any value here means reviews were lost.",
 		}, []string{"platform"}),
+		Reactions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_reactions_total",
+			Help: "Reactions put on comments at receipt, by outcome (added, failed).",
+		}, []string{"platform", "outcome"}),
 		JobsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kibitz_jobs_total",
 			Help: "Jobs by outcome (succeeded, failed, skipped, abandoned).",
@@ -115,7 +123,7 @@ func NewMetrics() *Metrics {
 	}
 
 	registry.MustRegister(
-		m.WebhooksReceived, m.EventsPublished, m.PublishFailures,
+		m.WebhooksReceived, m.EventsPublished, m.PublishFailures, m.Reactions,
 		m.JobsTotal, m.JobDuration, m.JobsInFlight,
 		m.AgentTokens, m.AgentToolCalls, m.ReferenceDocs,
 		m.CommentsPosted, m.FindingsDropped, m.ImplementRefused,

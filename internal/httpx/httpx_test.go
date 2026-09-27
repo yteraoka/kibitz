@@ -186,3 +186,24 @@ func TestHealthReady(t *testing.T) {
 		t.Errorf("ok check = %q", body.Checks["ok"])
 	}
 }
+
+// A handler behind the middleware can still flush. The webhook receiver
+// answers the forge and then reacts to the comment; a flush that did not get
+// through would keep the forge waiting on the reaction.
+func TestAHandlerBehindTheMiddlewareCanFlush(t *testing.T) {
+	flushed := make(chan error, 1)
+	h := httpx.Chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		flushed <- http.NewResponseController(w).Flush()
+	}), httpx.Recover(discardLogger()), httpx.Logging(discardLogger()))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/webhook/github", nil))
+
+	if err := <-flushed; err != nil {
+		t.Fatalf("Flush through the middleware: %v", err)
+	}
+	if !rec.Flushed {
+		t.Error("the response was not flushed")
+	}
+}

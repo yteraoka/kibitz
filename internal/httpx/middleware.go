@@ -137,3 +137,10 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	r.written += int64(n)
 	return n, err
 }
+
+// Unwrap exposes the writer underneath, which is how http.ResponseController
+// reaches its Flush. Without it a handler that answers first and keeps
+// working afterwards -- the webhook receiver, which reacts to a comment once
+// the forge has its 202 -- would have its flush refused, silently, and the
+// forge would wait for the work it was meant not to wait for.
+func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

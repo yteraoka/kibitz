@@ -579,3 +579,66 @@ func TestGitLabCredentials(t *testing.T) {
 		t.Errorf("a signing token rendered as %q", got)
 	}
 }
+
+func TestServerReactsWithTheCredentialsItIsGiven(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_GITHUB_APP_ID"] = "12345"
+	env["KIBITZ_GITHUB_PRIVATE_KEY"] = "-----BEGIN RSA PRIVATE KEY-----"
+	env["KIBITZ_GITLAB_TOKEN"] = "glpat-x"
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	r := cfg.Reactions
+	if !r.Enabled || r.Timeout != 3*time.Second {
+		t.Errorf("Enabled = %v, Timeout = %v; want on, 3s", r.Enabled, r.Timeout)
+	}
+	if r.GitHub.AppID != 12345 || r.GitHub.PrivateKey == "" {
+		t.Errorf("GitHub = %+v", r.GitHub)
+	}
+	if !r.GitLab.Configured() || r.AzureDevOps.Configured() {
+		t.Errorf("GitLab configured = %v, Azure DevOps configured = %v; want true, false",
+			r.GitLab.Configured(), r.AzureDevOps.Configured())
+	}
+}
+
+// Without a credential there is nothing to react with, and that is not an
+// error: the server has run without one until now.
+func TestServerWithoutCredentialsReactsToNothing(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	f := cfg.Reactions.Forges
+	if f.GitHub.AppID != 0 || f.GitLab.Configured() || f.AzureDevOps.Configured() {
+		t.Errorf("Forges = %+v, want none", f)
+	}
+}
+
+func TestServerRefusesHalfAReactionCredential(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_GITHUB_PRIVATE_KEY"] = "-----BEGIN RSA PRIVATE KEY-----"
+
+	_, err := config.LoadServer(config.MapEnv(env))
+	if err == nil || !strings.Contains(err.Error(), "KIBITZ_GITHUB_APP_ID") {
+		t.Fatalf("err = %v, want it to mention KIBITZ_GITHUB_APP_ID", err)
+	}
+}
+
+// Switched off, the credentials are not read at all, so a server that is not
+// meant to hold one cannot be made to by a variable left in its environment.
+func TestServerWithReactionsOffHoldsNoCredential(t *testing.T) {
+	env := minimalServerEnv()
+	env["KIBITZ_REACTIONS"] = "false"
+	env["KIBITZ_GITLAB_TOKEN"] = "glpat-x"
+	env["KIBITZ_GITHUB_PRIVATE_KEY"] = "half of a GitHub App"
+
+	cfg, err := config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if cfg.Reactions.Enabled || cfg.Reactions.GitLab.Configured() || cfg.Reactions.GitHub.PrivateKey != "" {
+		t.Errorf("Reactions = %+v, want off and empty", cfg.Reactions)
+	}
+}

@@ -182,6 +182,79 @@ resource "google_cloud_run_v2_service" "server" {
         }
       }
 
+      # Reacting to a comment at receipt (ADR-0020). Switched on, the server
+      # gets the forge credentials the worker has, and narrows GitHub's
+      # tokens to what a reaction needs. Switched off, it is told so and
+      # holds none: nothing below is set.
+      env {
+        name  = "KIBITZ_REACTIONS"
+        value = var.server_reactions ? "true" : "false"
+      }
+      dynamic "env" {
+        for_each = var.server_reactions ? [1] : []
+        content {
+          name  = "KIBITZ_GITHUB_INSTALLATION_ID"
+          value = var.github_installation_id
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions ? [1] : []
+        content {
+          name = "KIBITZ_GITHUB_PRIVATE_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_private_key.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions && var.gitlab_enabled && var.gitlab_base_url != "" ? [1] : []
+        content {
+          name  = "KIBITZ_GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions && var.gitlab_enabled ? [1] : []
+        content {
+          name = "KIBITZ_GITLAB_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gitlab_token[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions && var.azure_devops_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_ORG_URL"
+          value = var.azure_devops_org_url
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions && var.azure_devops_enabled ? [1] : []
+        content {
+          name = "KIBITZ_AZDO_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.azure_devops_token[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.server_reactions && var.azure_devops_enabled && var.azure_devops_token_is_bearer ? [1] : []
+        content {
+          name  = "KIBITZ_AZDO_TOKEN_IS_BEARER"
+          value = "true"
+        }
+      }
+
       # The long tail of settings that have a default and only sometimes
       # need changing. Names this configuration sets itself are rejected by
       # the variable's own validation.
@@ -220,6 +293,9 @@ resource "google_cloud_run_v2_service" "server" {
     google_secret_manager_secret_iam_member.server_gitlab_signing_tokens,
     google_secret_manager_secret_iam_member.server_azure_devops_passwords,
     google_secret_manager_secret_iam_member.server_azure_devops_header_values,
+    google_secret_manager_secret_iam_member.server_private_key,
+    google_secret_manager_secret_iam_member.server_gitlab_token,
+    google_secret_manager_secret_iam_member.server_azure_devops_token,
     google_pubsub_topic_iam_member.server_publish,
     google_cloud_run_v2_worker_pool_iam_member.worker_scaling,
     google_service_account_iam_member.worker_act_as,

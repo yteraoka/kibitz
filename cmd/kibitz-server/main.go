@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/yteraoka/kibitz/internal/config"
+	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/httpx"
 	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue"
@@ -124,6 +126,20 @@ func realMain() error {
 		return err
 	}
 
+	// Reacting to a comment the moment its work is queued is the only thing
+	// the server writes to a forge, and it does so with the narrowest
+	// credential that can (ADR-0020).
+	reactors, err := newReactors(cfg.Reactions)
+	if err != nil {
+		return err
+	}
+	for platform := range reactors {
+		logger.LogAttrs(ctx, slog.LevelInfo, "reacting to comments at receipt",
+			slog.String("platform", string(platform)),
+			slog.Duration("timeout", cfg.Reactions.Timeout),
+		)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Live)
 	mux.HandleFunc("GET /readyz", health.Ready)
@@ -142,19 +158,28 @@ func realMain() error {
 		// would not be a nil interface, and the receiver would call it.
 		receiverOpts = append(receiverOpts, webhook.WithWaker(waker))
 	}
+	// Each platform's receiver reacts with that platform's own client, if the
+	// server has one.
+	optsFor := func(platform event.Platform) []webhook.ReceiverOption {
+		reactor, ok := reactors[platform]
+		if !ok {
+			return receiverOpts
+		}
+		return append(slices.Clip(receiverOpts), webhook.WithReactor(reactor, cfg.Reactions.Timeout))
+	}
 	mux.Handle("POST /webhook/github", webhook.NewReceiver(
 		githubHook,
 		publisher,
 		triggers,
 		logger,
-		receiverOpts...,
+		optsFor(event.PlatformGitHub)...,
 	))
 	mux.Handle("POST /webhook/gitlab", webhook.NewReceiver(
 		gitlabhook.New(reveal(cfg.Webhook.GitLabTokens), reveal(cfg.Webhook.GitLabSigningTokens)),
 		publisher,
 		triggers,
 		logger,
-		receiverOpts...,
+		optsFor(event.PlatformGitLab)...,
 	))
 	mux.Handle("POST /webhook/azure-devops", webhook.NewReceiver(
 		azdohook.New(
@@ -165,7 +190,7 @@ func realMain() error {
 		publisher,
 		triggers,
 		logger,
-		receiverOpts...,
+		optsFor(event.PlatformAzureDevOps)...,
 	))
 
 	handler := httpx.Chain(mux,

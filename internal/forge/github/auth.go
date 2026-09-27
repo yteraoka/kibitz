@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -31,6 +33,9 @@ type appAuth struct {
 	baseURL        string
 	httpClient     *http.Client
 	now            func() time.Time
+	// permissions, when set, is sent with every token request so the token is
+	// minted with no more than these.
+	permissions map[string]string
 
 	mu      sync.Mutex
 	token   string
@@ -107,9 +112,24 @@ func (a *appAuth) installationToken(ctx context.Context) (string, error) {
 	}
 
 	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", a.baseURL, a.installationID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	var payload io.Reader
+	if len(a.permissions) > 0 {
+		// GitHub mints the token with these and nothing more. Asking for a
+		// permission the app does not have is refused rather than ignored,
+		// which is the right way round: a narrowing that silently did not
+		// happen would be worse than one that fails at startup.
+		encoded, err := json.Marshal(map[string]any{"permissions": a.permissions})
+		if err != nil {
+			return "", fmt.Errorf("encoding token permissions: %w", err)
+		}
+		payload = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, payload)
 	if err != nil {
 		return "", err
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+appToken)
 	req.Header.Set("Accept", "application/vnd.github+json")

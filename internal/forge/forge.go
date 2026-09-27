@@ -297,3 +297,68 @@ type Writer interface {
 	// request returns that one rather than failing.
 	CreatePullRequest(ctx context.Context, ref PRRef, req NewPullRequest) (*PullRequestInfo, error)
 }
+
+// CommentRef names one comment, precisely enough to react to it.
+//
+// Each platform addresses a comment differently. GitHub keeps conversation
+// comments and inline review comments behind different endpoints, GitLab
+// hangs notes off a merge request or an issue, and Azure DevOps needs the
+// thread a comment is in. The fields cover all three; each client reads the
+// ones it needs.
+type CommentRef struct {
+	Platform event.Platform
+	Owner    string
+	Repo     string
+	// Project is the Azure DevOps project; empty elsewhere.
+	Project string
+	// Number is the pull request or issue the comment is on.
+	Number int
+	// OnIssue is set when Number is an issue rather than a pull request.
+	OnIssue bool
+	// Inline is set for a comment on a line of the diff, which GitHub serves
+	// from a different endpoint than a comment in the conversation.
+	Inline    bool
+	CommentID string
+	// ThreadID is the thread the comment is in, which Azure DevOps needs.
+	ThreadID string
+}
+
+// Reactor puts a reaction on a comment. It is what kibitz uses to say "seen"
+// the moment an instruction arrives, before any work has been done.
+//
+// It is kept apart from [Client] because it is used somewhere Client is not:
+// by the webhook server, which is on the public internet and is given the
+// narrowest credential that can do this and nothing more (ADR-0020).
+type Reactor interface {
+	// React acknowledges a comment. Reacting twice is not an error.
+	React(ctx context.Context, c CommentRef) error
+}
+
+// CommentOf names the comment an event came from, or reports that it did not
+// come from one. It is [RefOf] for a comment.
+func CommentOf(ev *event.ReviewEvent) (CommentRef, bool) {
+	if ev == nil || ev.Comment == nil || ev.Comment.ID == "" {
+		return CommentRef{}, false
+	}
+	ref := CommentRef{
+		Platform:  ev.Source.Platform,
+		Owner:     ev.Repository.Owner,
+		Repo:      ev.Repository.Name,
+		Project:   ev.Repository.Project,
+		CommentID: ev.Comment.ID,
+		ThreadID:  ev.Comment.ThreadID,
+		// Only a comment on a line of the diff has a path. On GitHub that is
+		// the review comment, which lives behind its own endpoint.
+		Inline: ev.Comment.Path != "",
+	}
+	switch {
+	case ev.PullRequest != nil:
+		ref.Number = ev.PullRequest.Number
+	case ev.Issue != nil:
+		ref.Number = ev.Issue.Number
+		ref.OnIssue = true
+	default:
+		return CommentRef{}, false
+	}
+	return ref, true
+}
