@@ -116,6 +116,15 @@ inspection した接続の中のリクエストは、`CONNECT` した先にし�
   **このフラグが無いと Node はプロキシの変数を無視して直接繋ぎ、ログにも残らない**。
   フラグを付けると stderr に `EnvHttpProxyAgent is experimental` の警告が出るが、
   動作には影響しない
+- ワーカーのイメージ (opencode 1.18.31) の中で、kibitz の `opencode.Runner` に
+  プロキシをつなぎ、Vertex AI の Gemini で実際のレビューを最後まで走らせた。
+  許可リストは `*.googleapis.com` だけ
+  - モデルへのストリーミング (`streamGenerateContent`) 32 件と ADC のトークン更新
+    (`oauth2.googleapis.com/token`) が inspection 付きで通り、すべて `event_id` 付きで記録された
+  - 許可外の remote MCP サーバーは `CONNECT` で拒否され、opencode はそのサーバーを
+    使えないものとして扱ってレビューを続けた
+  - opencode 自身のモデル一覧の更新 (`models.opencode.ai`) とプラグインの install
+    (`registry.npmjs.org`) も拒否されたが、どちらも失敗してもレビューに影響しない
 - **loopback を常に除外する理由も実機で見つけた。** opencode 2.x は自分の
   サーバーと `http://127.0.0.1:<port>` で話し、Bun は `NO_PROXY` に無いと
   これもプロキシに送る。プロキシが拒否すると、opencode は再試行を続けて止まらない

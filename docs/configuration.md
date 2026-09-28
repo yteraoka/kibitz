@@ -515,6 +515,14 @@ KIBITZ_EGRESS_DENY=jira.example.com/rest/api/*/user*
   `*.googleapis.com` (`aiplatform.googleapis.com` など)。入れ忘れると
   すべてのレビューがモデルを呼べずに失敗する
 - パスは `..` を解決してから照合する (`/v1/../admin` は `/admin` として判定する)
+- **許可リストを書くと、opencode 自身の次の 2 つが毎回拒否される。** どちらも失敗しても
+  レビューは続くので、許可しなくてよい (opencode 1.18.31 で確認)。
+  ログには `denied` が、opencode の診断には `problems` が出る
+
+  | 宛先 | 何をしようとしているか | 拒否されたとき |
+  | --- | --- | --- |
+  | `models.opencode.ai` | モデル一覧の更新 | 同梱の一覧で動く (`Failed to fetch models.dev`) |
+  | `registry.npmjs.org` | `@opencode-ai/plugin` の裏での install | 使わないまま動く (`background dependency install failed`) |
 - `KIBITZ_MCP_SERVERS` にある remote MCP サーバーの URL がルールで拒否される場合、
   **起動時に警告を出す** (起動は止めない)
 
