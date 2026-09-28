@@ -125,6 +125,12 @@ inspection した接続の中のリクエストは、`CONNECT` した先にし�
     使えないものとして扱ってレビューを続けた
   - opencode 自身のモデル一覧の更新 (`models.opencode.ai`) とプラグインの install
     (`registry.npmjs.org`) も拒否されたが、どちらも失敗してもレビューに影響しない
+- 同じことを Cloud Run (gen2、ワーカーと同じサービスアカウントとリソース) の一時ジョブでも行い、
+  レビューが最後まで通った。モデルのトークンはメタデータサーバーから直接取られ
+  (既定の `KIBITZ_EGRESS_NO_PROXY`)、プロキシには現れなかった
+  - `gemini-3.8-flash` では `Requests ending with a model turn are not supported` で
+    失敗したが、同じ失敗はプロキシの無い本番ワーカーでも 2026-09-27 に起きており、
+    このプロキシとは関係が無い
 - **loopback を常に除外する理由も実機で見つけた。** opencode 2.x は自分の
   サーバーと `http://127.0.0.1:<port>` で話し、Bun は `NO_PROXY` に無いと
   これもプロキシに送る。プロキシが拒否すると、opencode は再試行を続けて止まらない
