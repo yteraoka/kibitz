@@ -603,6 +603,31 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         }
       }
 
+      # The agent's egress proxy. The lists travel only with the switch: without
+      # the proxy nothing reads them, and a list that looks enforced but is
+      # not is worse than none.
+      dynamic "env" {
+        for_each = var.egress_proxy ? [1] : []
+        content {
+          name  = "KIBITZ_EGRESS_PROXY"
+          value = "true"
+        }
+      }
+      dynamic "env" {
+        for_each = var.egress_proxy && length(var.egress_allow) > 0 ? [1] : []
+        content {
+          name  = "KIBITZ_EGRESS_ALLOW"
+          value = join(",", var.egress_allow)
+        }
+      }
+      dynamic "env" {
+        for_each = var.egress_proxy && length(var.egress_deny) > 0 ? [1] : []
+        content {
+          name  = "KIBITZ_EGRESS_DENY"
+          value = join(",", var.egress_deny)
+        }
+      }
+
       # See server_env.
       dynamic "env" {
         for_each = var.worker_env

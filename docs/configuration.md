@@ -91,6 +91,12 @@
 | `KIBITZ_MCP_CONTEXT_BIN` | `kibitz-mcp` | kibitz 自身の MCP サーバーのパス。`off` で無効 |
 | `KIBITZ_MCP_SERVERS` | - | この kibitz が提供する MCP サーバーの定義。名前 → サーバーの JSON オブジェクト (下記) |
 | `KIBITZ_MCP_ALLOWLIST` | - | そのうちリポジトリが有効化してよい名前 (カンマ区切り)。未設定なら定義したものすべて |
+| `KIBITZ_EGRESS_PROXY` | `false` | エージェントの HTTP(S) をワーカー内のプロキシに通し、1 リクエスト 1 行でログに出す。以下の `KIBITZ_EGRESS_*` はこれが `true` のときだけ効く ([下記](#外部アクセスの制御)) |
+| `KIBITZ_EGRESS_ALLOW` | - | 許可する宛先 `host[:port][/path]` (カンマ区切り)。**未設定なら拒否リスト以外すべて許可** (ログだけ取る) |
+| `KIBITZ_EGRESS_DENY` | - | 拒否する宛先。許可リストより優先 |
+| `KIBITZ_EGRESS_TLS_INSPECT` | `true` | HTTPS を終端してパスまで判定・記録する。`false` ならホストとポートだけで判定し、パス付きのルールは起動時に拒否される |
+| `KIBITZ_EGRESS_TLS_PASSTHROUGH` | - | inspection せずにトンネルするホスト (証明書をピン留めするクライアント向け)。ホストだけで判定する |
+| `KIBITZ_EGRESS_NO_PROXY` | `metadata.google.internal,169.254.169.254` | プロキシを通さないホスト。loopback (`localhost` / `127.0.0.1` / `::1`) は設定に関わらず常に含まれる。`off` で loopback だけにする |
 | `KIBITZ_GITHUB_APP_ID` / `_PRIVATE_KEY` / `_INSTALLATION_*` | - | GitHub App 認証 (PAT は使わない) |
 | `KIBITZ_GITLAB_BASE_URL` | `https://gitlab.com` | GitLab インスタンス。self-managed はここを変える (`/api/v4` は付けても付けなくてもよい) |
 | `KIBITZ_GITLAB_TOKEN` | - | personal / group / project access token (`api` スコープ)。**GitLab には GitHub App のインストールトークンに相当するものが無く、長命な資格情報になる** |
@@ -471,6 +477,122 @@ opencode の環境をそのまま継承する** — kibitz が書いたわけで
 
 3 が要点で、`jira` を有効にしたジョブには `JIRA_TOKEN` が渡るが、
 `sentry` だけを有効にしたジョブには渡らない。
+
+`KIBITZ_EGRESS_PROXY=true` のときは、これに加えてプロキシの変数と CA のファイル
+(下記) が**最後に**付く。ワーカーが継承した `HTTPS_PROXY` や
+`KIBITZ_AGENT_ENV_PASSTHROUGH` で渡した値よりも優先される。
+
+### 外部アクセスの制御
+
+`KIBITZ_EGRESS_PROXY=true` にすると、エージェントのプロセス (opencode と、
+それが起動する local MCP サーバー) が出す HTTP(S) リクエストは、すべて
+**ワーカーの中で動くプロキシ**を通る。プロキシはリクエストごとに許可・拒否を決め、
+1 リクエスト 1 行のログを書く。
+
+```
+KIBITZ_EGRESS_PROXY=true
+KIBITZ_EGRESS_ALLOW=*.googleapis.com,jira.example.com
+KIBITZ_EGRESS_DENY=jira.example.com/rest/api/*/user*
+```
+
+#### ルールの書き方
+
+`host[:port][/path]`。スキームは書かない (書くと起動時に拒否される)。
+
+| 書き方 | 一致するもの |
+| --- | --- |
+| `example.com` | そのホスト。ポートとパスは問わない |
+| `*.example.com` | サブドメインすべて (`a.example.com`、`a.b.example.com`)。`example.com` 自身は含まない |
+| `example.com:8443` | そのポートだけ |
+| `api.example.com/v1/*` | そのパス以下。`*` は `/` をまたぐ。**TLS inspection が必要** |
+| `*` | すべて |
+
+- **拒否が優先。** 許可リストに一致しても、拒否リストに一致すれば拒否する
+- **許可リストが空なら、拒否リスト以外はすべて許可**する。まずこの状態で
+  動かしてログを見て、実際に使っている宛先から許可リストを書くとよい
+  (起動時に警告が 1 行出る)
+- **許可リストを書くなら、モデルの宛先を必ず入れる。** Vertex AI は
+  `*.googleapis.com` (`aiplatform.googleapis.com` など)。入れ忘れると
+  すべてのレビューがモデルを呼べずに失敗する
+- パスは `..` を解決してから照合する (`/v1/../admin` は `/admin` として判定する)
+- `KIBITZ_MCP_SERVERS` にある remote MCP サーバーの URL がルールで拒否される場合、
+  **起動時に警告を出す** (起動は止めない)
+
+#### TLS inspection
+
+既定で有効。ワーカーは起動時に**そのインスタンス専用の CA** を作り、
+HTTPS をその CA が署名した証明書で終端してから上流に繋ぎ直す。
+これでパスまで判定でき、ログにも残る。
+
+- **CA の秘密鍵はワーカーのメモリにしか無い。** ファイルに書くのは証明書だけで、
+  それを信頼するのはワーカーが起動するエージェントのプロセスだけ。
+  再起動すれば別の CA になる
+- エージェントには `NODE_EXTRA_CA_CERTS` (Node / Bun。opencode は Bun) と、
+  システムの CA に kibitz の CA を足したバンドルを `SSL_CERT_FILE` /
+  `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE` / `GIT_SSL_CAINFO` で渡す
+- 証明書をピン留めするクライアントは inspection できない。そのホストは
+  `KIBITZ_EGRESS_TLS_PASSTHROUGH` に書く。ホストとポートだけで判定し、
+  **そのホストにパス付きの拒否ルールがあればホストごと拒否、
+  パス無しの許可ルールが無ければ拒否**する (パスが見えない以上、安全側に倒す)
+- 失敗するのはたいてい TLS ハンドシェイクで、ログに
+  `TLS handshake with the client failed` と出る
+- `CONNECT` した先と違う `Host` ヘッダのリクエストは 421 で拒否する
+  (許可したホストの接続で別のホスト宛てのリクエストを通さないため)
+
+#### ログ
+
+リクエストごとに `msg=egress` の行が出る。ジョブのログと同じ `event_id` が付くので、
+1 回の検索でレビューとそれが触った宛先が揃う。
+
+```json
+{"level":"INFO","msg":"egress","event_id":"…","mode":"review",
+ "outcome":"allowed","method":"POST","scheme":"https",
+ "host":"aiplatform.googleapis.com","port":"443",
+ "path":"/v1/projects/…/models/gemini-3.1-pro-preview:streamGenerateContent",
+ "query_keys":["alt"],"inspected":true,"reason":"allowed by *.googleapis.com",
+ "status":200,"bytes_sent":48213,"bytes_received":9120,"duration_ms":8342}
+```
+
+| フィールド | 内容 |
+| --- | --- |
+| `outcome` | `allowed` / `denied` (ルールで拒否、`WARN`) / `failed` (上流に繋がらない、`WARN`) |
+| `reason` | 決めたルール (`allowed by …` / `denied by …` / `not in the allow list`) |
+| `path` | inspection しているときだけ。トンネルは `CONNECT` の 1 行だけで、パスは出ない |
+| `query_keys` | クエリの**名前だけ**。値は出さない (API キーがクエリに入ることがあるため) |
+| `bytes_sent` / `bytes_received` | エージェントが送った / 受け取ったボディの大きさ |
+
+**ヘッダは記録しない。** リクエストボディとレスポンスボディも記録しない
+(プロンプトとコードそのものなので)。件数は `kibitz_egress_requests_total{outcome}` にも出る。
+
+#### 内部アドレス
+
+許可リストが空のとき、プライベート / loopback / リンクローカル / CGNAT の
+アドレスへの接続は拒否する (`failed`、`internal addresses are only reachable
+through an allow list`)。名前の解決後、実際に繋ぐアドレスで判定する。
+許可リストがあれば、通る宛先はすべて運用者が名前を書いたものなので制限しない
+(社内の Jira など)。
+
+#### プロキシを通らないもの
+
+- **loopback。** opencode は自分自身のサーバーと `http://127.0.0.1:<port>` で話す。
+  Bun は `NO_PROXY` に無いとこれもプロキシに送るので、プロキシがそれを拒否すると
+  エージェントが延々と再試行する。だから設定に関わらず常に除外する
+- **メタデータサーバー** (既定)。エージェントはここからモデルを呼ぶトークンを取る。
+  通したいなら `KIBITZ_EGRESS_NO_PROXY=off` にして、許可リストに
+  `metadata.google.internal` と `169.254.169.254` を加える
+- **ワーカー自身の通信** (Forge API、Pub/Sub、Firestore)。プロキシが扱うのは
+  エージェントのプロセスだけ
+- **プロキシの変数を無視するプロセス。** 下記
+
+> **これはポリシーと監査ログで、壁ではない。** エージェントのプロセスが
+> `HTTPS_PROXY` に従うから効く。opencode (Bun) は従う。Node の MCP サーバーは
+> `NODE_USE_ENV_PROXY=1` を渡しているので、それを解する Node (22.21 / 24.5 以降)
+> なら従う。自前で直接繋ぐバイナリは
+> 迂回できる。レビューのエージェントは `bash` が `git` / `rg` に限られ、
+> `webfetch` も拒否しているので経路は MCP サーバーに限られるが、
+> **強制したいならネットワーク側で塞ぐ** (ワーカーの egress を VPC に向け、
+> ファイアウォールで絞る)。プロキシはその手前で、何に触ったかを記録し、
+> 行儀のよいクライアントを止めるためのもの ([security.md](security.md#3-プロンプトインジェクション))。
 
 ## 3. リポジトリ側の設定 (`.kibitz.yaml`)
 

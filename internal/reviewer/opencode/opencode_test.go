@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yteraoka/kibitz/internal/egress"
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/jobcontext"
@@ -447,6 +449,41 @@ func TestEnvPassthrough(t *testing.T) {
 	}
 	if h.env(t)["KIBITZ_EXTRA"] != "extra" {
 		t.Error("a variable the deployment named did not reach the agent")
+	}
+}
+
+// With an egress proxy, the agent is pointed at the job's own session of it,
+// whatever proxy the worker itself inherited, and the session is gone when the
+// job is.
+func TestEgressProxyReachesTheAgent(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://inherited.example:3128")
+
+	proxy, err := egress.New(egress.Config{Inspect: true}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Close() })
+
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin, Egress: proxy}, discardLogger())
+	if _, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	env := h.env(t)
+	proxyURL := env["HTTPS_PROXY"]
+	if !strings.HasPrefix(proxyURL, "http://127.0.0.1:") {
+		t.Fatalf("HTTPS_PROXY = %q, want the job's session", proxyURL)
+	}
+	if env["https_proxy"] != proxyURL || env["HTTP_PROXY"] != proxyURL {
+		t.Errorf("the proxy variables disagree: %v", env)
+	}
+	if env["NODE_EXTRA_CA_CERTS"] == "" {
+		t.Error("the agent was not told to trust the inspection CA")
+	}
+	if conn, err := net.Dial("tcp", strings.TrimPrefix(proxyURL, "http://")); err == nil {
+		_ = conn.Close()
+		t.Error("the job's proxy session is still listening after the job")
 	}
 }
 

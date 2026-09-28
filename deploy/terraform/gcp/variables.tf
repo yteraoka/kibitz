@@ -378,6 +378,37 @@ variable "repo_budgets" {
   default     = ""
 }
 
+# --- Egress ---------------------------------------------------------------
+
+variable "egress_proxy" {
+  description = <<-EOT
+    Send every request the agent's processes make -- the model, remote MCP
+    servers, whatever a local MCP server fetches -- through a proxy in the
+    worker that logs each one and applies egress_allow and egress_deny.
+    HTTPS is inspected by default, so the log has paths and a rule can name
+    one (KIBITZ_EGRESS_TLS_INSPECT in worker_env turns that off).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "egress_allow" {
+  description = <<-EOT
+    Destinations the agent may reach, as host[:port][/path] ("*.example.com"
+    for subdomains). Empty allows everything egress_deny does not name, which
+    makes the proxy an audit log. The model has to be here:
+    "*.googleapis.com" covers Vertex AI.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "egress_deny" {
+  description = "Destinations the agent may never reach, in the same form. A deny wins over an allow."
+  type        = list(string)
+  default     = []
+}
+
 # --- Everything else ----------------------------------------------------
 
 variable "server_env" {
@@ -453,6 +484,9 @@ variable "worker_env" {
       "KIBITZ_IMPLEMENT_BRANCH_PREFIX",
       "KIBITZ_COMMIT_NAME",
       "KIBITZ_COMMIT_EMAIL",
+      "KIBITZ_EGRESS_PROXY",
+      "KIBITZ_EGRESS_ALLOW",
+      "KIBITZ_EGRESS_DENY",
     ])) == 0
     error_message = "worker_env may not set a variable this configuration already sets; use the variable for it instead."
   }

@@ -16,10 +16,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/yteraoka/kibitz/internal/egress"
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/jobcontext"
 	"github.com/yteraoka/kibitz/internal/reviewer"
@@ -59,6 +61,10 @@ type Config struct {
 	EnvPassthrough []string
 	// CustomProvider declares a provider OpenCode's catalog does not list.
 	CustomProvider *CustomProvider
+	// Egress, when set, is the proxy every request the agent's processes make
+	// goes through. Each job gets its own session of it, so that what the
+	// proxy logs carries the job's event id.
+	Egress *egress.Proxy
 	// LogLevel is how much of its own log opencode writes to stderr, where the
 	// runner reads it: DEBUG, INFO, WARN or ERROR. Empty means WARN, which is
 	// enough to explain a failure and quiet on success.
@@ -217,6 +223,18 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		return nil, err
 	}
 
+	env := r.childEnv(servers)
+	if r.cfg.Egress != nil {
+		session, err := r.cfg.Egress.Start(egressAttrs(req)...)
+		if err != nil {
+			return nil, fmt.Errorf("opencode: %w", err)
+		}
+		defer func() { _ = session.Close() }()
+		// Last, so that a proxy the worker inherited or was told to pass
+		// through cannot take the agent around this one.
+		env = append(env, session.Env()...)
+	}
+
 	promptPath := filepath.Join(req.WorkspaceDir, ".kibitz", "prompt.md")
 	if err := writeFile(promptPath, []byte(reviewer.BuildPrompt(req))); err != nil {
 		return nil, fmt.Errorf("opencode: writing prompt: %w", err)
@@ -227,7 +245,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	}
 
 	start := time.Now()
-	stdout, err := r.exec(ctx, configPath, req, servers)
+	stdout, err := r.exec(ctx, configPath, req, env)
 	if err != nil && req.SessionID != "" && isMissingSession(err) {
 		// The session lives in the agent's own storage, inside a container
 		// that is disposable. Losing it is ordinary, not a failure: the
@@ -237,7 +255,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 			slog.String("session_id", req.SessionID),
 		)
 		req.SessionID = ""
-		stdout, err = r.exec(ctx, configPath, req, servers)
+		stdout, err = r.exec(ctx, configPath, req, env)
 	}
 	// What the runs that broke off spent. They are billed like any other.
 	var broken transcript
@@ -253,7 +271,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 			slog.Int("resume", resumed+1),
 		)
 		req.SessionID = runErr.Diagnosis.SessionID
-		stdout, err = r.execResume(ctx, configPath, req, servers)
+		stdout, err = r.execResume(ctx, configPath, req, env)
 	}
 	if err != nil {
 		return nil, err
@@ -358,21 +376,20 @@ const resumeMessage = "直前の応答は、モデルの応答が途中で打ち
 	"文章で回答する指示だった場合は、回答全体を最初から書き直してください。"
 
 // exec runs the CLI and returns its stdout.
-func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer) ([]byte, error) {
-	return r.run(ctx, configPath, req, servers, r.args(req, false))
+func (r *Runner) exec(ctx context.Context, configPath string, req reviewer.Request, env []string) ([]byte, error) {
+	return r.run(ctx, configPath, req, env, r.args(req, false))
 }
 
 // execResume continues req's session with [resumeMessage].
-func (r *Runner) execResume(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer) ([]byte, error) {
-	return r.run(ctx, configPath, req, servers, r.args(req, true))
+func (r *Runner) execResume(ctx context.Context, configPath string, req reviewer.Request, env []string) ([]byte, error) {
+	return r.run(ctx, configPath, req, env, r.args(req, true))
 }
 
-// run starts the CLI with args and returns its stdout.
-func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Request, servers map[string]MCPServer, args []string) ([]byte, error) {
+// run starts the CLI with args in env and returns its stdout.
+func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Request, env []string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
 	cmd.Dir = req.WorkspaceDir
-	cmd.Env = r.childEnv(servers)
-	cmd.Env = append(cmd.Env,
+	cmd.Env = append(slices.Clip(env),
 		"OPENCODE_CONFIG="+configPath,
 		// The agent must not pick up the operator's own session history.
 		"OPENCODE_DISABLE_AUTOUPDATE=1",
@@ -423,6 +440,16 @@ func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Reques
 		r.logger.LogAttrs(ctx, slog.LevelWarn, "the agent reported problems but finished", attrs...)
 	}
 	return stdout, nil
+}
+
+// egressAttrs are what the egress log's lines for one job carry: the same
+// event id the job's own log does, so one search finds what a review reached.
+func egressAttrs(req reviewer.Request) []slog.Attr {
+	attrs := []slog.Attr{slog.String("mode", string(req.Mode))}
+	if req.Event != nil {
+		attrs = append([]slog.Attr{slog.String("event_id", req.Event.ID)}, attrs...)
+	}
+	return attrs
 }
 
 // agentArg is the index of the agent's name in args.

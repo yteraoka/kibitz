@@ -6,8 +6,10 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/yteraoka/kibitz/internal/egress"
 	"github.com/yteraoka/kibitz/internal/policy"
 )
 
@@ -444,6 +446,9 @@ type Worker struct {
 	// repository may enable; empty means all of them.
 	MCPServers   string
 	MCPAllowlist []string
+	// Egress puts the agent's outbound requests through a proxy that decides
+	// and logs each one.
+	Egress Egress
 	// GuidelineFiles are the repository's own convention files, read from its
 	// default branch. Nil uses the built-in list; "off" reads none.
 	GuidelineFiles []string
@@ -590,6 +595,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		},
 		MCPServers:       l.str("KIBITZ_MCP_SERVERS", ""),
 		MCPAllowlist:     l.list("KIBITZ_MCP_ALLOWLIST", nil),
+		Egress:           loadEgress(l),
 		GuidelineFiles:   l.list("KIBITZ_REPO_GUIDELINE_FILES", nil),
 		ReferenceDocs:    l.list("KIBITZ_REFERENCE_DOCS", nil),
 		Forges:           loadForges(l),
@@ -618,6 +624,60 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// Egress configures the proxy the agent's processes reach the network
+// through (docs/security.md).
+type Egress struct {
+	// Enabled starts the proxy. Nothing else here does anything without it.
+	Enabled bool
+	// Allow and Deny are host[:port][/path] rules. An empty allow list allows
+	// everything the deny list does not name.
+	Allow []string
+	Deny  []string
+	// Inspect terminates TLS so that paths can be decided and logged.
+	Inspect bool
+	// Passthrough names hosts that are tunnelled without inspection.
+	Passthrough []string
+	// NoProxy names hosts the agent reaches without the proxy.
+	NoProxy []string
+}
+
+// DefaultEgressNoProxy is what the agent reaches without the proxy unless
+// told otherwise: the metadata server its model token comes from. Loopback
+// is added whatever this says (egress.Loopback).
+var DefaultEgressNoProxy = []string{"metadata.google.internal", "169.254.169.254"}
+
+func loadEgress(l *loader) Egress {
+	e := Egress{
+		Enabled:     l.bool("KIBITZ_EGRESS_PROXY", false),
+		Allow:       l.list("KIBITZ_EGRESS_ALLOW", nil),
+		Deny:        l.list("KIBITZ_EGRESS_DENY", nil),
+		Inspect:     l.bool("KIBITZ_EGRESS_TLS_INSPECT", true),
+		Passthrough: l.list("KIBITZ_EGRESS_TLS_PASSTHROUGH", nil),
+		NoProxy:     l.list("KIBITZ_EGRESS_NO_PROXY", DefaultEgressNoProxy),
+	}
+	if len(e.NoProxy) == 1 && strings.EqualFold(e.NoProxy[0], "off") {
+		e.NoProxy = nil
+	}
+	// Rules are checked even with the proxy off, so that turning it on is
+	// not the moment a typo in them is found.
+	if _, err := egress.ParseRules(e.Allow); err != nil {
+		l.fail("KIBITZ_EGRESS_ALLOW", "%v", err)
+	}
+	rules, err := egress.ParseRules(e.Deny)
+	if err != nil {
+		l.fail("KIBITZ_EGRESS_DENY", "%v", err)
+	}
+	if !e.Inspect {
+		allow, _ := egress.ParseRules(e.Allow)
+		for _, r := range append(allow, rules...) {
+			if r.HasPath() {
+				l.fail("KIBITZ_EGRESS_TLS_INSPECT", "is false, but the rule %q names a path, which only inspection can see", r)
+			}
+		}
+	}
+	return e
 }
 
 // Scaler is the kibitz-scaler configuration. It is a small tool with a small
