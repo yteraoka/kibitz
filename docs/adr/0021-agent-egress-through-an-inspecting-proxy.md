@@ -111,6 +111,11 @@ inspection した接続の中のリクエストは、`CONNECT` した先にし�
   内部アドレスの拒否・セッションを閉じたときのトンネルの切断を確認した
 - 実機で、curl・Node 24 (`NODE_USE_ENV_PROXY=1`)・Bun 1.2 の `fetch` が
   プロキシに従い、CA を信頼し、許可は 200・拒否は 403 になることを確認した
+- ワーカーのイメージの Node (`node:22-slim`、v22.23.3) でも、`fetch` と
+  `https.get` の両方が `NODE_USE_ENV_PROXY=1` でプロキシに従うことを確認した。
+  **このフラグが無いと Node はプロキシの変数を無視して直接繋ぎ、ログにも残らない**。
+  フラグを付けると stderr に `EnvHttpProxyAgent is experimental` の警告が出るが、
+  動作には影響しない
 - **loopback を常に除外する理由も実機で見つけた。** opencode 2.x は自分の
   サーバーと `http://127.0.0.1:<port>` で話し、Bun は `NO_PROXY` に無いと
   これもプロキシに送る。プロキシが拒否すると、opencode は再試行を続けて止まらない
