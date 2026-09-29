@@ -262,9 +262,36 @@ func TestGeneratedPermissions(t *testing.T) {
 		t.Errorf("the output path is not writable: %v", edit)
 	}
 
-	bash, ok := permission["bash"].(map[string]any)
-	if !ok || bash["*"] != "deny" {
-		t.Errorf("bash = %v, want deny by default", permission["bash"])
+	if permission["bash"] != "deny" {
+		t.Errorf("bash = %v, want deny", permission["bash"])
+	}
+}
+
+// No mode gets a shell, and no mode reaches outside the workspace. A bash rule
+// is matched against the command line as a string, and every program a narrow
+// one let through had options that went further than reading.
+func TestNoModeHasAShellOrLeavesTheWorkspace(t *testing.T) {
+	for _, mode := range []reviewer.Mode{reviewer.ModeReview, reviewer.ModeAnswer, reviewer.ModePlan, reviewer.ModeImplement} {
+		t.Run(string(mode), func(t *testing.T) {
+			h := newHarness(t, writeOutput+`
+echo '{"type":"text","timestamp":6,"sessionID":"ses_123","part":{"type":"text","text":"ok"}}'
+`)
+			runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+			req := request(h.workspace, mode)
+			req.Question = "?"
+			req.Issue = &event.Issue{Number: 1, Title: "x"}
+			req.EditablePaths = []string{"internal/**"}
+			if _, err := runner.Run(context.Background(), req); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			permission := h.config(t)["permission"].(map[string]any)
+			if permission["bash"] != "deny" {
+				t.Errorf("bash = %v, want deny", permission["bash"])
+			}
+			if permission["external_directory"] != "deny" {
+				t.Errorf("external_directory = %v, want deny", permission["external_directory"])
+			}
+		})
 	}
 }
 
@@ -785,12 +812,8 @@ echo '{"type":"text","text":"internal/queue/sqs.go を追加しました。"}'
 
 	// The build and the tests run where kibitz holds no credentials, so the
 	// agent must not be able to run them here (ADR-0019).
-	bash, ok := permission["bash"].(map[string]any)
-	if !ok || bash["*"] != "deny" {
-		t.Errorf("bash = %v, want deny by default", permission["bash"])
-	}
-	if bash["go test*"] == "allow" || bash["*"] == "allow" {
-		t.Errorf("the agent can run the verification itself: %v", bash)
+	if permission["bash"] != "deny" {
+		t.Errorf("the agent can run commands itself: bash = %v", permission["bash"])
 	}
 
 	if args := strings.Join(h.args(t), " "); !strings.Contains(args, "--agent kibitz-implement") {

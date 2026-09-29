@@ -26,46 +26,49 @@ type opencodeConfig struct {
 // action ("allow", "deny") or a map of pattern to action.
 type permissions map[string]any
 
+// baseline is what every profile starts from: the agent reads the workspace
+// with opencode's own tools and nothing else.
+//
+// There is no shell, not even a narrow one. opencode matches a bash rule
+// against the command line as a string, so allowing a program allows every
+// option it has, and the programs that look read-only have options that are
+// not: between them they could run a file from the pull request, read the
+// worker's own environment, and write outside the workspace. A pattern that
+// tried to exclude each of those would be a list of the ones somebody thought
+// of. opencode's read, grep and glob do the same work with arguments that are
+// a path and a pattern, not options.
+//
+// external_directory is denied by name rather than left to "*", so that
+// those tools stay inside the workspace however the default is written.
+func baseline() permissions {
+	return permissions{
+		"*":                  "deny",
+		"read":               "allow",
+		"grep":               "allow",
+		"glob":               "allow",
+		"webfetch":           "deny",
+		"bash":               "deny",
+		"external_directory": "deny",
+	}
+}
+
 // reviewPermissions is read-only except for the one file the contract asks
 // for. The agent reviews code; it has no reason to change any of it.
 func reviewPermissions() permissions {
-	return permissions{
-		"*":        "deny",
-		"read":     "allow",
-		"grep":     "allow",
-		"glob":     "allow",
-		"webfetch": "deny",
-		"edit": map[string]string{
-			"*":             "deny",
-			".kibitz/out/*": "allow",
-		},
-		"bash": map[string]string{
-			"*":         "deny",
-			"git diff*": "allow",
-			"git log*":  "allow",
-			"git show*": "allow",
-			"rg *":      "allow",
-		},
+	p := baseline()
+	p["edit"] = map[string]string{
+		"*":             "deny",
+		".kibitz/out/*": "allow",
 	}
+	return p
 }
 
 // answerPermissions withhold even that: answering a question requires reading
 // only.
 func answerPermissions() permissions {
-	return permissions{
-		"*":        "deny",
-		"read":     "allow",
-		"grep":     "allow",
-		"glob":     "allow",
-		"edit":     "deny",
-		"webfetch": "deny",
-		"bash": map[string]string{
-			"*":         "deny",
-			"git log*":  "allow",
-			"git show*": "allow",
-			"rg *":      "allow",
-		},
-	}
+	p := baseline()
+	p["edit"] = "deny"
+	return p
 }
 
 // implementPermissions let the agent write, and only where the repository said
@@ -77,7 +80,7 @@ func answerPermissions() permissions {
 // (see worker.Editable). This is the cheap layer that stops an honest mistake
 // early; the expensive one is the check afterwards, which stops the rest.
 //
-// bash stays where it is in every other profile. The commands that build and
+// There is no shell here either (see [baseline]). The commands that build and
 // test the change run somewhere kibitz holds no credentials (ADR-0019), and an
 // agent that could run them here would be running them in the process that
 // holds the GitHub App's private key.
@@ -89,21 +92,9 @@ func implementPermissions(allow []string) permissions {
 		}
 	}
 
-	return permissions{
-		"*":        "deny",
-		"read":     "allow",
-		"grep":     "allow",
-		"glob":     "allow",
-		"webfetch": "deny",
-		"edit":     edit,
-		"bash": map[string]string{
-			"*":         "deny",
-			"git diff*": "allow",
-			"git log*":  "allow",
-			"git show*": "allow",
-			"rg *":      "allow",
-		},
-	}
+	p := baseline()
+	p["edit"] = edit
+	return p
 }
 
 func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Request, servers map[string]MCPServer) error {
