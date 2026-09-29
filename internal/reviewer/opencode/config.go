@@ -118,6 +118,7 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 	if req.Mode == reviewer.ModeImplement {
 		cfg.Permission = implementPermissions(req.EditablePaths)
 	}
+	allowServerTools(cfg.Permission, servers)
 
 	// A model OpenCode's catalog does not know about is declared here, with a
 	// credential minted for this job.
@@ -137,6 +138,41 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 		return fmt.Errorf("opencode: writing config: %w", err)
 	}
 	return nil
+}
+
+// allowServerTools lets the agent call the tools of the MCP servers this run
+// enabled.
+//
+// opencode checks an MCP tool against the permission block like any other,
+// by the name it gives it, so under "*": "deny" a server that is enabled and
+// connected still offers the model nothing: its tools are left out of the
+// request. Enabling a server was the decision -- the operator defined it, the
+// repository asked for it, and a fork got it only if it is marked for forks
+// -- so its tools are allowed by that name and no others.
+//
+// The key sorts after "*" in the encoded object, which is the order opencode
+// reads the rules in, the last match winning. A server's name cannot put it
+// before: the characters that sort before "*" are the ones sanitized away.
+func allowServerTools(p permissions, servers map[string]MCPServer) {
+	for name := range servers {
+		p[mcpToolPrefix(name)+"*"] = "allow"
+	}
+}
+
+// mcpToolPrefix is how opencode prefixes a server's tools: the server's name
+// with everything outside [A-Za-z0-9_-] replaced by "_", and a "_". Doing the
+// same here keeps the pattern free of wildcards whatever the name is.
+func mcpToolPrefix(server string) string {
+	var b strings.Builder
+	for _, r := range server {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String() + "_"
 }
 
 // writeFile creates the parent directory and writes the file with permissions
