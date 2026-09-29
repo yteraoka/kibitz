@@ -44,6 +44,10 @@ type Metrics struct {
 	ImplementVerified *prometheus.CounterVec
 	// ImplementOpened counts the draft pull requests the mode opened.
 	ImplementOpened prometheus.Counter
+	// EgressRequests counts what the agent's processes asked the egress
+	// proxy for, by outcome. No host label: a denied host is whatever the
+	// agent was talked into naming, and would make the series unbounded.
+	EgressRequests *prometheus.CounterVec
 }
 
 // NewMetrics registers the instruments on a fresh registry, so that two
@@ -120,6 +124,10 @@ func NewMetrics() *Metrics {
 			Name: "kibitz_implement_pull_requests_total",
 			Help: "Draft pull requests opened by the mode that writes code.",
 		}),
+		EgressRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kibitz_egress_requests_total",
+			Help: "Requests the agent made through the egress proxy, by outcome (allowed, denied, failed). The log has each one.",
+		}, []string{"outcome"}),
 	}
 
 	registry.MustRegister(
@@ -127,7 +135,7 @@ func NewMetrics() *Metrics {
 		m.JobsTotal, m.JobDuration, m.JobsInFlight,
 		m.AgentTokens, m.AgentToolCalls, m.ReferenceDocs,
 		m.CommentsPosted, m.FindingsDropped, m.ImplementRefused,
-		m.ImplementVerified, m.ImplementOpened,
+		m.ImplementVerified, m.ImplementOpened, m.EgressRequests,
 	)
 	return m
 }

@@ -291,6 +291,54 @@ func TestLoadWorkerRejectsUnknownOpenCodeMode(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerEgressDefaults(t *testing.T) {
+	cfg, err := config.LoadWorker(config.MapEnv(minimalWorkerEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := cfg.Egress
+	if e.Enabled || !e.Inspect || len(e.Allow) != 0 || len(e.Deny) != 0 {
+		t.Errorf("egress defaults = %+v", e)
+	}
+	if strings.Join(e.NoProxy, ",") != strings.Join(config.DefaultEgressNoProxy, ",") {
+		t.Errorf("NoProxy = %v", e.NoProxy)
+	}
+
+	env := minimalWorkerEnv()
+	env["KIBITZ_EGRESS_NO_PROXY"] = "off"
+	cfg, err = config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Egress.NoProxy) != 0 {
+		t.Errorf("NoProxy = %v, want none", cfg.Egress.NoProxy)
+	}
+}
+
+func TestLoadWorkerRejectsBadEgressRules(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_EGRESS_ALLOW"] = "https://api.example.com"
+	env["KIBITZ_EGRESS_DENY"] = "bad*.example.com"
+
+	_, err := config.LoadWorker(config.MapEnv(env))
+	for _, key := range []string{"KIBITZ_EGRESS_ALLOW", "KIBITZ_EGRESS_DENY"} {
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("err = %v, want it to mention %s", err, key)
+		}
+	}
+}
+
+func TestLoadWorkerPathRulesNeedInspection(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_EGRESS_ALLOW"] = "api.example.com/v1/*"
+	env["KIBITZ_EGRESS_TLS_INSPECT"] = "false"
+
+	_, err := config.LoadWorker(config.MapEnv(env))
+	if err == nil || !strings.Contains(err.Error(), "KIBITZ_EGRESS_TLS_INSPECT") {
+		t.Fatalf("err = %v, want it to mention KIBITZ_EGRESS_TLS_INSPECT", err)
+	}
+}
+
 func TestLoadWorkerRejectsNonPositiveConcurrency(t *testing.T) {
 	env := minimalWorkerEnv()
 	env["KIBITZ_CONCURRENCY"] = "0"

@@ -89,6 +89,12 @@ PR のタイトル・本文・差分・コメントはすべて**外部の第三
      ([worker.md](worker.md#3-opencode-設定-ジョブごとに生成))
    - 読めるのはワークスペースの中だけ (`external_directory` を `deny`)
    - 外部アクセスは許可リストの MCP のみ
+   - **エージェントの HTTP(S) はワーカー内のプロキシを通す** (`KIBITZ_EGRESS_PROXY`)。
+     許可リスト / 拒否リストで宛先を決め、TLS inspection でパスまで判定し、
+     1 リクエスト 1 行をジョブの `event_id` 付きでログに残す
+     ([configuration.md](configuration.md#外部アクセスの制御)、
+     [ADR-0021](adr/0021-agent-egress-through-an-inspecting-proxy.md))。
+     プロキシはプロセスが `HTTPS_PROXY` に従うから効くので、強制は次の層が担う
    - egress をネットワーク層で制限
 3. **出力を検証する。** エージェントの出力は構造化 JSON としてスキーマ検証し、
    コメント本文はそのまま投稿する前に長さ・件数・対象行の妥当性を検査する。

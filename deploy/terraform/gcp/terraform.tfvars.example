@@ -128,6 +128,20 @@ alert_notification_channels = []
 #
 #   azure_devops_token_is_bearer = false
 
+# --- エージェントの外部アクセス ---------------------------------------------
+#
+# エージェント (opencode と MCP サーバー) の HTTP(S) をワーカー内のプロキシに通し、
+# 1 リクエスト 1 行でログに出す。HTTPS は既定で TLS inspection するので、
+# パスまでログに残り、ルールにもパスを書ける (docs/configuration.md#外部アクセスの制御)。
+#
+# egress_allow を空にすると「拒否リスト以外はすべて許可 + ログだけ」になる。
+# まずは空で動かしてログを見てから、許可リストを書くのがよい。
+# モデル (Vertex AI) は *.googleapis.com なので、許可リストを書くなら必ず入れる。
+#
+#   egress_proxy = true
+#   egress_allow = ["*.googleapis.com", "jira.example.com"]
+#   egress_deny  = ["jira.example.com/rest/api/*/user*"]
+
 # --- その他の設定 ------------------------------------------------------
 #
 # docs/configuration.md にある環境変数のうち、既定値で足りるものは

@@ -639,6 +639,15 @@ egress を塞ぐ。**リポジトリのコードは実行しない** — ビル�
 実装モードでそれが必要になる場合は、資格情報を持たない別の Cloud Run ジョブに出す
 (上記 9、[ADR-0019](adr/0019-run-repository-code-in-a-credential-less-job.md))。
 
+エージェントのプロセスが外に出るときの経路は、`KIBITZ_EGRESS_PROXY=true` で
+**ワーカー内のプロキシ**に集められる。ジョブごとに `127.0.0.1` の別ポートで
+セッションを開き、opencode に `HTTPS_PROXY` と CA のファイルを渡し、ジョブが
+終わったら閉じる。プロキシは許可リスト / 拒否リストで宛先を決め、
+TLS inspection でパスまで見て、1 リクエスト 1 行を `event_id` 付きで記録する
+([configuration.md](configuration.md#外部アクセスの制御)、
+[ADR-0021](adr/0021-agent-egress-through-an-inspecting-proxy.md))。
+ワーカー自身の通信 (Forge API など) はプロキシを通らない。
+
 ## 11. 観測
 
 - OpenCode の `--format json` イベントを逐次パースし、ツール呼び出し・トークン数・

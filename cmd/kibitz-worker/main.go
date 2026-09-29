@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yteraoka/kibitz/internal/config"
+	"github.com/yteraoka/kibitz/internal/egress"
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
 	azdoforge "github.com/yteraoka/kibitz/internal/forge/azuredevops"
@@ -118,7 +120,15 @@ func realMain() error {
 
 	metrics := telemetry.NewMetrics()
 
-	job, err := newReviewJob(ctx, cfg, logger, state, metrics)
+	proxy, err := newEgress(cfg, logger, metrics)
+	if err != nil {
+		return fmt.Errorf("egress proxy: %w", err)
+	}
+	if proxy != nil {
+		defer func() { _ = proxy.Close() }()
+	}
+
+	job, err := newReviewJob(ctx, cfg, logger, state, metrics, proxy)
 	if err != nil {
 		return err
 	}
@@ -249,7 +259,7 @@ func botLogins(ctx context.Context, cfg *config.Worker, job *worker.ReviewJob, l
 	return append(logins, login)
 }
 
-func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics) (*worker.ReviewJob, error) {
+func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, state store.Store, metrics *telemetry.Metrics, proxy *egress.Proxy) (*worker.ReviewJob, error) {
 	forges := make(map[event.Platform]forge.Client)
 
 	if cfg.GitHub.AppID != 0 {
@@ -315,6 +325,9 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		logger.LogAttrs(context.Background(), slog.LevelInfo, "MCP servers are available to repositories",
 			slog.Any("servers", mcp.Names()))
 	}
+	if proxy != nil {
+		warnUnreachableMCP(mcp, proxy, logger)
+	}
 
 	engine := opencode.New(opencode.Config{
 		Bin:            cfg.OpenCode.Bin,
@@ -330,6 +343,7 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		ContextBin:     contextBin(cfg.OpenCode.ContextBin),
 		MCPServers:     mcp,
 		CustomProvider: vertexMaaSProvider(cfg, logger),
+		Egress:         proxy,
 	}, logger)
 
 	verifier, err := newVerifier(ctx, cfg, logger)
@@ -373,6 +387,64 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		MaxPostsPerHour:  cfg.MaxPostsPerHour,
 		Metrics:          metrics,
 	}, nil
+}
+
+// newEgress builds the proxy the agent reaches the network through, or nil
+// when the deployment has not turned it on.
+func newEgress(cfg *config.Worker, logger *slog.Logger, metrics *telemetry.Metrics) (*egress.Proxy, error) {
+	e := cfg.Egress
+	if !e.Enabled {
+		return nil, nil
+	}
+	proxy, err := egress.New(egress.Config{
+		Allow:       e.Allow,
+		Deny:        e.Deny,
+		Inspect:     e.Inspect,
+		Passthrough: e.Passthrough,
+		NoProxy:     e.NoProxy,
+		Observe: func(outcome string) {
+			metrics.EgressRequests.WithLabelValues(outcome).Inc()
+		},
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "the agent's requests go through the egress proxy",
+		slog.Any("allow", e.Allow),
+		slog.Any("deny", e.Deny),
+		slog.Bool("tls_inspect", e.Inspect),
+		slog.Any("tls_passthrough", e.Passthrough),
+		slog.Any("no_proxy", e.NoProxy),
+	)
+	if len(e.Allow) == 0 {
+		logger.LogAttrs(context.Background(), slog.LevelWarn,
+			"KIBITZ_EGRESS_ALLOW is empty: every destination not denied is allowed, and only logged")
+	}
+	return proxy, nil
+}
+
+// warnUnreachableMCP names the remote MCP servers the egress rules would turn
+// away. It does not refuse to start: a server no repository enables costs
+// nothing, and one that is enabled fails in the job's own log anyway. This
+// puts the reason in the startup log, where it is found before a review is.
+func warnUnreachableMCP(mcp opencode.Catalog, proxy *egress.Proxy, logger *slog.Logger) {
+	for _, name := range mcp.Names() {
+		server := mcp[name]
+		if server.Type != opencode.MCPRemote {
+			continue
+		}
+		u, err := url.Parse(server.URL)
+		if err != nil {
+			continue
+		}
+		if d := proxy.Check(u); !d.Allowed {
+			logger.LogAttrs(context.Background(), slog.LevelWarn, "an MCP server is not reachable through the egress proxy",
+				slog.String("server", name),
+				slog.String("host", u.Host),
+				slog.String("reason", d.Reason()),
+			)
+		}
+	}
 }
 
 // vertexMaaSProvider declares Vertex AI's Model as a Service partner models,
