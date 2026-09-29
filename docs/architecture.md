@@ -117,6 +117,7 @@ Cloud Scheduler ──毎分──> kibitz-scaler
                               ├─ Cloud Monitoring から num_undelivered_messages を読む
                               ├─ 溜まっていれば ceil(件数 / N) 台 (上限あり)
                               ├─ 一定時間ずっと空なら最小 (既定 0) 台
+                              ├─ ただし台数が変わった直後は下げない
                               └─ 読めなければ 1 台のまま (下げない)
 ```
 
@@ -124,6 +125,9 @@ Cloud Scheduler ──毎分──> kibitz-scaler
   それを待つとレビューの開始が遅れる。scaler は増減と 0 への回収を担当する。
 - 滞留数には **ack されていない配送済みメッセージも含まれる**ので、レビュー実行中の
   ワーカーが「空」と判定されて消されることはない。
+- ただしメトリクスは遅れるので、**サーバーが起こした直後**は、きっかけのメッセージが
+  まだ滞留数に現れない。そのため worker pool の `updateTime` から
+  `worker_idle_after` の間は下げない ([deployment.md](deployment.md#ワーカーのオートスケール))。
 - 書き換えるのは worker pool のインスタンス数 (`scaling.manualInstanceCount`) だけで、
   リビジョンテンプレートには触らない (新リビジョンが作られると実行中のレビューが
   中断されるため)。

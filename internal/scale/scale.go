@@ -53,6 +53,11 @@ const (
 	ReasonCooling Reason = "cooling"
 	ReasonIdle    Reason = "idle"
 	ReasonUnknown Reason = "unknown"
+	// ReasonSettling holds a count that was raised recently. The backlog
+	// that raised it -- the server's wake-up above all -- takes minutes to
+	// reach the metric, and until it does the queue looks as empty as it did
+	// before (see [Scaler.Reconcile]).
+	ReasonSettling Reason = "settling"
 )
 
 // Policy turns a backlog into the number of instances the worker should have.
@@ -133,6 +138,12 @@ type Target interface {
 	SetInstances(ctx context.Context, n int) error
 	// String names the target for logs.
 	String() string
+}
+
+// ChangeTracker is a [Target] that knows when it was last changed. The scaler
+// uses it to leave alone a count somebody else has just raised.
+type ChangeTracker interface {
+	LastChanged(ctx context.Context) (time.Time, error)
 }
 
 // Result is what one reconciliation did.

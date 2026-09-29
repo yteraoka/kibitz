@@ -331,3 +331,72 @@ func TestWakeDoesNotBlock(t *testing.T) {
 		t.Fatal("Wake blocked")
 	}
 }
+
+// changingTarget is a target that knows when it was last changed.
+type changingTarget struct {
+	*fakeTarget
+	changed time.Time
+	err     error
+}
+
+func (c *changingTarget) LastChanged(context.Context) (time.Time, error) {
+	return c.changed, c.err
+}
+
+// The server woke the worker a moment ago and the metric has not caught up:
+// the queue still reads as empty for an hour. The worker must be left alone,
+// or the review it was woken for is killed.
+func TestScalerLeavesARecentlyRaisedCountAlone(t *testing.T) {
+	now := time.Date(2026, 9, 29, 15, 5, 24, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		changedAgo time.Duration
+		err        error
+		want       int
+		reason     Reason
+	}{
+		"woken twenty seconds ago":     {changedAgo: 40 * time.Second, want: 1, reason: ReasonSettling},
+		"changed longer ago than idle": {changedAgo: 20 * time.Minute, want: 0, reason: ReasonIdle},
+		"change time unreadable":       {err: errors.New("run api is having a day"), want: 1, reason: ReasonSettling},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := &changingTarget{fakeTarget: &fakeTarget{count: 1}, changed: now.Add(-tc.changedAgo), err: tc.err}
+			s := &Scaler{
+				Source: fakeSource{backlog: Backlog{Known: true, EmptyFor: time.Hour}},
+				Target: target,
+				Policy: testPolicy(),
+				Logger: quiet(),
+				Now:    func() time.Time { return now },
+			}
+			res, err := s.Reconcile(context.Background())
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if res.Desired != tc.want || res.Reason != tc.reason {
+				t.Errorf("result = %+v, want %d for %s", res, tc.want, tc.reason)
+			}
+			if target.count != tc.want {
+				t.Errorf("instances = %d, want %d", target.count, tc.want)
+			}
+		})
+	}
+}
+
+// Settling only ever holds a count up; it never stops one going up.
+func TestSettlingDoesNotStopAScaleOut(t *testing.T) {
+	now := time.Now()
+	target := &changingTarget{fakeTarget: &fakeTarget{count: 0}, changed: now}
+	s := &Scaler{
+		Source: fakeSource{backlog: Backlog{Known: true, Undelivered: 1}},
+		Target: target,
+		Policy: testPolicy(),
+		Logger: quiet(),
+		Now:    func() time.Time { return now },
+	}
+	res, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.Desired != 1 || res.Reason != ReasonBacklog || target.count != 1 {
+		t.Errorf("result = %+v, instances = %d, want a scale out to 1", res, target.count)
+	}
+}
