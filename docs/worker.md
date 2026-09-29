@@ -184,14 +184,9 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
     "grep": "allow",
     "glob": "allow",
     "webfetch": "deny",
-    "edit": { "*": "deny", ".kibitz/out/*": "allow" },
-    "bash": {
-      "*": "deny",
-      "git diff*": "allow",
-      "git log*": "allow",
-      "git show*": "allow",
-      "rg *": "allow"
-    }
+    "bash": "deny",
+    "external_directory": "deny",
+    "edit": { "*": "deny", ".kibitz/out/*": "allow" }
   },
   "mcp": {
     "kibitz-context": {
@@ -215,6 +210,20 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
   (`--auto` は明示的な `deny` を上書きしない)。
 - **既定は書き込み禁止。** レビューは読み取り専用。出力先の `.kibitz/out/` だけ書き込みを許す。
   自動修正 (suggestion / 修正コミット) を有効にする場合のみ `edit` を段階的に開放する。
+- **シェルは渡さない。どのモードでも `bash` は丸ごと `deny`。** 以前は
+  `git diff` / `git log` / `git show` / `rg` だけを許していたが、opencode は
+  `bash` のルールをコマンドライン文字列へのワイルドカードとして照合するので、
+  許したプログラムのオプションがそのまま通っていた。読むだけに見えるコマンドにも、
+  **リポジトリのファイルを実行する・ワーカー自身の環境変数を読む・ワークスペースの外に
+  書く**オプションがあり、いずれもワーカーのイメージで実際に確認した
+  (ワーカーの環境には GitHub App の秘密鍵がある)。オプションを 1 つずつ拒否する
+  パターンは「誰かが思いついたものの一覧」にしかならないので、許可を絞るのではなく
+  シェルを外した。コードを探すのは opencode 自身の `read` / `grep` / `glob` で足りる
+  (引数はパスとパターンだけで、オプションを取らない)。失ったのは `git log` /
+  `git show` による履歴の参照だけ
+- **ワークスペースの外は読ませない。** `external_directory` を `"*"` の既定に任せず
+  明示的に `deny` にする。ワークスペースの外は `read` / `grep` / `glob` からも
+  見えない
 - **リポジトリ内の `opencode.json` / `.opencode/` を無条件に信用しない。**
   PR の内容は攻撃者が制御しうる。既定では `OPENCODE_CONFIG` 側 (= kibitz 生成) を優先し、
   リポジトリ設定の取り込みは許可リスト方式にする ([security.md](security.md))。
@@ -550,7 +559,7 @@ Issue の内容を読んでコードを書き、ブランチと draft PR を作�
 | --- | --- |
 | `read` / `grep` / `glob` | allow |
 | `edit` | `paths_allow` のパターンのみ allow、既定は deny |
-| `bash` | **`git diff` / `git log` / `git show` / `rg` のみ。ビルドもテストも走らせない** |
+| `bash` | **deny。** ビルドもテストも、`git` も `rg` も走らせない (§3) |
 | `webfetch` | deny |
 
 **`bash` でビルドやテストを走らせない**のは、走らせる場所が別にあるため。
