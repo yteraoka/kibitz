@@ -65,7 +65,7 @@ func TestTheServersGitHubTokenCannotPush(t *testing.T) {
 	if !ok {
 		t.Fatal("no GitHub reactor")
 	}
-	if err := reactor.React(context.Background(), forge.CommentRef{Owner: "acme", Repo: "web", Number: 1, CommentID: "1"}); err != nil {
+	if err := reactor.React(context.Background(), forge.CommentRef{Owner: "acme", Repo: "web", Number: 1, CommentID: "1"}, forge.ReactionSeen); err != nil {
 		t.Fatalf("React: %v", err)
 	}
 

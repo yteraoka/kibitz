@@ -19,7 +19,14 @@ import (
 // From Microsoft's own specification of the 7.1 API, which also puts it at
 // api-version 7.1 rather than a preview. A like from the same identity twice
 // is one like.
-func (c *Client) React(ctx context.Context, ref forge.CommentRef) error {
+//
+// A like is all there is, so a refusal cannot be said this way: it is
+// reported as not supported rather than sent as a like, which would say the
+// opposite.
+func (c *Client) React(ctx context.Context, ref forge.CommentRef, reaction forge.Reaction) error {
+	if reaction == forge.ReactionRefused {
+		return fmt.Errorf("azuredevops: %w: a pull request comment takes no reaction but a like", forge.ErrNotSupported)
+	}
 	if ref.OnIssue {
 		// A work item is not a pull request and its discussion takes no like.
 		return fmt.Errorf("azuredevops: %w: reacting to a work item comment", forge.ErrNotSupported)

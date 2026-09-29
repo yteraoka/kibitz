@@ -32,6 +32,7 @@ kibitz が**なぜそう作られているか**の記録。
 | [0019](0019-run-repository-code-in-a-credential-less-job.md) | リポジトリのコードは、資格情報を持たない別ジョブで実行する | 採用 |
 | [0020](0020-the-server-reacts-at-receipt.md) | サーバーが受信時にコメントへリアクションし、そのために絞った資格情報を持つ | 採用 |
 | [0021](0021-agent-egress-through-an-inspecting-proxy.md) | エージェントの外部アクセスは、ワーカー内の inspection するプロキシを通す | 採用 |
+| [0022](0022-only-allowed-people-may-ask-in-a-comment.md) | コメントで依頼できる人を運用側で絞り、断ったことはリアクションで伝える | 採用 |
 
 **[ADR-0010](0010-data-and-instruction-positions.md) が中核**で、
 0011・0015・0016・0017 はいずれもその原則を各所に適用した結果になっている。

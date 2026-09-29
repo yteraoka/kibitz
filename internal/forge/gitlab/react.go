@@ -11,8 +11,12 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 )
 
-// Reaction is the emoji kibitz awards a note to say it has seen it.
-const Reaction = "eyes"
+// Reactions kibitz awards a note: "eyes" for seen, "no_entry_sign" (🚫) for
+// refused. GitLab takes any emoji name, so the refusal can say exactly that.
+const (
+	Reaction        = "eyes"
+	RefusedReaction = "no_entry_sign"
+)
 
 // React implements [forge.Reactor] with an emoji reaction on the note, which
 // GitLab calls award emoji:
@@ -21,7 +25,11 @@ const Reaction = "eyes"
 //	POST /projects/:id/issues/:iid/notes/:note_id/award_emoji?name=eyes
 //
 // Taken from GitLab's own API documentation (doc/api/emoji_reactions.md).
-func (c *Client) React(ctx context.Context, ref forge.CommentRef) error {
+func (c *Client) React(ctx context.Context, ref forge.CommentRef, reaction forge.Reaction) error {
+	name := Reaction
+	if reaction == forge.ReactionRefused {
+		name = RefusedReaction
+	}
 	id := strings.TrimSpace(ref.CommentID)
 	if id == "" {
 		return errors.New("gitlab: no note to react to")
@@ -32,7 +40,7 @@ func (c *Client) React(ctx context.Context, ref forge.CommentRef) error {
 		kind = "issues"
 	}
 	path := fmt.Sprintf("%s/%s/%d/notes/%s/award_emoji?name=%s",
-		project, kind, ref.Number, url.PathEscape(id), url.QueryEscape(Reaction))
+		project, kind, ref.Number, url.PathEscape(id), url.QueryEscape(name))
 
 	err := c.do(ctx, http.MethodPost, path, nil, nil)
 	// An emoji the same user already awarded is refused with a message saying

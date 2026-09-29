@@ -323,15 +323,30 @@ type CommentRef struct {
 	ThreadID string
 }
 
-// Reactor puts a reaction on a comment. It is what kibitz uses to say "seen"
-// the moment an instruction arrives, before any work has been done.
+// Reaction is what a reaction on a comment says. Each forge picks the emoji
+// for it from the ones it has.
+type Reaction string
+
+// Reactions kibitz puts on a comment.
+const (
+	// ReactionSeen says the instruction is queued.
+	ReactionSeen Reaction = "seen"
+	// ReactionRefused says the instruction will not be acted on, because the
+	// person who wrote it is not allowed to ask.
+	ReactionRefused Reaction = "refused"
+)
+
+// Reactor puts a reaction on a comment. It is what kibitz uses to answer an
+// instruction the moment it arrives, before any work has been done: "seen"
+// when it is queued, "refused" when it never will be.
 //
 // It is kept apart from [Client] because it is used somewhere Client is not:
 // by the webhook server, which is on the public internet and is given the
 // narrowest credential that can do this and nothing more (ADR-0020).
 type Reactor interface {
-	// React acknowledges a comment. Reacting twice is not an error.
-	React(ctx context.Context, c CommentRef) error
+	// React puts reaction on a comment. Reacting twice is not an error. A
+	// forge with no emoji for a reaction returns [ErrNotSupported].
+	React(ctx context.Context, c CommentRef, reaction Reaction) error
 }
 
 // CommentOf names the comment an event came from, or reports that it did not

@@ -11,9 +11,12 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 )
 
-// Reaction is what kibitz puts on a comment to say it has seen it. "eyes" is
-// the one people already read as "looking at it".
-const Reaction = "eyes"
+// Reactions kibitz puts on a comment. "eyes" is the one people already read
+// as "looking at it"; "-1" is the plainest no GitHub's short list has.
+const (
+	Reaction        = "eyes"
+	RefusedReaction = "-1"
+)
 
 // React implements [forge.Reactor].
 //
@@ -24,7 +27,11 @@ const Reaction = "eyes"
 //
 // Reacting twice answers 200 instead of 201 and changes nothing, so a
 // redelivered webhook does not stack reactions.
-func (c *Client) React(ctx context.Context, ref forge.CommentRef) error {
+func (c *Client) React(ctx context.Context, ref forge.CommentRef, reaction forge.Reaction) error {
+	content := Reaction
+	if reaction == forge.ReactionRefused {
+		content = RefusedReaction
+	}
 	id := strings.TrimSpace(ref.CommentID)
 	if id == "" {
 		return errors.New("github: no comment to react to")
@@ -35,7 +42,7 @@ func (c *Client) React(ctx context.Context, ref forge.CommentRef) error {
 	}
 	repo := forge.PRRef{Owner: ref.Owner, Repo: ref.Repo}
 	path := repoPath(repo, fmt.Sprintf("/%s/comments/%s/reactions", kind, url.PathEscape(id)))
-	return c.do(ctx, http.MethodPost, path, map[string]string{"content": Reaction}, nil)
+	return c.do(ctx, http.MethodPost, path, map[string]string{"content": content}, nil)
 }
 
 var _ forge.Reactor = (*Client)(nil)

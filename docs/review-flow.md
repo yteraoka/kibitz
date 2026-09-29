@@ -244,6 +244,7 @@ sequenceDiagram
 | 自分自身の発言 | server の policy → worker の Guard (二重) | 同じく捨てる |
 | リポジトリが許可リストに無い | server の policy | 同じく捨てる |
 | メンションもコマンドも無い | server の policy | — |
+| コメントの作者が `KIBITZ_ALLOWED_COMMENTERS` に無い (設定時のみ) | server の policy。**コメントに拒否のリアクションを付ける** | 同じく捨てる |
 | タイトル / 本文にキーワードが無い | server の policy | 素通し |
 | PR が closed かつ未マージ | `review()` | 同じくスキップ |
 | `review.enabled` が false / `triggers` に無い | `review()` | `triggers` は素通し |

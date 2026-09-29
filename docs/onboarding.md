@@ -215,6 +215,7 @@ gcloud run services logs read kibitz-server --region "$REGION" --limit 50 | \
 | --- | --- |
 | Webhook は 200 だがレビューされない | `KIBITZ_ALLOWED_REPOS` に入っていない。ログの `reason` が `repo_not_allowed` |
 | 同上 (GitHub) | App がそのリポジトリにインストールされていない。clone が落ちる |
+| コメントで依頼したのに 👎 (GitLab は 🚫) が付いた | 依頼した人が `KIBITZ_ALLOWED_COMMENTERS` に入っていない。ログの `reason` が `actor_not_allowed` で、`author` に login が出る |
 | 同上 (キーワード設定時) | タイトルにも本文にもキーワードが無い (`reason` が `no_keyword`)。コメントでの依頼は常に通る |
 | 401 が返る | 検証に失敗している。[deployment.md §7 の切り分け](deployment.md#401-の切り分け) |
 | Azure DevOps で `invalid character '<'` 系 | トークンが受け付けられていない (203 + サインインページ)。スコープか、Bearer かどうかの設定 |

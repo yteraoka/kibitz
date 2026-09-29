@@ -28,6 +28,7 @@
 | `KIBITZ_GITHUB_APP_ID` | - | 自分の発言を判別するための GitHub App id。**秘密情報ではない** (App の設定 URL に含まれる数字)。GitHub がコメントに付ける `performed_via_github_app.id` と突き合わせる |
 | `KIBITZ_BOT_LOGINS` | - | 追加で無視したいアカウント名 (カンマ区切り)。通常は不要 — App id での判別が効かないイベント (レビューコメントなど) の保険 |
 | `KIBITZ_ALLOWED_REPOS` | `*` | 受け付けるリポジトリのグロブ (カンマ区切り) |
+| `KIBITZ_ALLOWED_COMMENTERS` | - | **コメントで kibitz に依頼してよい人**の login (カンマ区切り)。未設定なら誰でも依頼できる。リストに無い人の依頼はキューに載らず、コメントに**拒否のリアクション**が付く ([下記](#コメントで依頼できる人)) |
 | `KIBITZ_MENTION` | `/kibitz` | コメントで kibitz に話しかけるときのトークン。**`@` 付きにすると同名の GitHub アカウントへ通知が飛ぶ**ため既定は `/` ([security.md](security.md#31-メンション名と通知)) |
 | `KIBITZ_TRIGGER_KEYWORDS` | - | レビュー依頼のキーワード (カンマ区切り)。設定すると PR 系イベントはタイトルか本文にこれらかメンションを含むときだけ publish する。コメントは常に対象 ([event-schema.md](event-schema.md#31-キーワードによる-publish-の絞り込み)) |
 | `KIBITZ_MAX_EVENT_AGE` | `0` (無効) | これより古い配送を破棄する。0 は無効 (下記) |
@@ -36,11 +37,44 @@
 | `KIBITZ_SCALE_REGION` | - | ワーカーのリージョン (backend=cloudrun で必須) |
 | `KIBITZ_SCALE_WORKER_POOL` | - | ワーカーの Cloud Run worker pool 名 (同上) |
 | `KIBITZ_SCALE_WAKE_COOLDOWN` | `30s` | 起動要求をまとめる間隔。初回は待たない |
-| `KIBITZ_REACTIONS` | `true` | kibitz 宛てのコメントを publish したら、その場で 👀 (Azure DevOps では like) を付ける。付けるには下の資格情報が要り、**持っているプラットフォームにだけ**付く。`false` にすると資格情報の変数を読まない ([ADR-0020](adr/0020-the-server-reacts-at-receipt.md)) |
+| `KIBITZ_REACTIONS` | `true` | kibitz 宛てのコメントを publish したら、その場で 👀 (Azure DevOps では like) を付ける。`KIBITZ_ALLOWED_COMMENTERS` で断ったコメントには 👎 (GitLab は 🚫) を付ける。付けるには下の資格情報が要り、**持っているプラットフォームにだけ**付く。`false` にすると資格情報の変数を読まない ([ADR-0020](adr/0020-the-server-reacts-at-receipt.md)) |
 | `KIBITZ_REACTION_TIMEOUT` | `3s` | リアクション 1 回の上限。forge には先に 202 を返しているので、配送のタイムアウトには影響しない |
 | `KIBITZ_GITHUB_APP_ID` / `_INSTALLATION_ID` / `_PRIVATE_KEY` / `_BASE_URL` | - | リアクション用。ワーカーと同じ変数。**サーバーが発行するトークンは `issues` / `pull_requests` の書き込みだけに絞る**。リアクションが有効なら `_APP_ID` は数字として読む (App の設定 URL の数字) |
 | `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
 | `KIBITZ_AZDO_ORG_URL` / `_TOKEN` / `_TOKEN_IS_BEARER` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
+
+### コメントで依頼できる人
+
+`KIBITZ_ALLOWED_COMMENTERS` に書いた人のコメントだけが、kibitz への依頼として
+扱われる。public リポジトリでは**誰でもコメントできる**ので、書かなければ
+誰でもレビュー (とモデルの利用料) を起こせる。
+
+```
+KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
+```
+
+| 書き方 | 意味 |
+| --- | --- |
+| `alice` | どのプラットフォームでも `alice` |
+| `github:alice` | GitHub の `alice` だけ (`github` / `gitlab` / `azure_devops`) |
+| `*@example.com` | `*` と `?` はワイルドカード。Azure DevOps の login はメールアドレス形式 |
+
+- 大文字小文字は区別しない
+- 見るのは**コメントを書いた人**。依頼そのものがコメントだから
+- 対象は **kibitz 宛てのコメント** (`/kibitz ...` を含む PR のコメントと、
+  Issue でのコマンド) だけ。kibitz 宛てでないコメントには何もしない。
+  PR の作成や push による自動レビューは**この設定の対象外**
+- リストに無い人の依頼は**キューに載らない** (worker は起動せず、モデルも呼ばない)。
+  ログは `reason=actor_not_allowed` と `author` 付きで出るので、足すべき人がいれば分かる
+- 断ったことはコメントへのリアクションで伝える: GitHub は 👎 (`-1`)、GitLab は 🚫
+  (`no_entry_sign`)。**Azure DevOps はリアクションが like しか無く、断ったことを
+  表せないので何も付けない** (like を付けると逆の意味になる)。
+  `KIBITZ_REACTIONS=false` でも何も付かない
+- **ワイルドカードの使い方に注意する。** GitHub の login は誰でも取得できるので、
+  `acme-*` のようなパターンは「acme- で始まる名前を取った誰でも」を意味する。
+  login は変更でき、手放された名前は他人が取得できることも覚えておく
+- 実装モードの `implement.allowed_actors` (`.kibitz.yaml`) とは別の設定で、
+  そちらはこの判定を通った後にさらに絞るもの
 
 ## 2. kibitz-worker (環境変数)
 
