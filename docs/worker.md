@@ -186,12 +186,14 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
     "webfetch": "deny",
     "bash": "deny",
     "external_directory": "deny",
-    "edit": { "*": "deny", ".kibitz/out/*": "allow" }
+    "edit": { "*": "deny", ".kibitz/out/*": "allow" },
+    "jira_*": "allow",
+    "kibitz_*": "allow"
   },
   "mcp": {
-    "kibitz-context": {
+    "kibitz": {
       "type": "local",
-      "command": ["kibitz-mcp", "--job", "<job-id>"],
+      "command": ["kibitz-mcp", "--context", "<jobdir>/context.json"],
       "enabled": true
     },
     "jira": {
@@ -227,6 +229,13 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
 - **リポジトリ内の `opencode.json` / `.opencode/` を無条件に信用しない。**
   PR の内容は攻撃者が制御しうる。既定では `OPENCODE_CONFIG` 側 (= kibitz 生成) を優先し、
   リポジトリ設定の取り込みは許可リスト方式にする ([security.md](security.md))。
+- **有効にした MCP サーバーのツールは、名前で許可する** (`<サーバー名>_*`)。
+  opencode は MCP のツールも他のツールと同じく permission で判定するので、
+  `"*": "deny"` のままだと、サーバーが起動して接続していても**ツールがモデルに
+  渡らない** (opencode 1.18.31 で確認。以前はこの状態で、`kibitz-mcp` のツールも
+  外部の MCP も一度も使われていなかった)。サーバー名の `[A-Za-z0-9_-]` 以外の文字は
+  opencode と同じく `_` に置き換える (`my.jira` → `my_jira_*`)。
+  有効にしていないサーバーの名前には許可を書かない
 - **MCP はコンテキストを食う。** OpenCode のドキュメントも警告している通り、
   ツール定義だけでトークンを大量に消費するため、ジョブの種類ごとに必要な MCP だけを有効化する。
 

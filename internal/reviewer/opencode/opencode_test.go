@@ -366,6 +366,74 @@ func TestMCPServersAreWrittenIntoTheConfig(t *testing.T) {
 	}
 }
 
+// An enabled server's tools are allowed by name. Under "*": "deny" opencode
+// otherwise leaves them out of the request, and a server that is connected but
+// offers the model nothing is a cost with no use.
+func TestEnabledServersToolsAreAllowed(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin:        h.bin,
+		ContextBin: "kibitz-mcp",
+		MCPServers: opencode.Catalog{
+			"my.jira v2": {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+			"sentry":     {Type: opencode.MCPLocal, Command: []string{"sentry-mcp"}},
+		},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.MCP = []string{"my.jira v2"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	permission := h.config(t)["permission"].(map[string]any)
+	// opencode's own naming: anything outside [A-Za-z0-9_-] becomes "_".
+	for _, key := range []string{"my_jira_v2_*", opencode.ContextServerName + "_*"} {
+		if permission[key] != "allow" {
+			t.Errorf("permission[%q] = %v, want allow", key, permission[key])
+		}
+	}
+	if _, ok := permission["sentry_*"]; ok {
+		t.Error("a server the repository did not ask for had its tools allowed")
+	}
+
+	// opencode reads the rules in order and the last match wins, so the
+	// default has to come first.
+	raw, err := os.ReadFile(filepath.Join(h.workspace, ".kibitz", "config-copy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def, tools := strings.Index(string(raw), `"*": "deny"`), strings.Index(string(raw), `"my_jira_v2_*"`); def < 0 || tools < def {
+		t.Errorf("the default does not come before the server's rule:\n%s", raw)
+	}
+}
+
+// A server a fork pull request does not get has no rule either.
+func TestForkDoesNotAllowDroppedServersTools(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin: h.bin,
+		MCPServers: opencode.Catalog{
+			"jira":   {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp"},
+			"public": {Type: opencode.MCPRemote, URL: "https://public.example.com/mcp", AllowFork: true},
+		},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.PullRequest.IsFork = true
+	req.MCP = []string{"jira", "public"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	permission := h.config(t)["permission"].(map[string]any)
+	if _, ok := permission["jira_*"]; ok {
+		t.Error("a fork pull request was allowed the tools of a server it did not get")
+	}
+	if permission["public_*"] != "allow" {
+		t.Errorf("public_* = %v, want allow", permission["public_*"])
+	}
+}
+
 // A repository that asked for nothing gets nothing, and the block is left out
 // rather than written empty.
 func TestNoMCPServersWithoutARequest(t *testing.T) {
