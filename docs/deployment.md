@@ -546,6 +546,14 @@ Cloud Scheduler ──毎分──> kibitz-scaler ──> バックログを読�
   ワーカーはメッセージを掴んだままになり、作業中に消されることはない。
   それでもメトリクス自体が遅れるため、既定では 15 分 (`worker_idle_after`)
   空が続いてから下げる。
+- **台数が変わってから `worker_idle_after` の間は下げない** (`reason=settling`)。
+  サーバーが起こした直後は、そのきっかけのメッセージがまだメトリクスに
+  現れておらず、それまで長く空だったキューは「ずっと空」に見える。
+  これを見て下げると、**起こされたばかりのワーカーが実行中のレビューごと
+  止められる** (実際に起きた: 起こされてから 40 秒で 0 台に戻され、
+  レビューは再配送で 3 分遅れ、モデル代は 2 回分かかった)。
+  いつ変わったかは worker pool の `updateTime` で見るので、サーバーとの間に
+  受け渡しは要らない。読めなければ下げない
 - **メトリクスが読めないときは下げない。** Monitoring 障害で
   「空に見える」ことがあるので、読めなければ 1 台維持する。
 
@@ -567,6 +575,16 @@ gcloud logging read \
   'resource.type=cloud_run_job AND resource.labels.job_name=kibitz-scaler' \
   --limit 20 --format='value(jsonPayload.msg,jsonPayload.reason,jsonPayload.backlog)'
 ```
+
+`reconciled` の `reason` の意味:
+
+| reason | 意味 |
+| --- | --- |
+| `backlog` | 溜まっているので、その件数に見合う台数にする |
+| `cooling` | 空だが、空になってからまだ `worker_idle_after` 経っていない |
+| `settling` | 空に見えるが、台数が変わってからまだ `worker_idle_after` 経っていない (サーバーが起こした直後など) |
+| `idle` | 十分長く空なので最小台数に戻す |
+| `unknown` | メトリクスが読めないので 1 台に保つ |
 
 常時 1 台温めておきたい場合は `worker_min_instances = 1` にする。
 増減自体は動いたまま、下限だけが 1 になる。

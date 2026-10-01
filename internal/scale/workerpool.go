@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -97,6 +98,21 @@ func (c *CloudRunWorkerPool) SetInstances(ctx context.Context, n int) error {
 		return fmt.Errorf("patch %s scaling: %w", c.name, describe(err))
 	}
 	return nil
+}
+
+// LastChanged is when the worker pool was last updated, by anybody: the
+// server waking it, this scaler, or a deployment. It implements
+// [ChangeTracker].
+func (c *CloudRunWorkerPool) LastChanged(ctx context.Context) (time.Time, error) {
+	pool, err := c.get(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	changed, err := time.Parse(time.RFC3339Nano, pool.UpdateTime)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s: update time %q: %w", c.name, pool.UpdateTime, err)
+	}
+	return changed, nil
 }
 
 func (c *CloudRunWorkerPool) get(ctx context.Context) (*run.GoogleCloudRunV2WorkerPool, error) {

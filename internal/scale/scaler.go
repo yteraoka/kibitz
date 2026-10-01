@@ -20,6 +20,8 @@ type Scaler struct {
 	Target Target
 	Policy Policy
 	Logger *slog.Logger
+	// Now is the clock. Nil means time.Now.
+	Now func() time.Time
 }
 
 // Reconcile observes the backlog once and applies the instance count it calls
@@ -50,6 +52,11 @@ func (s *Scaler) Reconcile(ctx context.Context) (Result, error) {
 		return result, err
 	}
 	result.Current = current
+
+	if desired < current && s.settling(ctx, policy) {
+		desired, reason = current, ReasonSettling
+		result.Desired, result.Reason = desired, reason
+	}
 
 	if current == desired {
 		s.log().LogAttrs(ctx, slog.LevelDebug, "worker scale is unchanged",
@@ -100,6 +107,42 @@ func (s *Scaler) Run(ctx context.Context, interval time.Duration) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// settling reports whether the target was changed too recently to be scaled
+// down.
+//
+// The server wakes the worker the moment it publishes, and the backlog that
+// justifies it reaches the metric minutes later. In between, a queue that was
+// empty for an hour still reads as empty for an hour, and without this the
+// scaler takes the worker away in the middle of the review it was woken for --
+// which is what it did: woken, the job started, and the next reconcile set the
+// count back to zero twenty seconds later. The job was redelivered and ran
+// again, three minutes late and paid for twice.
+//
+// IdleAfter is the wait because it is the same wait: how long a metric that
+// says "empty" might still be catching up. A target that cannot say when it
+// changed is treated as settled, as before; one that can but fails to answer
+// is treated as settling, for the reason an unreadable backlog keeps the
+// worker up.
+func (s *Scaler) settling(ctx context.Context, policy Policy) bool {
+	tracker, ok := s.Target.(ChangeTracker)
+	if !ok {
+		return false
+	}
+	changed, err := tracker.LastChanged(ctx)
+	if err != nil {
+		s.log().LogAttrs(ctx, slog.LevelWarn, "could not read when the worker scale last changed; leaving it",
+			slog.String("target", s.Target.String()),
+			slog.String("error", err.Error()),
+		)
+		return true
+	}
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	return now().Sub(changed) < policy.IdleAfter
 }
 
 func (s *Scaler) log() *slog.Logger {
