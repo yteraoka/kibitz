@@ -583,3 +583,93 @@ func TestEvaluateWithoutAnyIdentityDoesNotDropItsOwnComments(t *testing.T) {
 		t.Errorf("decision = %+v; with neither an app id nor a login there is nothing to match on", d)
 	}
 }
+
+func commentersEngine(allowed ...string) *policy.Engine {
+	return policy.New(policy.Config{
+		BotLogins:         []string{"kibitz[bot]"},
+		AllowedRepos:      []string{"yteraoka/*"},
+		Mention:           "@kibitz",
+		AllowedCommenters: allowed,
+	})
+}
+
+func TestAllowedCommenters(t *testing.T) {
+	e := commentersEngine("Alice", "github:bob", "gitlab:carol", "*@example.com")
+	cases := []struct {
+		platform event.Platform
+		login    string
+		want     bool
+	}{
+		{event.PlatformGitHub, "alice", true},                 // any platform, any case
+		{event.PlatformGitLab, "ALICE", true},                 // any platform
+		{event.PlatformGitHub, "bob", true},                   // limited to github
+		{event.PlatformGitLab, "bob", false},                  // and only github
+		{event.PlatformGitLab, "carol", true},                 //
+		{event.PlatformGitHub, "carol", false},                //
+		{event.PlatformAzureDevOps, "dave@example.com", true}, // a wildcard
+		{event.PlatformGitHub, "mallory", false},
+		{event.PlatformGitHub, "", false}, // nobody to check is nobody on the list
+	}
+	for _, c := range cases {
+		ev := commentEvent("@kibitz review")
+		ev.Source.Platform = c.platform
+		ev.Comment.Author = event.Actor{Login: c.login}
+		d := e.Evaluate(ev, now)
+		if d.Publish != c.want {
+			t.Errorf("%s:%q published = %v, want %v (%s)", c.platform, c.login, d.Publish, c.want, d.Reason)
+		}
+		if !c.want && (d.Reason != policy.ReasonActorNotAllowed || !d.Refused()) {
+			t.Errorf("%s:%q reason = %s, want a refusal", c.platform, c.login, d.Reason)
+		}
+	}
+}
+
+// The comment's own author is what is checked: the comment is the request.
+func TestAllowedCommentersChecksTheCommentAuthor(t *testing.T) {
+	ev := commentEvent("@kibitz review")
+	ev.Actor = event.Actor{Login: "alice"}
+	ev.Comment.Author = event.Actor{Login: "mallory"}
+	if d := commentersEngine("alice").Evaluate(ev, now); d.Publish {
+		t.Errorf("decision = %+v, want the comment's author checked", d)
+	}
+}
+
+// A comment that did not address kibitz is not refused; it is not ours at all,
+// and reacting to it would be kibitz talking into other people's threads.
+func TestUnaddressedCommentIsNotRefused(t *testing.T) {
+	ev := commentEvent("LGTM")
+	ev.Comment.Author = event.Actor{Login: "mallory"}
+	d := commentersEngine("alice").Evaluate(ev, now)
+	if d.Publish || d.Reason != policy.ReasonNoMention || d.Refused() {
+		t.Errorf("decision = %+v, want no_mention and no refusal", d)
+	}
+}
+
+// A command on an issue is gated the same way.
+func TestAllowedCommentersGateIssueCommands(t *testing.T) {
+	ev := prEvent(event.KindIssueComment)
+	ev.PullRequest = nil
+	ev.Issue = &event.Issue{Number: 7}
+	ev.Comment = &event.Comment{ID: "9", Body: "@kibitz implement", Author: event.Actor{Login: "mallory"}}
+	if d := commentersEngine("alice").Evaluate(ev, now); d.Publish || !d.Refused() {
+		t.Errorf("decision = %+v, want a refusal", d)
+	}
+}
+
+// Pull request events are not somebody asking, so the list does not apply.
+func TestAllowedCommentersLeavePullRequestEventsAlone(t *testing.T) {
+	ev := prEvent(event.KindPROpened)
+	ev.Actor = event.Actor{Login: "mallory"}
+	if d := commentersEngine("alice").Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want a pull request event through", d)
+	}
+}
+
+// Without a list, anybody may ask, which is how kibitz behaved before.
+func TestNoAllowedCommentersLetsAnybodyAsk(t *testing.T) {
+	ev := commentEvent("@kibitz review")
+	ev.Comment.Author = event.Actor{Login: "mallory"}
+	if d := commentersEngine().Evaluate(ev, now); !d.Publish {
+		t.Errorf("decision = %+v, want accepted", d)
+	}
+}

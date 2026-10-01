@@ -83,6 +83,13 @@ resource "google_cloud_run_v2_service" "server" {
         name  = "KIBITZ_ALLOWED_REPOS"
         value = join(",", var.allowed_repos)
       }
+      dynamic "env" {
+        for_each = length(var.allowed_commenters) > 0 ? [1] : []
+        content {
+          name  = "KIBITZ_ALLOWED_COMMENTERS"
+          value = join(",", var.allowed_commenters)
+        }
+      }
       env {
         name  = "KIBITZ_BOT_LOGINS"
         value = join(",", var.bot_logins)

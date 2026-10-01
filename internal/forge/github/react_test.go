@@ -28,7 +28,7 @@ func TestReactUsesTheEndpointForTheKindOfComment(t *testing.T) {
 			f := newFakeGitHub(t)
 			f.handle("POST "+tc.path, http.StatusCreated, map[string]any{"id": 1, "content": "eyes"})
 
-			if err := f.client(t).React(context.Background(), tc.ref); err != nil {
+			if err := f.client(t).React(context.Background(), tc.ref, forge.ReactionSeen); err != nil {
 				t.Fatalf("React: %v", err)
 			}
 			got := f.lastRequest()
@@ -47,7 +47,7 @@ func TestReactUsesTheEndpointForTheKindOfComment(t *testing.T) {
 func TestReactingTwiceIsNotAnError(t *testing.T) {
 	f := newFakeGitHub(t)
 	f.handle("POST /repos/yteraoka/kibitz/issues/comments/111/reactions", http.StatusOK, map[string]any{"id": 1})
-	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "111"}); err != nil {
+	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "111"}, forge.ReactionSeen); err != nil {
 		t.Errorf("React: %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestTokensAreNarrowedWhenPermissionsAreGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "1"}); err != nil {
+	if err := client.React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "1"}, forge.ReactionSeen); err != nil {
 		t.Fatalf("React: %v", err)
 	}
 
@@ -116,10 +116,23 @@ func TestTokensAreNotNarrowedByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "1"}); err != nil {
+	if err := client.React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", CommentID: "1"}, forge.ReactionSeen); err != nil {
 		t.Fatalf("React: %v", err)
 	}
 	if len(body) != 0 {
 		t.Errorf("the token request carried %q; the worker's tokens must stay as they were", body)
+	}
+}
+
+// A refusal is a thumbs down on the same endpoint.
+func TestReactRefusal(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handle("POST /repos/yteraoka/kibitz/pulls/comments/222/reactions", http.StatusCreated, map[string]any{"id": 1})
+	ref := forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 42, CommentID: "222", Inline: true}
+	if err := f.client(t).React(context.Background(), ref, forge.ReactionRefused); err != nil {
+		t.Fatalf("React: %v", err)
+	}
+	if got := f.lastRequest().Body["content"]; got != "-1" {
+		t.Errorf("content = %v, want -1", got)
 	}
 }

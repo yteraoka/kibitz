@@ -23,7 +23,7 @@ func TestReactAwardsAnEmojiToTheNote(t *testing.T) {
 			f.mux.HandleFunc("POST /", func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusCreated)
 			})
-			if err := f.client(t).React(context.Background(), tc.ref); err != nil {
+			if err := f.client(t).React(context.Background(), tc.ref, forge.ReactionSeen); err != nil {
 				t.Fatalf("React: %v", err)
 			}
 			got := f.lastRequest()
@@ -44,7 +44,7 @@ func TestReactAwardsAnEmojiToTheNote(t *testing.T) {
 func TestReactingTwiceIsNotAnError(t *testing.T) {
 	f := newFake(t)
 	f.handle("POST /", http.StatusNotFound, map[string]any{"message": "404 Award Emoji Name has already been taken"})
-	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 16, CommentID: "501"}); err != nil {
+	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 16, CommentID: "501"}, forge.ReactionSeen); err != nil {
 		t.Errorf("React: %v", err)
 	}
 }
@@ -53,7 +53,22 @@ func TestReactingTwiceIsNotAnError(t *testing.T) {
 func TestAReactionThatIsRefusedIsAnError(t *testing.T) {
 	f := newFake(t)
 	f.handle("POST /", http.StatusForbidden, map[string]any{"message": "403 Forbidden"})
-	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 16, CommentID: "501"}); err == nil {
+	if err := f.client(t).React(context.Background(), forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 16, CommentID: "501"}, forge.ReactionSeen); err == nil {
 		t.Error("React returned nil for a 403")
+	}
+}
+
+// A refusal is the no-entry sign on the same note.
+func TestReactRefusal(t *testing.T) {
+	f := newFake(t)
+	f.mux.HandleFunc("POST /", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+	ref := forge.CommentRef{Owner: "yteraoka", Repo: "kibitz", Number: 16, CommentID: "501"}
+	if err := f.client(t).React(context.Background(), ref, forge.ReactionRefused); err != nil {
+		t.Fatalf("React: %v", err)
+	}
+	if got := f.lastRequest().Query; got != "name=no_entry_sign" {
+		t.Errorf("query = %q, want name=no_entry_sign", got)
 	}
 }

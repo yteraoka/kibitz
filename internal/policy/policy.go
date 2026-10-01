@@ -34,6 +34,10 @@ const (
 	// ReasonCommandNotForIssue drops a command that only means something on
 	// a pull request. "review" on an issue is a typo, not an instruction.
 	ReasonCommandNotForIssue Reason = "command_not_for_issue"
+	// ReasonActorNotAllowed drops a comment addressed to kibitz by somebody
+	// the operator has not allowed to ask. It is the one refusal worth telling
+	// the author about, which is why [Decision.Refused] marks it.
+	ReasonActorNotAllowed Reason = "actor_not_allowed"
 )
 
 // Config holds the server-side trigger rules.
@@ -60,6 +64,14 @@ type Config struct {
 	// MaxEventAge rejects deliveries older than this as replays. Zero disables
 	// the check.
 	MaxEventAge time.Duration
+	// AllowedCommenters are who may ask kibitz for something in a comment:
+	// logins, matched without regard to case, with "*" and "?" as in
+	// AllowedRepos. "github:alice" names alice on GitHub only; an entry with
+	// no platform names that login on every platform. Empty lets anybody ask.
+	//
+	// It gates comments and nothing else. A pull request being opened or
+	// pushed to is not somebody asking.
+	AllowedCommenters []string
 }
 
 // Engine evaluates events against a [Config].
@@ -70,6 +82,37 @@ type Engine struct {
 	mention      string
 	keywords     []string
 	maxEventAge  time.Duration
+	commenters   []commenter
+}
+
+// commenter is one entry of the allowed commenters, split into the platform
+// it is limited to (empty for every platform) and the login pattern.
+type commenter struct {
+	platform event.Platform
+	login    string
+}
+
+// platforms are the prefixes an allowed commenter may be limited to.
+var platforms = map[event.Platform]bool{
+	event.PlatformGitHub:      true,
+	event.PlatformGitLab:      true,
+	event.PlatformAzureDevOps: true,
+}
+
+func parseCommenters(list []string) []commenter {
+	out := make([]commenter, 0, len(list))
+	for _, entry := range list {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry == "" {
+			continue
+		}
+		c := commenter{login: entry}
+		if platform, login, ok := strings.Cut(entry, ":"); ok && platforms[event.Platform(platform)] {
+			c = commenter{platform: event.Platform(platform), login: login}
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // New builds an engine.
@@ -94,6 +137,7 @@ func New(cfg Config) *Engine {
 		mention:      cfg.Mention,
 		keywords:     keywords,
 		maxEventAge:  cfg.MaxEventAge,
+		commenters:   parseCommenters(cfg.AllowedCommenters),
 	}
 }
 
@@ -102,6 +146,11 @@ type Decision struct {
 	Publish bool
 	Reason  Reason
 }
+
+// Refused reports a comment that asked kibitz for something and was turned
+// down because of who wrote it. Unlike every other reason to skip an event,
+// the author is waiting for an answer, so this one is worth telling them.
+func (d Decision) Refused() bool { return d.Reason == ReasonActorNotAllowed }
 
 // Evaluate decides whether ev should be published.
 //
@@ -147,6 +196,9 @@ func (e *Engine) Evaluate(ev *event.ReviewEvent, now time.Time) Decision {
 		if !issueCommands[cmd.Name] {
 			return Decision{Reason: ReasonCommandNotForIssue}
 		}
+		if !e.mayAsk(ev) {
+			return Decision{Reason: ReasonActorNotAllowed}
+		}
 		ev.Command = cmd
 		ev.Kind = event.KindIssueCommand
 		return Decision{Publish: true, Reason: ReasonAccepted}
@@ -155,6 +207,11 @@ func (e *Engine) Evaluate(ev *event.ReviewEvent, now time.Time) Decision {
 	if ev.Kind == event.KindCommentCreated {
 		if ev.Comment == nil || !Mentions(ev.Comment.Body, e.mention) {
 			return Decision{Reason: ReasonNoMention}
+		}
+		// Checked only once the comment has addressed kibitz: a comment that
+		// did not ask for anything is not refused, it is simply not ours.
+		if !e.mayAsk(ev) {
+			return Decision{Reason: ReasonActorNotAllowed}
 		}
 		if cmd := ParseCommand(ev.Comment.Body, e.mention); cmd != nil {
 			ev.Command = cmd
@@ -200,6 +257,35 @@ func (e *Engine) wanted(ev *event.ReviewEvent) bool {
 	haystack := strings.ToLower(StripCode(text))
 	for _, keyword := range e.keywords {
 		if strings.Contains(haystack, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// mayAsk reports whether the comment's author may ask kibitz for something.
+//
+// It is the comment's own author that is checked, not the delivery's actor:
+// the comment is the request, and on every platform kibitz supports the two
+// are the same person, but only the comment says so for certain.
+func (e *Engine) mayAsk(ev *event.ReviewEvent) bool {
+	if len(e.commenters) == 0 {
+		return true
+	}
+	author := ev.Actor
+	if ev.Comment != nil && ev.Comment.Author.Login != "" {
+		author = ev.Comment.Author
+	}
+	login := strings.ToLower(strings.TrimSpace(author.Login))
+	if login == "" {
+		// Nobody to check against the list is nobody on it.
+		return false
+	}
+	for _, c := range e.commenters {
+		if c.platform != "" && c.platform != ev.Source.Platform {
+			continue
+		}
+		if Match(c.login, login) {
 			return true
 		}
 	}

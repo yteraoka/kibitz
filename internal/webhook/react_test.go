@@ -14,22 +14,32 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/queue/memory"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/webhook"
+	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
 )
 
 type recordingReactor struct {
-	mu   sync.Mutex
-	refs []forge.CommentRef
-	err  error
+	mu        sync.Mutex
+	refs      []forge.CommentRef
+	reactions []forge.Reaction
+	err       error
 }
 
-func (r *recordingReactor) React(_ context.Context, ref forge.CommentRef) error {
+func (r *recordingReactor) React(_ context.Context, ref forge.CommentRef, reaction forge.Reaction) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.refs = append(r.refs, ref)
+	r.reactions = append(r.reactions, reaction)
 	return r.err
+}
+
+func (r *recordingReactor) said() []forge.Reaction {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]forge.Reaction(nil), r.reactions...)
 }
 
 func (r *recordingReactor) seen() []forge.CommentRef {
@@ -116,7 +126,7 @@ func TestAFailedReactionDoesNotFailTheDelivery(t *testing.T) {
 		t.Errorf("%d messages queued, want 1", q.Len())
 	}
 	var m dto.Metric
-	if err := metrics.Reactions.WithLabelValues("github", "failed").Write(&m); err != nil {
+	if err := metrics.Reactions.WithLabelValues("github", "seen", "failed").Write(&m); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.GetCounter().GetValue(); got != 1 {
@@ -131,7 +141,7 @@ type blockingReactor struct {
 	done    chan error
 }
 
-func (r *blockingReactor) React(ctx context.Context, _ forge.CommentRef) error {
+func (r *blockingReactor) React(ctx context.Context, _ forge.CommentRef, _ forge.Reaction) error {
 	<-r.release
 	// The server notices a hang-up a moment after it happens; give it that
 	// moment to cancel, if it is going to.
@@ -191,7 +201,7 @@ func TestTheForgeIsAnsweredBeforeTheReaction(t *testing.T) {
 // slowReactor never finishes on its own.
 type slowReactor struct{}
 
-func (slowReactor) React(ctx context.Context, _ forge.CommentRef) error {
+func (slowReactor) React(ctx context.Context, _ forge.CommentRef, _ forge.Reaction) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -208,5 +218,64 @@ func TestAReactionIsCutOffAtItsTimeout(t *testing.T) {
 	case <-finished:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the handler waited on the reaction past its timeout")
+	}
+}
+
+// A comment from somebody the operator has not allowed to ask is answered 204,
+// nothing is queued, and the comment gets the refusal -- the author is waiting,
+// and silence would look like kibitz being broken.
+func TestReceiverRefusesACommentFromSomebodyNotAllowed(t *testing.T) {
+	q := memory.New()
+	reactor := &recordingReactor{}
+	engine := policy.New(policy.Config{
+		BotLogins:         []string{"kibitz[bot]"},
+		AllowedRepos:      []string{"yteraoka/*"},
+		Mention:           "@kibitz",
+		AllowedCommenters: []string{"someone-else"},
+	})
+	rc := webhook.NewReceiver(githubhook.New([]string{secret}), q, engine, discardLogger(),
+		webhook.WithReceiverClock(func() time.Time { return now }), webhook.WithReactor(reactor, time.Second))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "issue_comment.created.json"), "issue_comment"))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if rec.Header().Get("Content-Length") != "" {
+		t.Errorf("a 204 carried Content-Length %q", rec.Header().Get("Content-Length"))
+	}
+	if q.Len() != 0 {
+		t.Errorf("%d events queued, want none", q.Len())
+	}
+	if said := reactor.said(); len(said) != 1 || said[0] != forge.ReactionRefused {
+		t.Errorf("reactions = %v, want one refusal", said)
+	}
+}
+
+// The same comment from somebody on the list is queued and seen.
+func TestReceiverQueuesACommentFromSomebodyAllowed(t *testing.T) {
+	q := memory.New()
+	reactor := &recordingReactor{}
+	engine := policy.New(policy.Config{
+		BotLogins:         []string{"kibitz[bot]"},
+		AllowedRepos:      []string{"yteraoka/*"},
+		Mention:           "@kibitz",
+		AllowedCommenters: []string{"github:yteraoka"},
+	})
+	rc := webhook.NewReceiver(githubhook.New([]string{secret}), q, engine, discardLogger(),
+		webhook.WithReceiverClock(func() time.Time { return now }), webhook.WithReactor(reactor, time.Second))
+
+	rec := httptest.NewRecorder()
+	rc.ServeHTTP(rec, post(fixture(t, "issue_comment.created.json"), "issue_comment"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if q.Len() != 1 {
+		t.Errorf("%d events queued, want 1", q.Len())
+	}
+	if said := reactor.said(); len(said) != 1 || said[0] != forge.ReactionSeen {
+		t.Errorf("reactions = %v, want one seen", said)
 	}
 }

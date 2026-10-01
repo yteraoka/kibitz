@@ -143,6 +143,19 @@ variable "allowed_repos" {
   default     = ["*"]
 }
 
+variable "allowed_commenters" {
+  description = <<-EOT
+    Who may ask kibitz for something in a comment, as logins. "github:alice"
+    limits an entry to one platform; "*" and "?" are wildcards; case does not
+    matter. A comment addressed to kibitz by anybody else is not queued and
+    gets a reaction saying so (a thumbs down on GitHub, a no-entry sign on
+    GitLab). Empty lets anybody ask. Pull requests being opened or pushed to
+    are not gated by this.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "mention" {
   description = <<-EOT
     The token that addresses kibitz in a comment.
@@ -451,6 +464,7 @@ variable "server_env" {
       "KIBITZ_AZDO_ORG_URL",
       "KIBITZ_AZDO_TOKEN",
       "KIBITZ_AZDO_TOKEN_IS_BEARER",
+      "KIBITZ_ALLOWED_COMMENTERS",
     ])) == 0
     error_message = "server_env may not set a variable this configuration already sets; use the variable for it instead."
   }

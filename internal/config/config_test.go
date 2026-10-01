@@ -690,3 +690,23 @@ func TestServerWithReactionsOffHoldsNoCredential(t *testing.T) {
 		t.Errorf("Reactions = %+v, want off and empty", cfg.Reactions)
 	}
 }
+
+func TestLoadServerAllowedCommenters(t *testing.T) {
+	cfg, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Policy.AllowedCommenters) != 0 {
+		t.Errorf("AllowedCommenters = %v, want none by default", cfg.Policy.AllowedCommenters)
+	}
+
+	env := minimalServerEnv()
+	env["KIBITZ_ALLOWED_COMMENTERS"] = "alice, github:bob ,"
+	cfg, err = config.LoadServer(config.MapEnv(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.Policy.AllowedCommenters, ","); got != "alice,github:bob" {
+		t.Errorf("AllowedCommenters = %q", got)
+	}
+}

@@ -176,6 +176,16 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	decision := rc.policy.Evaluate(ev, rc.now())
+	if decision.Refused() {
+		// The author asked and is not allowed to. Everything else skipped
+		// here is traffic nobody is waiting on; this is a person expecting a
+		// review, and silence would read as kibitz being broken.
+		// Who was refused goes in the line: it is what an operator needs to
+		// decide whether the list is missing somebody.
+		rc.logSkip(r, body, string(decision.Reason), ev, slog.String("author", commentAuthor(ev)))
+		rc.answerAndReact(w, r, ev, http.StatusNoContent, forge.ReactionRefused)
+		return
+	}
 	if !decision.Publish {
 		rc.skip(r, w, body, string(decision.Reason), ev)
 		return
@@ -207,7 +217,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.String("message_id", msgID),
 		)...,
 	)
-	rc.answerAndReact(w, r, ev)
+	rc.answerAndReact(w, r, ev, http.StatusAccepted, forge.ReactionSeen)
 }
 
 func (rc *Receiver) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
@@ -281,16 +291,28 @@ func headerCarrier(r *http.Request) telemetry.Carrier {
 // answer to the question an operator actually asks — why did my pull request
 // not get reviewed — and it is not an answer they can get from anywhere else.
 func (rc *Receiver) skip(r *http.Request, w http.ResponseWriter, body []byte, reason string, ev *event.ReviewEvent) {
+	rc.logSkip(r, body, reason, ev)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// logSkip records a delivery that was not published, and why.
+func (rc *Receiver) logSkip(r *http.Request, body []byte, reason string, ev *event.ReviewEvent, extra ...slog.Attr) {
 	if rc.metrics != nil {
 		rc.metrics.WebhooksReceived.WithLabelValues(string(rc.handler.Platform()), "skipped", reason).Inc()
 	}
-	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event skipped",
-		append(rc.deliveryAttrs(r, body, ev),
-			slog.Bool("published", false),
-			slog.String("reason", reason),
-		)...,
+	attrs := append(rc.deliveryAttrs(r, body, ev),
+		slog.Bool("published", false),
+		slog.String("reason", reason),
 	)
-	w.WriteHeader(http.StatusNoContent)
+	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event skipped", append(attrs, extra...)...)
+}
+
+// commentAuthor is the login of whoever wrote the comment an event came from.
+func commentAuthor(ev *event.ReviewEvent) string {
+	if ev.Comment != nil && ev.Comment.Author.Login != "" {
+		return ev.Comment.Author.Login
+	}
+	return ev.Actor.Login
 }
 
 func (rc *Receiver) reject(r *http.Request, w http.ResponseWriter, body []byte, ev *event.ReviewEvent, status int, msg string, err error) {

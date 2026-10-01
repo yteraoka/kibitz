@@ -106,13 +106,21 @@ func realMain() error {
 	}()
 
 	triggers := policy.New(policy.Config{
-		AppID:        cfg.Policy.AppID,
-		BotLogins:    cfg.Policy.BotLogins,
-		AllowedRepos: cfg.Policy.AllowedRepos,
-		Mention:      cfg.Policy.Mention,
-		Keywords:     cfg.Policy.Keywords,
-		MaxEventAge:  cfg.Policy.MaxEventAge,
+		AppID:             cfg.Policy.AppID,
+		BotLogins:         cfg.Policy.BotLogins,
+		AllowedRepos:      cfg.Policy.AllowedRepos,
+		Mention:           cfg.Policy.Mention,
+		Keywords:          cfg.Policy.Keywords,
+		MaxEventAge:       cfg.Policy.MaxEventAge,
+		AllowedCommenters: cfg.Policy.AllowedCommenters,
 	})
+
+	if len(cfg.Policy.AllowedCommenters) > 0 {
+		// Logins, not secrets: this is the line to check when somebody who
+		// should be able to ask is being refused.
+		logger.LogAttrs(ctx, slog.LevelInfo, "only these people may ask kibitz in a comment",
+			slog.Any("allowed_commenters", cfg.Policy.AllowedCommenters))
+	}
 
 	metrics := telemetry.NewMetrics()
 	health := httpx.NewHealth(version)

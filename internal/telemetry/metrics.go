@@ -75,8 +75,8 @@ func NewMetrics() *Metrics {
 		}, []string{"platform"}),
 		Reactions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kibitz_reactions_total",
-			Help: "Reactions put on comments at receipt, by outcome (added, failed).",
-		}, []string{"platform", "outcome"}),
+			Help: "Reactions put on comments at receipt, by what they said (seen, refused) and outcome (added, failed, unsupported).",
+		}, []string{"platform", "kind", "outcome"}),
 		JobsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kibitz_jobs_total",
 			Help: "Jobs by outcome (succeeded, failed, skipped, abandoned).",

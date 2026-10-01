@@ -24,6 +24,14 @@ bot_logins = []
 # Repositories kibitz will accept webhooks for.
 allowed_repos = ["my-org/*"]
 
+# コメントで kibitz に依頼してよい人 (login)。空なら誰でも依頼できる。
+# public リポジトリでは誰でもコメントできるので、設定しておくのがよい。
+# リストに無い人の依頼はキューに載らず、コメントに 👎 (GitLab は 🚫) が付く。
+# "github:alice" のように書くとそのプラットフォームに限る。
+# PR の作成や push による自動レビューはこの設定の対象外。
+#
+#   allowed_commenters = ["github:alice", "github:bob"]
+
 # コメントで kibitz に話しかけるときの書き方。GitHub 側では単なる文字列で、
 # GitHub App は @ メンションできないので、この値を GitHub が解釈することはない。
 # ただし **同名のアカウントが実在すればその人に通知が飛ぶ** (public リポジトリの場合)。

@@ -207,6 +207,10 @@ type Policy struct {
 	// "Redeliver" on a failed hook hours later must still get a review rather
 	// than a silent no-op.
 	MaxEventAge time.Duration
+	// AllowedCommenters are who may ask kibitz for something in a comment.
+	// Empty lets anybody. A comment addressed to kibitz by somebody not on
+	// the list is not queued, and gets a reaction saying so.
+	AllowedCommenters []string
 }
 
 // GitHubApp holds GitHub App credentials. kibitz authenticates as an App only;
@@ -509,12 +513,13 @@ func LoadServer(env Lookup) (*Server, error) {
 			AzureDevOpsHeaderValues: l.secrets("KIBITZ_AZDO_HEADER_VALUES"),
 		},
 		Policy: Policy{
-			AppID:        l.str("KIBITZ_GITHUB_APP_ID", ""),
-			BotLogins:    l.list("KIBITZ_BOT_LOGINS", nil),
-			AllowedRepos: l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
-			Mention:      l.str("KIBITZ_MENTION", policy.DefaultMention),
-			Keywords:     l.list("KIBITZ_TRIGGER_KEYWORDS", nil),
-			MaxEventAge:  l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
+			AppID:             l.str("KIBITZ_GITHUB_APP_ID", ""),
+			BotLogins:         l.list("KIBITZ_BOT_LOGINS", nil),
+			AllowedRepos:      l.list("KIBITZ_ALLOWED_REPOS", []string{"*"}),
+			Mention:           l.str("KIBITZ_MENTION", policy.DefaultMention),
+			Keywords:          l.list("KIBITZ_TRIGGER_KEYWORDS", nil),
+			MaxEventAge:       l.durationOrZero("KIBITZ_MAX_EVENT_AGE", 0),
+			AllowedCommenters: l.list("KIBITZ_ALLOWED_COMMENTERS", nil),
 		},
 		Scale: loadScale(l),
 		Reactions: Reactions{

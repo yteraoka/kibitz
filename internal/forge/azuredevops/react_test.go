@@ -17,7 +17,7 @@ func TestReactLikesTheCommentInItsThread(t *testing.T) {
 	err := c.React(context.Background(), forge.CommentRef{
 		Platform: event.PlatformAzureDevOps, Owner: "fabrikam", Project: "Fabrikam", Repo: "kibitz",
 		Number: 42, ThreadID: "7", CommentID: "3",
-	})
+	}, forge.ReactionSeen)
 	if err != nil {
 		t.Fatalf("React: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestReactLikesTheCommentInItsThread(t *testing.T) {
 func TestReactNeedsTheThread(t *testing.T) {
 	s := newStub(t)
 	c, _ := s.client()
-	if err := c.React(context.Background(), forge.CommentRef{Number: 42, CommentID: "3"}); err == nil {
+	if err := c.React(context.Background(), forge.CommentRef{Number: 42, CommentID: "3"}, forge.ReactionSeen); err == nil {
 		t.Error("React returned nil without a thread")
 	}
 	if len(s.calls) != 0 {
@@ -47,8 +47,22 @@ func TestReactNeedsTheThread(t *testing.T) {
 func TestReactDoesNotLikeWorkItems(t *testing.T) {
 	s := newStub(t)
 	c, _ := s.client()
-	err := c.React(context.Background(), forge.CommentRef{Number: 5, ThreadID: "1", CommentID: "1", OnIssue: true})
+	err := c.React(context.Background(), forge.CommentRef{Number: 5, ThreadID: "1", CommentID: "1", OnIssue: true}, forge.ReactionSeen)
 	if !errors.Is(err, forge.ErrNotSupported) {
 		t.Errorf("error = %v, want ErrNotSupported", err)
+	}
+}
+
+// A like is the only reaction there is, and a refusal sent as a like would say
+// the opposite. It is reported as unsupported and nothing is sent.
+func TestReactRefusalIsNotSupported(t *testing.T) {
+	s := newStub(t)
+	c, _ := s.client()
+	err := c.React(context.Background(), forge.CommentRef{Number: 42, ThreadID: "7", CommentID: "3"}, forge.ReactionRefused)
+	if !errors.Is(err, forge.ErrNotSupported) {
+		t.Fatalf("err = %v, want ErrNotSupported", err)
+	}
+	if len(s.calls) != 0 {
+		t.Errorf("%d calls, want none", len(s.calls))
 	}
 }
