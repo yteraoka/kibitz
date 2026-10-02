@@ -597,6 +597,9 @@ func TestLoadScaler(t *testing.T) {
 	if cfg.Scale.Interval != time.Minute {
 		t.Errorf("Interval = %s, want 1m", cfg.Scale.Interval)
 	}
+	if cfg.ListenAddr != ":8080" {
+		t.Errorf("ListenAddr = %q, want :8080, the port Cloud Run sends requests to", cfg.ListenAddr)
+	}
 
 	// A scaler with nothing to scale is a misconfiguration, not a no-op.
 	delete(env, "KIBITZ_SCALE_BACKEND")

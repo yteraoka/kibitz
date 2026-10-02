@@ -688,10 +688,15 @@ func loadEgress(l *loader) Egress {
 // Scaler is the kibitz-scaler configuration. It is a small tool with a small
 // configuration: which queue to watch, and which worker pool to size from it.
 type Scaler struct {
-	Log   Log
-	Trace Trace
-	Queue Queue
-	Scale Scale
+	// ListenAddr is where -serve listens for reconcile requests. Unused when
+	// the scaler reconciles once or with -loop.
+	ListenAddr        string
+	ReadHeaderTimeout time.Duration
+	ShutdownTimeout   time.Duration
+	Log               Log
+	Trace             Trace
+	Queue             Queue
+	Scale             Scale
 }
 
 // LoadScaler reads the kibitz-scaler configuration.
@@ -699,10 +704,13 @@ func LoadScaler(env Lookup) (*Scaler, error) {
 	l := newLoader(env)
 
 	cfg := &Scaler{
-		Log:   loadLog(l),
-		Trace: loadTrace(l),
-		Queue: loadQueue(l),
-		Scale: loadScale(l),
+		ListenAddr:        l.str("KIBITZ_LISTEN_ADDR", ":8080"),
+		ReadHeaderTimeout: l.duration("KIBITZ_READ_HEADER_TIMEOUT", 10*time.Second),
+		ShutdownTimeout:   l.duration("KIBITZ_SHUTDOWN_TIMEOUT", 20*time.Second),
+		Log:               loadLog(l),
+		Trace:             loadTrace(l),
+		Queue:             loadQueue(l),
+		Scale:             loadScale(l),
 	}
 
 	// The scaler has nothing else to do, so an unset backend is a mistake

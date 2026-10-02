@@ -6,9 +6,11 @@
 // that backlog calls for, which is what lets the worker sit at zero between
 // reviews.
 //
-// It reconciles once and exits, which is how it runs as a Cloud Run job on a
-// Cloud Scheduler trigger. With -loop it stays up and reconciles on an
-// interval instead, for running it anywhere else.
+// With -serve it listens for POST /reconcile and reconciles once per request,
+// which is how it runs on Cloud Run: a service that Cloud Scheduler calls and
+// that is billed only while it answers. With -loop it stays up and reconciles
+// on an interval, for running it anywhere else. With neither it reconciles
+// once and exits.
 //
 // See docs/deployment.md.
 package main
@@ -18,11 +20,13 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/yteraoka/kibitz/internal/config"
+	"github.com/yteraoka/kibitz/internal/httpx"
 	"github.com/yteraoka/kibitz/internal/scale"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 )
@@ -39,7 +43,11 @@ func main() {
 
 func realMain() error {
 	loop := flag.Bool("loop", false, "keep running and reconcile every KIBITZ_SCALE_INTERVAL")
+	serve := flag.Bool("serve", false, "listen on KIBITZ_LISTEN_ADDR and reconcile once per POST /reconcile")
 	flag.Parse()
+	if *loop && *serve {
+		return fmt.Errorf("-loop and -serve are alternatives; pick one")
+	}
 
 	cfg, err := config.LoadScaler(config.OSEnv)
 	if err != nil {
@@ -84,7 +92,25 @@ func realMain() error {
 		slog.Int("max_instances", cfg.Scale.MaxInstances),
 		slog.Duration("idle_after", cfg.Scale.IdleAfter),
 		slog.Bool("loop", *loop),
+		slog.Bool("serve", *serve),
 	)
+
+	if *serve {
+		health := httpx.NewHealth(version)
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", health.Live)
+		mux.Handle("POST /reconcile", &reconcileHandler{scaler: scaler, logger: logger})
+		srv := &http.Server{
+			Addr: cfg.ListenAddr,
+			Handler: httpx.Chain(mux,
+				httpx.RequestID,
+				httpx.Recover(logger),
+				httpx.Logging(logger),
+			),
+			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		}
+		return httpx.Serve(ctx, logger, "http", srv, cfg.ShutdownTimeout)
+	}
 
 	if *loop {
 		return scaler.Run(ctx, cfg.Scale.Interval)

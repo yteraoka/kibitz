@@ -24,7 +24,7 @@ kibitz が**なぜそう作られているか**の記録。
 | [0011](0011-repository-settings-from-the-default-branch.md) | リポジトリ設定はデフォルトブランチから読み、一方向にだけ効かせる | 採用 |
 | [0012](0012-narrow-the-conditions-that-wake-the-bot.md) | ボットが動く条件を狭くする | 採用 |
 | [0013](0013-narrow-what-is-reviewed-and-report-the-cost.md) | レビュー範囲を絞り、かかった費用をレビュー本文に書く | 採用 |
-| [0014](0014-worker-pool-and-self-managed-scaling.md) | worker は Cloud Run worker pool で動かし、台数は自分で決める | 採用 |
+| [0014](0014-worker-pool-and-self-managed-scaling.md) | worker は Cloud Run worker pool で動かし、台数は自分で決める | 採用 (scaler の実行形態は 0023 で置き換え) |
 | [0015](0015-mcp-declared-in-three-layers-off-by-default.md) | MCP は三層で宣言し、既定では何も有効にしない | 採用 |
 | [0016](0016-kibitz-mcp-holds-no-credential.md) | kibitz-mcp に資格情報を持たせない | 採用 |
 | [0017](0017-index-decision-records-serve-bodies-as-tools.md) | 設計文書は索引をプロンプトに載せ、本文はツールで読ませる | 採用 |
@@ -33,6 +33,7 @@ kibitz が**なぜそう作られているか**の記録。
 | [0020](0020-the-server-reacts-at-receipt.md) | サーバーが受信時にコメントへリアクションし、そのために絞った資格情報を持つ | 採用 |
 | [0021](0021-agent-egress-through-an-inspecting-proxy.md) | エージェントの外部アクセスは、ワーカー内の inspection するプロキシを通す | 採用 |
 | [0022](0022-only-allowed-people-may-ask-in-a-comment.md) | コメントで依頼できる人を運用側で絞り、断ったことはリアクションで伝える | 採用 |
+| [0023](0023-run-the-scaler-as-a-request-billed-service.md) | scaler は Cloud Run ジョブではなく、リクエスト課金の Cloud Run サービスとして動かす | 採用 |
 
 **[ADR-0010](0010-data-and-instruction-positions.md) が中核**で、
 0011・0015・0016・0017 はいずれもその原則を各所に適用した結果になっている。

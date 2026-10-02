@@ -1,6 +1,7 @@
 # worker は Cloud Run worker pool で動かし、台数は自分で決める
 
 - **状態**: 採用 (2026-09-22、`52b6d94` の設計を PR #24 で置き換え)
+  — scaler を Cloud Run ジョブで動かす部分のみ [ADR-0023](0023-run-the-scaler-as-a-request-billed-service.md) で置き換え
 - **関連**: `52b6d94` / PR #24 (`3fb0497`) / `docs/deployment.md`
 
 ## 背景

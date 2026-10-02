@@ -7,8 +7,8 @@
 #
 #   * kibitz-server sets the count to one the moment it publishes, so a
 #     review starts immediately rather than waiting for a metric;
-#   * kibitz-scaler, below, reconciles once a minute from the subscription's
-#     backlog: it adds instances while messages pile up, and returns the pool
+#   * kibitz-scaler, below, is called once a minute by Cloud Scheduler and
+#     reconciles from the subscription's backlog: it adds instances while messages pile up, and returns the pool
 #     to worker_min_instances once the queue has been empty for
 #     worker_idle_after.
 #
@@ -21,77 +21,125 @@ resource "google_service_account" "scaler" {
   display_name = "kibitz worker autoscaler"
 }
 
-resource "google_cloud_run_v2_job" "scaler" {
+# The scaler is a service rather than a job because of how each is billed. A
+# job execution starts a container and is paid for from start to exit, and at
+# one execution a minute that start-up was most of the bill: the reconcile
+# itself is one read and at most one write. A service with request-based
+# billing is paid for only while it answers, and sits at zero in between.
+# See ADR-0023.
+resource "google_cloud_run_v2_service" "scaler" {
   name     = "${var.name_prefix}-scaler"
   location = var.region
   labels   = var.labels
 
+  # Cloud Scheduler counts as internal traffic, so nothing outside the project
+  # needs to reach this, and nothing outside it can.
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
   deletion_protection = false
 
+  # One instance taking one request at a time is all a once-a-minute caller
+  # needs, and it is what keeps two reconciles from writing the count at once
+  # (see max_instance_request_concurrency below).
+  scaling {
+    scaling_mode       = "AUTOMATIC"
+    min_instance_count = 0
+    max_instance_count = 1
+  }
+
   template {
-    template {
-      service_account = google_service_account.scaler.email
-      # One reconciliation is one read and at most one write. If it cannot be
-      # done in two minutes the next run will do it instead.
-      timeout     = "120s"
-      max_retries = 1
+    service_account = google_service_account.scaler.email
+    # One reconciliation is one read and at most one write. If it cannot be
+    # done in two minutes the next call will do it instead.
+    timeout = "120s"
 
-      containers {
-        image = var.scaler_image
+    # One request at a time. Together with the single instance this keeps a
+    # Cloud Scheduler retry from reconciling alongside the attempt it
+    # retries, and it is what Cloud Run requires before it allows a CPU
+    # below one.
+    max_instance_request_concurrency = 1
 
-        resources {
-          limits = {
-            cpu    = "1"
-            memory = "512Mi"
-          }
-        }
+    # The first generation environment is named rather than left to Cloud
+    # Run, because the second refuses to start below 512Mi. Nothing the
+    # second adds -- network file systems, full Linux compatibility -- is
+    # anything a few API calls need.
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN1"
 
-        env {
-          name  = "KIBITZ_PUBSUB_PROJECT_ID"
-          value = var.project_id
+    scaling {
+      max_instance_count = 1
+    }
+
+    containers {
+      image = var.scaler_image
+      args  = ["-serve"]
+
+      ports {
+        container_port = 8080
+      }
+
+      # cpu_idle is request-based billing: the CPU is allocated, and paid
+      # for, only while a request is being handled. That is the whole reason
+      # this is a service.
+      #
+      # 0.08 is the smallest CPU Cloud Run offers. A reconcile is two or
+      # three API calls that spend their time waiting on the network, so a
+      # sliver of a CPU is enough, and the boost covers the start-up, which
+      # is the only part that does real work. 128Mi is the floor of the
+      # first generation environment, and a Go binary holding two API
+      # clients fits in it; raise it if memory utilization says otherwise.
+      resources {
+        limits = {
+          cpu    = "0.08"
+          memory = "128Mi"
         }
-        env {
-          name  = "KIBITZ_PUBSUB_SUBSCRIPTION"
-          value = google_pubsub_subscription.worker.name
-        }
-        env {
-          name  = "KIBITZ_SCALE_BACKEND"
-          value = "cloudrun"
-        }
-        env {
-          name  = "KIBITZ_SCALE_REGION"
-          value = var.region
-        }
-        env {
-          name  = "KIBITZ_SCALE_WORKER_POOL"
-          value = google_cloud_run_v2_worker_pool.worker.name
-        }
-        env {
-          name  = "KIBITZ_SCALE_MIN_INSTANCES"
-          value = tostring(var.worker_min_instances)
-        }
-        env {
-          name  = "KIBITZ_SCALE_MAX_INSTANCES"
-          value = tostring(var.worker_max_instances)
-        }
-        env {
-          name  = "KIBITZ_SCALE_MESSAGES_PER_INSTANCE"
-          value = tostring(var.worker_messages_per_instance)
-        }
-        env {
-          name  = "KIBITZ_SCALE_IDLE_AFTER"
-          value = var.worker_idle_after
-        }
-        env {
-          name  = "KIBITZ_LOG_LEVEL"
-          value = var.log_level
-        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "KIBITZ_PUBSUB_PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "KIBITZ_PUBSUB_SUBSCRIPTION"
+        value = google_pubsub_subscription.worker.name
+      }
+      env {
+        name  = "KIBITZ_SCALE_BACKEND"
+        value = "cloudrun"
+      }
+      env {
+        name  = "KIBITZ_SCALE_REGION"
+        value = var.region
+      }
+      env {
+        name  = "KIBITZ_SCALE_WORKER_POOL"
+        value = google_cloud_run_v2_worker_pool.worker.name
+      }
+      env {
+        name  = "KIBITZ_SCALE_MIN_INSTANCES"
+        value = tostring(var.worker_min_instances)
+      }
+      env {
+        name  = "KIBITZ_SCALE_MAX_INSTANCES"
+        value = tostring(var.worker_max_instances)
+      }
+      env {
+        name  = "KIBITZ_SCALE_MESSAGES_PER_INSTANCE"
+        value = tostring(var.worker_messages_per_instance)
+      }
+      env {
+        name  = "KIBITZ_SCALE_IDLE_AFTER"
+        value = var.worker_idle_after
+      }
+      env {
+        name  = "KIBITZ_LOG_LEVEL"
+        value = var.log_level
       }
     }
   }
 
   lifecycle {
-    ignore_changes = [template[0].template[0].containers[0].image]
+    ignore_changes = [template[0].containers[0].image]
   }
 
   depends_on = [
@@ -100,7 +148,7 @@ resource "google_cloud_run_v2_job" "scaler" {
   ]
 }
 
-# Cloud Scheduler is what makes the job run; nothing else triggers it.
+# Cloud Scheduler is what calls the scaler; nothing else does.
 resource "google_cloud_scheduler_job" "scaler" {
   name             = "${var.name_prefix}-scaler"
   region           = var.region
@@ -117,16 +165,19 @@ resource "google_cloud_scheduler_job" "scaler" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.scaler.name}:run"
+    uri         = "${google_cloud_run_v2_service.scaler.uri}/reconcile"
 
-    oauth_token {
+    # A service is called with an ID token for the service itself, not with
+    # an access token for the Cloud Run API as the job was.
+    oidc_token {
       service_account_email = google_service_account.scaler.email
+      audience              = google_cloud_run_v2_service.scaler.uri
     }
   }
 
   depends_on = [
     google_project_service.required,
-    google_cloud_run_v2_job_iam_member.scaler_invoke,
+    google_cloud_run_v2_service_iam_member.scaler_invoke,
   ]
 }
 
@@ -166,9 +217,9 @@ resource "google_service_account_iam_member" "worker_act_as" {
 }
 
 # Cloud Scheduler authenticates as the scaler's own account, which therefore
-# has to be allowed to start the job.
-resource "google_cloud_run_v2_job_iam_member" "scaler_invoke" {
-  name     = google_cloud_run_v2_job.scaler.name
+# has to be allowed to call the service. Nobody else is.
+resource "google_cloud_run_v2_service_iam_member" "scaler_invoke" {
+  name     = google_cloud_run_v2_service.scaler.name
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scaler.email}"

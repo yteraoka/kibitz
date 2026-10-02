@@ -110,7 +110,9 @@ OpenCode の同時実行数はセマフォで制限する (メモリとトーク
 **worker pool** がちょうど想定している形で、ingress もポートもプローブも無く、
 CPU は常時割り当てられる。ただし worker pool にオートスケールは無く、
 インスタンス数は「誰かが決めて書き込む」もの。その数をキューの滞留数から
-決める小さなジョブを別に置く。
+決める小さなサービスを別に置く。
+Cloud Scheduler が毎分呼び、呼ばれている間だけ課金される
+([ADR-0023](adr/0023-run-the-scaler-as-a-request-billed-service.md))。
 
 ```
 Cloud Scheduler ──毎分──> kibitz-scaler
@@ -320,7 +322,7 @@ type Result struct {
 | server | Cloud Run (HTTP) | ECS Fargate + ALB、または Lambda + API Gateway |
 | queue | Cloud Pub/Sub | SQS FIFO (+ DLQ) |
 | worker | Cloud Run worker pool (pull 購読、台数は kibitz-scaler が決める) | ECS Fargate (常駐) |
-| scaler | Cloud Run ジョブ + Cloud Scheduler | (SQS + Application Auto Scaling) |
+| scaler | Cloud Run サービス (internal、リクエスト課金) + Cloud Scheduler | (SQS + Application Auto Scaling) |
 | blob | Cloud Storage | S3 |
 | state | Firestore | DynamoDB |
 | secret | Secret Manager | Secrets Manager / SSM Parameter Store |

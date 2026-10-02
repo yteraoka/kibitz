@@ -67,8 +67,8 @@ resource "google_artifact_registry_repository_iam_member" "deployer_push" {
 
 # Changing which image each component runs. The grants are per resource rather
 # than on the project, so the pipeline cannot touch anything else here. The
-# server is a service and the worker is a worker pool, which are separate
-# resource types with separate IAM policies.
+# server and the scaler are services and the worker is a worker pool, which
+# are separate resource types with separate IAM policies.
 resource "google_cloud_run_v2_service_iam_member" "deployer_server" {
   name     = google_cloud_run_v2_service.server.name
   location = var.region
@@ -83,8 +83,8 @@ resource "google_cloud_run_v2_worker_pool_iam_member" "deployer_worker" {
   member   = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-resource "google_cloud_run_v2_job_iam_member" "deployer_scaler" {
-  name     = google_cloud_run_v2_job.scaler.name
+resource "google_cloud_run_v2_service_iam_member" "deployer_scaler" {
+  name     = google_cloud_run_v2_service.scaler.name
   location = var.region
   role     = "roles/run.developer"
   member   = "serviceAccount:${google_service_account.deployer.email}"
