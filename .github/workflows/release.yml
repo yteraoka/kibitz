@@ -120,7 +120,7 @@ jobs:
             --image "${repo}/kibitz-worker:${IMAGE_TAG}" \
             --quiet
 
-          gcloud run jobs update kibitz-scaler \
+          gcloud run services update kibitz-scaler \
             --region "$region" \
             --image "${repo}/kibitz-scaler:${IMAGE_TAG}" \
             --quiet
@@ -139,5 +139,7 @@ jobs:
             worker_revision=$(gcloud run worker-pools describe kibitz-worker \
               --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
             echo "| kibitz-worker | \`${worker_revision}\` |"
-            echo "| kibitz-scaler | job updated |"
+            scaler_revision=$(gcloud run services describe kibitz-scaler \
+              --region "${{ vars.GCP_REGION }}" --format='value(status.latestReadyRevisionName)')
+            echo "| kibitz-scaler | \`${scaler_revision}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

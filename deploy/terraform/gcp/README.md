@@ -15,7 +15,7 @@ covers what the configuration itself does.
 | --- | --- |
 | `google_cloud_run_v2_service.server` | Public: GitHub has to reach it. Scales to zero; the signature check is what protects it |
 | `google_cloud_run_v2_worker_pool.worker` | A pull subscriber receives no requests, which is what a worker pool is for: no ingress, no ports, no probes, and the CPU allocated for the life of the instance. Its instance count is written at runtime, not by Terraform |
-| `google_cloud_run_v2_job.scaler` + `google_cloud_scheduler_job.scaler` | Sizes the worker from the Pub/Sub backlog once a minute, and returns it to `worker_min_instances` (zero by default) once the queue has been empty for `worker_idle_after` |
+| `google_cloud_run_v2_service.scaler` + `google_cloud_scheduler_job.scaler` | Internal-only service that Cloud Scheduler calls once a minute, billed only while it answers. Sizes the worker from the Pub/Sub backlog, and returns it to `worker_min_instances` (zero by default) once the queue has been empty for `worker_idle_after` |
 | `google_pubsub_subscription.worker` | Ordered per pull request, with a dead letter policy |
 | `google_firestore_database.state` | Idempotency records and locks. `deletion_policy = ABANDON`: losing it means reviewing everything again |
 | `google_secret_manager_secret.*` | The webhook secret and the App key. Values are added with gcloud, so they never enter the Terraform state |
@@ -38,7 +38,7 @@ rather than secrets.
 
 The deploy service account's grants are per resource -- push to this Artifact
 Registry repository, and `roles/run.developer` on the server, the worker pool
-and the scaler job -- with one exception. Updating a worker pool returns a
+and the scaler service -- with one exception. Updating a worker pool returns a
 long-running operation that gcloud polls, and that operation is not a child of
 the pool, so reading it takes a project-level permission: a custom role holding
 `run.operations.get` and nothing else.

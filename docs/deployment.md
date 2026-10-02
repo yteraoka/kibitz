@@ -530,7 +530,7 @@ PR 作成 ──> kibitz-server ──publish──> Pub/Sub
                   └─ インスタンス数を 1 に引き上げ (即時)
                                           │
                                           ↓
-Cloud Scheduler ──毎分──> kibitz-scaler ──> バックログを読む
+Cloud Scheduler ──毎分 POST──> kibitz-scaler ──> バックログを読む
                                           └─ 溜まっていれば増やす
                                              15 分空なら 0 に戻す
 ```
@@ -570,9 +570,8 @@ kibitz だけなので、上限も数を決める側 (scaler の
 # いまの台数と、scaler が何を見て決めたか
 gcloud run worker-pools describe kibitz-worker --region asia-northeast1 \
   --format="value(metadata.annotations['run.googleapis.com/manualInstanceCount'])"
-gcloud run jobs executions list --job kibitz-scaler --region asia-northeast1 --limit 5
 gcloud logging read \
-  'resource.type=cloud_run_job AND resource.labels.job_name=kibitz-scaler' \
+  'resource.type=cloud_run_revision AND resource.labels.service_name=kibitz-scaler' \
   --limit 20 --format='value(jsonPayload.msg,jsonPayload.reason,jsonPayload.backlog)'
 ```
 
@@ -665,7 +664,7 @@ terraform output github_actions
 —— Pull Request が持ち込んだものも含めて —— デプロイできない。
 
 デプロイ用 SA の権限はリソース単位 (Artifact Registry への push と、server /
-worker pool / scaler job それぞれの `roles/run.developer`) だが、1 つだけ
+worker pool / scaler サービスそれぞれの `roles/run.developer`) だが、1 つだけ
 プロジェクト単位のものがある。worker pool の更新は long-running operation を返し、
 gcloud はそれを polling する。operation は worker pool の子リソースではなく
 `projects/PROJECT/locations/REGION/operations/ID` にいるので、リソース単位の権限では
@@ -792,7 +791,7 @@ printf '%s' "$(cat body.json)" | \
 | 同じ PR に何度もレビューが付く | Firestore に書けていない | ワーカーの SA に `datastore.user` があるか |
 | レビューが来ない・ログも無い | ワーカーが 0 インスタンスのまま起きていない | サーバーのログに `worker wake-up is enabled` が出ているか、サーバーの SA にワーカー (worker pool) の `roles/run.developer` があるか |
 | PR を作ってもイベントが publish されない | `trigger_keywords` を設定したがキーワードが無い | サーバーのログの `reason=no_keyword`。**コメントの先頭に** `/kibitz review` と書けば実行される |
-| ワーカーが 1 台上がりっぱなし | scaler が失敗している、またはメトリクスが読めていない | `gcloud run jobs executions list --job kibitz-scaler`。SA に `roles/monitoring.viewer` があるか |
+| ワーカーが 1 台上がりっぱなし | scaler が失敗している、またはメトリクスが読めていない | scaler サービスのログ (`resource.labels.service_name=kibitz-scaler`) と Cloud Scheduler の実行履歴。SA に `roles/monitoring.viewer` があるか |
 | コメントしたのにレビューが走らない (回答だけ返る) | コマンドがコメントの先頭に無い | 引用や説明文の途中のメンションは質問として扱う。先頭に書く ([event-schema.md](event-schema.md#41-コマンドはコメントの先頭だけ)) |
 | レビュー中にワーカーが落ちる | `worker_idle_after` を短くしすぎている | メトリクスの遅延より長くする (既定 15 分)。ジョブは再配送されるのでレビューは失われない |
 | `git fetch` が失敗する | App のインストール先にリポジトリが含まれていない | GitHub App の Install 設定でリポジトリを追加 |

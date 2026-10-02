@@ -120,29 +120,33 @@ resource "google_monitoring_alert_policy" "server_errors" {
 
 # The scaler failing is not visible in the reviews until much later: the worker
 # simply stays wherever it was left, either burning money at one instance or
-# missing the work that piles up behind it. One failed run is nothing, since
+# missing the work that piles up behind it. One failed call is nothing, since
 # the next is a minute away; a run of them is worth knowing about.
+#
+# 4xx counts as well as 5xx: a scaler that Cloud Scheduler is not allowed to
+# call fails with a 403 and never runs at all.
 resource "google_monitoring_alert_policy" "scaler_failures" {
   display_name = "${var.name_prefix}: the worker autoscaler is failing"
   combiner     = "OR"
 
   conditions {
-    display_name = "scaler job executions are failing"
+    display_name = "scaler calls are failing"
 
     condition_threshold {
       filter = join(" AND ", [
-        "resource.type = \"cloud_run_job\"",
-        "resource.labels.job_name = \"${google_cloud_run_v2_job.scaler.name}\"",
-        "metric.type = \"run.googleapis.com/job/completed_execution_count\"",
-        "metric.labels.result = \"failed\"",
+        "resource.type = \"cloud_run_revision\"",
+        "resource.labels.service_name = \"${google_cloud_run_v2_service.scaler.name}\"",
+        "metric.type = \"run.googleapis.com/request_count\"",
+        "metric.labels.response_code_class = one_of(\"4xx\", \"5xx\")",
       ])
       comparison      = "COMPARISON_GT"
       threshold_value = 3
       duration        = "0s"
 
       aggregations {
-        alignment_period   = "1800s"
-        per_series_aligner = "ALIGN_SUM"
+        alignment_period     = "1800s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
       }
     }
   }
@@ -155,10 +159,11 @@ resource "google_monitoring_alert_policy" "scaler_failures" {
       "instance count stays where it is, which means either an idle instance",
       "nobody is paying attention to or a queue nobody is draining.",
       "",
-      "  gcloud run jobs executions list --job ${var.name_prefix}-scaler --region ${var.region}",
+      "  gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=${var.name_prefix}-scaler' --limit 20",
       "",
       "The usual causes are a missing role (it needs roles/monitoring.viewer",
-      "and roles/run.developer on the worker pool) and a subscription name",
+      "and roles/run.developer on the worker pool, and Cloud Scheduler's",
+      "account needs roles/run.invoker on the scaler) and a subscription name",
       "that does not match the one it is watching.",
     ])
   }

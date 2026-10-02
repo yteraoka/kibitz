@@ -158,8 +158,8 @@ Vertex AI の認証はサービスアカウント鍵ファイルを配置せず�
 
 ## 2.1 kibitz-scaler (環境変数)
 
-Pub/Sub のバックログからワーカーのインスタンス数を決める小さなジョブ。
-Cloud Run ジョブとして Cloud Scheduler から毎分起動する
+Pub/Sub のバックログからワーカーのインスタンス数を決める小さなプログラム。
+Cloud Run サービスとして動き、Cloud Scheduler から毎分 `POST /reconcile` で呼ばれる
 ([deployment.md](deployment.md#ワーカーのオートスケール))。
 
 | 変数 | 既定 | 説明 |
@@ -172,9 +172,15 @@ Cloud Run ジョブとして Cloud Scheduler から毎分起動する
 | `KIBITZ_SCALE_MAX_INSTANCES` | `3` | 上限 |
 | `KIBITZ_SCALE_MESSAGES_PER_INSTANCE` | `2` | 1 インスタンスが引き受けるメッセージ数。通常は `KIBITZ_CONCURRENCY` と同じ |
 | `KIBITZ_SCALE_IDLE_AFTER` | `15m` | この時間ずっとキューが空なら最小まで下げる |
-| `KIBITZ_SCALE_INTERVAL` | `1m` | `-loop` で常駐させたときの間隔 (ジョブ実行では未使用) |
+| `KIBITZ_SCALE_INTERVAL` | `1m` | `-loop` で常駐させたときの間隔 (`-serve` では未使用) |
+| `KIBITZ_LISTEN_ADDR` | `:8080` | `-serve` で待ち受けるアドレス |
 
-`-loop` を付けなければ 1 回調整して終了する (Cloud Run ジョブ向け)。
+動かし方は 3 通り。
+
+- `-serve`: `POST /reconcile` 1 回につき 1 回調整する (Cloud Run サービス向け。Terraform はこれ)。
+  失敗は 500 で返すので、Cloud Scheduler とアラートが失敗として数える
+- `-loop`: 常駐して `KIBITZ_SCALE_INTERVAL` ごとに調整する (Cloud Run 以外で動かす場合)
+- どちらも付けない: 1 回調整して終了する
 
 必要な権限は `roles/monitoring.viewer` と、**ワーカーの worker pool に対する**
 `roles/run.developer`。プロジェクト全体の権限は要らない。

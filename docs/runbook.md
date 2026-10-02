@@ -86,7 +86,7 @@ gcloud run worker-pools update kibitz-worker --region "$REGION" --min-instances 
 gcloud run worker-pools update kibitz-worker --region "$REGION" --max-instances 3
 ```
 
-> **scaler が次の実行で台数を戻す。** 先に scaler のジョブを止めるか、
+> **scaler が次の実行で台数を戻す。** 先に scaler の Cloud Scheduler ジョブを止める (`gcloud scheduler jobs pause kibitz-scaler`) か、
 > 入れ替えを 1 分以内に終える。
 
 ### 1-3. 失効させるべきとき
@@ -127,7 +127,9 @@ gcloud pubsub subscriptions pull kibitz-events-dead-hold --limit=10 --format=jso
 ```bash
 # 台数と、scaler が何を見て決めたか
 gcloud run worker-pools describe kibitz-worker --region "$REGION" --format='value(scaling)'
-gcloud run jobs executions list --job kibitz-scaler --region "$REGION" --limit 5
+gcloud logging read \
+  'resource.type=cloud_run_revision AND resource.labels.service_name=kibitz-scaler AND jsonPayload.msg="reconciled"' \
+  --limit 5 --format='value(timestamp,jsonPayload.result)'
 ```
 
 | 見え方 | 原因 |
@@ -155,10 +157,14 @@ Redeliver)。
 **すぐには見えない障害。** 台数が最後の値のまま固まるので、1 台で課金され続けるか、
 溜まったキューを誰も捌かないかのどちらかになる。
 
-よくある原因は 2 つだけ。
+よくある原因は 3 つ。
 
 - 権限不足 — `roles/monitoring.viewer` と、**ワーカーの worker pool に対する**
   `roles/run.developer`
+- Cloud Scheduler が scaler を呼べない — 4xx (特に 403) が出ていれば、scaler の SA に
+  **scaler サービスに対する** `roles/run.invoker` があるか。この場合 scaler 自身のログには
+  何も残らないので、Cloud Scheduler の実行履歴
+  (`gcloud logging read 'resource.type=cloud_scheduler_job'`) を見る
 - サブスクリプション名の不一致
 
 ## 3. アラートにならない事故
