@@ -11,7 +11,7 @@ Phase 2 の時点で「GitHub の PR に AI レビューが付く」状態を作
 | クラウド | **GCP をメイン** (Pub/Sub / Firestore / GCS / Cloud Run・GKE) | AWS (SQS) 対応は Phase X に後置。インターフェースだけ先に用意する |
 | テナント | **単一組織** | 設定モデルにテナント ID を持たせない。キー設計は将来足せる形にしておく |
 | ワーカーの権限 | **当面はコメント投稿のみ**。将来 Issue 起点の実装まで | 実装モードを Phase 8 として独立させ、既定は無効。レビュー側の「読み取りのみ」保証は崩さない |
-| エージェントエンジン | **OpenCode** ([agent-engine.md](agent-engine.md)) | MCP がビルトインである点が決め手。`reviewer.Engine` で抽象化し pi も差し替え可能に保つ |
+| エージェントエンジン | **OpenCode** ([agent-engine.md](agent-engine.md)) | 当初の決め手は MCP がビルトインである点。pi 1.0 の MCP 対応後も、乗り換えの費用と成熟度から継続 (ADR-0024)。`reviewer.Engine` で抽象化し pi も差し替え可能に保つ |
 | GitHub の認証 | **GitHub App** | インストールトークンが 1 時間で失効し権限も細かい。PAT 経路は実装しない |
 | モデル | **Vertex AI 経由の Claude** (既定 `claude-opus-5`) | GCP メインと揃う。ADC で認証でき、モデル API キーという長期シークレットを持たずに済む |
 | 出力言語 | **日本語** | `review.language` で切り替え可能にはするが、既定は日本語 |
