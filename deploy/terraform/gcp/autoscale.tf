@@ -58,6 +58,12 @@ resource "google_cloud_run_v2_service" "scaler" {
     # below one.
     max_instance_request_concurrency = 1
 
+    # The first generation environment is named rather than left to Cloud
+    # Run, because the second refuses to start below 512Mi. Nothing the
+    # second adds -- network file systems, full Linux compatibility -- is
+    # anything a few API calls need.
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN1"
+
     scaling {
       max_instance_count = 1
     }
@@ -77,12 +83,13 @@ resource "google_cloud_run_v2_service" "scaler" {
       # 0.08 is the smallest CPU Cloud Run offers. A reconcile is two or
       # three API calls that spend their time waiting on the network, so a
       # sliver of a CPU is enough, and the boost covers the start-up, which
-      # is the only part that does real work. 512Mi is the floor of the
-      # second generation execution environment.
+      # is the only part that does real work. 128Mi is the floor of the
+      # first generation environment, and a Go binary holding two API
+      # clients fits in it; raise it if memory utilization says otherwise.
       resources {
         limits = {
           cpu    = "0.08"
-          memory = "512Mi"
+          memory = "128Mi"
         }
         cpu_idle          = true
         startup_cpu_boost = true
