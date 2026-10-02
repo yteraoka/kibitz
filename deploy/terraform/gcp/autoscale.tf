@@ -37,8 +37,9 @@ resource "google_cloud_run_v2_service" "scaler" {
   ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
   deletion_protection = false
 
-  # One instance is all a once-a-minute caller needs, and a single instance is
-  # what lets the handler's lock keep two reconciles from writing at once.
+  # One instance taking one request at a time is all a once-a-minute caller
+  # needs, and it is what keeps two reconciles from writing the count at once
+  # (see max_instance_request_concurrency below).
   scaling {
     scaling_mode       = "AUTOMATIC"
     min_instance_count = 0
@@ -50,6 +51,12 @@ resource "google_cloud_run_v2_service" "scaler" {
     # One reconciliation is one read and at most one write. If it cannot be
     # done in two minutes the next call will do it instead.
     timeout = "120s"
+
+    # One request at a time. Together with the single instance this keeps a
+    # Cloud Scheduler retry from reconciling alongside the attempt it
+    # retries, and it is what Cloud Run requires before it allows a CPU
+    # below one.
+    max_instance_request_concurrency = 1
 
     scaling {
       max_instance_count = 1
@@ -65,12 +72,16 @@ resource "google_cloud_run_v2_service" "scaler" {
 
       # cpu_idle is request-based billing: the CPU is allocated, and paid
       # for, only while a request is being handled. That is the whole reason
-      # this is a service. 512Mi is the floor of the second generation
-      # execution environment, and a whole CPU is required by the default
-      # concurrency; neither costs anything between calls.
+      # this is a service.
+      #
+      # 0.08 is the smallest CPU Cloud Run offers. A reconcile is two or
+      # three API calls that spend their time waiting on the network, so a
+      # sliver of a CPU is enough, and the boost covers the start-up, which
+      # is the only part that does real work. 512Mi is the floor of the
+      # second generation execution environment.
       resources {
         limits = {
-          cpu    = "1"
+          cpu    = "0.08"
           memory = "512Mi"
         }
         cpu_idle          = true

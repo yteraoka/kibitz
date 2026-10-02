@@ -20,7 +20,8 @@ Cloud Scheduler から `POST /reconcile` で呼ぶ。**
 
 - `kibitz-scaler -serve` は `POST /reconcile` 1 回につき `Scaler.Reconcile` を 1 回実行する。
   失敗は 500 で返す。
-- `min_instance_count = 0`、`max_instance_count = 1`。
+- `min_instance_count = 0`、`max_instance_count = 1`、`max_instance_request_concurrency = 1`。
+- CPU は Cloud Run の最小値 0.08 vCPU (メモリは第 2 世代実行環境の下限 512Mi)。
 - ingress は internal のみ。Cloud Scheduler は OIDC トークン (scaler の SA) で呼び、
   `roles/run.invoker` は scaler の SA にだけ付ける。
 - 1 回実行モードと `-loop` は残す (Cloud Run 以外で動かす場合のため)。
@@ -44,7 +45,15 @@ Functions にすると Functions Framework とソースデプロイという**�
 
 Cloud Scheduler のリトライは、リトライ元の試行とまだ重なっていることがある。
 2 つの調整が同時に台数を書くと、互いが変えている最中の数を見て判断することになる。
-上限を 1 台にし、ハンドラはロックで 1 件ずつ処理する。毎分 1 回の呼び出しには 1 台で足りる。
+上限を 1 台・同時リクエスト 1 件にし、さらにハンドラもロックで 1 件ずつ処理する
+(ロックは Cloud Run 以外で `-serve` を動かす場合のため)。毎分 1 回の呼び出しには 1 台で足りる。
+
+### CPU を最小にした理由
+
+1 回の調整は API を 2〜3 回呼ぶだけで、時間の大半はネットワーク待ち。
+CPU は vCPU 秒で課金されるので、少ない CPU で少し長くかかるほうが安い。
+起動時は startup CPU boost が効く。Cloud Run は同時リクエスト 1 件でないと
+1 vCPU 未満を許さないので、上の直列化と同じ設定がこれも可能にしている。
 
 ### 失敗を 500 で返す理由
 
