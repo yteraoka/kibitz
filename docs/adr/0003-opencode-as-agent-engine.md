@@ -1,6 +1,7 @@
 # エージェントエンジンに OpenCode を採用する
 
 - **状態**: 採用 (2026-09-21)
+  — 決め手とした「pi は MCP を持たない」は pi 1.0 で成り立たなくなった。理由は [ADR-0024](0024-keep-opencode-after-pi-gained-mcp.md) で置き換え
 - **関連**: `9bdbb5c` / **`docs/agent-engine.md` (比較の詳細)**
 
 ## 背景
