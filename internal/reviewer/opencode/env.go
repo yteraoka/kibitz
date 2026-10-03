@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"os"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -34,6 +35,10 @@ var baseEnv = []string{
 	"GOOGLE_CLOUD_REGION", "GOOGLE_CLOUD_LOCATION", "CLOUD_ML_REGION",
 	"GCE_METADATA_HOST", "GCE_METADATA_IP",
 }
+
+// BaseEnv returns the names in [baseEnv], for another engine that builds its
+// agent's environment the same way.
+func BaseEnv() []string { return slices.Clone(baseEnv) }
 
 // childEnv builds the environment for one agent process: the base list, the
 // configured provider credentials, and the variables the enabled MCP servers

@@ -29,6 +29,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/queue/pubsub"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
+	"github.com/yteraoka/kibitz/internal/reviewer/pi"
 	"github.com/yteraoka/kibitz/internal/run"
 	"github.com/yteraoka/kibitz/internal/sandbox"
 	"github.com/yteraoka/kibitz/internal/store"
@@ -91,6 +92,7 @@ func realMain() error {
 	logger.LogAttrs(ctx, slog.LevelInfo, "starting",
 		slog.String("queue_backend", cfg.Queue.Backend),
 		slog.String("state_backend", cfg.State.Backend),
+		slog.String("engine", cfg.Engine),
 		slog.String("model", cfg.OpenCode.Model),
 		slog.String("opencode_mode", cfg.OpenCode.Mode),
 		slog.Int("concurrency", cfg.Concurrency),
@@ -329,22 +331,7 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		warnUnreachableMCP(mcp, proxy, logger)
 	}
 
-	engine := opencode.New(opencode.Config{
-		Bin:            cfg.OpenCode.Bin,
-		Model:          cfg.OpenCode.Model,
-		ReviewAgent:    cfg.OpenCode.ReviewAgent,
-		AnswerAgent:    cfg.OpenCode.AnswerAgent,
-		PlanAgent:      cfg.OpenCode.PlanAgent,
-		ImplementAgent: cfg.OpenCode.ImplementAgent,
-		LogLevel:       cfg.OpenCode.LogLevel,
-		TriageAgent:    cfg.OpenCode.TriageAgent,
-		Env:            agentEnv(cfg, logger),
-		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
-		ContextBin:     contextBin(cfg.OpenCode.ContextBin),
-		MCPServers:     mcp,
-		CustomProvider: vertexMaaSProvider(cfg, logger),
-		Egress:         proxy,
-	}, logger)
+	engine := newEngine(cfg, mcp, proxy, logger)
 
 	verifier, err := newVerifier(ctx, cfg, logger)
 	if err != nil {
@@ -387,6 +374,52 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		MaxPostsPerHour:  cfg.MaxPostsPerHour,
 		Metrics:          metrics,
 	}, nil
+}
+
+// newEngine builds the agent engine the deployment chose. Both read the same
+// model, provider and MCP settings, so switching is one variable.
+func newEngine(cfg *config.Worker, mcp opencode.Catalog, proxy *egress.Proxy, logger *slog.Logger) reviewer.Engine {
+	if cfg.Engine == config.EnginePi {
+		env := agentEnv(cfg, logger)
+		// pi's Vertex AI provider reads the location from here rather than
+		// from VERTEX_LOCATION.
+		if v := cfg.OpenCode.Vertex; v.Location != "" {
+			env = append(env, "GOOGLE_CLOUD_LOCATION="+v.Location)
+		}
+		logger.LogAttrs(context.Background(), slog.LevelWarn,
+			"the agent engine is pi, which is on trial (ADR-0024)",
+			slog.String("bin", cfg.Pi.Bin),
+			slog.String("extension", cfg.Pi.Extension))
+		return pi.New(pi.Config{
+			Bin:            cfg.Pi.Bin,
+			Model:          cfg.OpenCode.Model,
+			AgentsDir:      cfg.Pi.AgentsDir,
+			GuardExtension: cfg.Pi.Extension,
+			SessionDir:     cfg.Pi.SessionDir,
+			MCPServers:     mcp,
+			Env:            env,
+			ContextBin:     contextBin(cfg.OpenCode.ContextBin),
+			EnvPassthrough: cfg.OpenCode.EnvPassthrough,
+			CustomProvider: vertexMaaSProvider(cfg, logger),
+			Egress:         proxy,
+		}, logger)
+	}
+	return opencode.New(opencode.Config{
+		Bin:            cfg.OpenCode.Bin,
+		Model:          cfg.OpenCode.Model,
+		ReviewAgent:    cfg.OpenCode.ReviewAgent,
+		AnswerAgent:    cfg.OpenCode.AnswerAgent,
+		PlanAgent:      cfg.OpenCode.PlanAgent,
+		ImplementAgent: cfg.OpenCode.ImplementAgent,
+		LogLevel:       cfg.OpenCode.LogLevel,
+		TriageAgent:    cfg.OpenCode.TriageAgent,
+		Env:            agentEnv(cfg, logger),
+		EnvPassthrough: cfg.OpenCode.EnvPassthrough,
+		ContextBin:     contextBin(cfg.OpenCode.ContextBin),
+		MCPServers:     mcp,
+		CustomProvider: vertexMaaSProvider(cfg, logger),
+		Egress:         proxy,
+	}, logger)
 }
 
 // newEgress builds the proxy the agent reaches the network through, or nil

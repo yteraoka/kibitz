@@ -62,6 +62,13 @@ const (
 	ScaleNone     = "none"
 )
 
+// Agent engines. See docs/agent-engine.md.
+const (
+	EngineOpenCode = "opencode"
+	// EnginePi is the trial engine of ADR-0024.
+	EnginePi = "pi"
+)
+
 // OpenCode execution modes. See docs/worker.md.
 const (
 	OpenCodeModeRun    = "run"
@@ -398,6 +405,22 @@ type OpenCode struct {
 	ContextBin string
 }
 
+// Pi configures the pi engine, which runs when KIBITZ_AGENT_ENGINE is "pi".
+// Everything else about the agent -- the model, the provider settings, the
+// MCP catalog -- is shared with OpenCode and read from there.
+type Pi struct {
+	Bin string
+	// AgentsDir holds the agent definitions. They are OpenCode's; pi reads
+	// their bodies as an addition to its system prompt.
+	AgentsDir string
+	// Extension is the kibitz-guard extension, which is pi's only
+	// permission layer.
+	Extension string
+	// SessionDir keeps sessions between jobs. Empty uses a directory under
+	// the temporary directory.
+	SessionDir string
+}
+
 // Limits bounds a single review job.
 type Limits struct {
 	MaxComments  int
@@ -443,8 +466,11 @@ type Worker struct {
 	Concurrency     int
 	JobTimeout      time.Duration
 	WorkspaceDir    string
-	OpenCode        OpenCode
-	Limits          Limits
+	// Engine selects the agent engine: "opencode" or "pi".
+	Engine   string
+	OpenCode OpenCode
+	Pi       Pi
+	Limits   Limits
 	// MCPServers defines the external tool servers this deployment offers, as
 	// one JSON object of name to server. MCPAllowlist narrows which of them a
 	// repository may enable; empty means all of them.
@@ -566,6 +592,13 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		Concurrency:     l.positiveInt("KIBITZ_CONCURRENCY", 2),
 		JobTimeout:      l.duration("KIBITZ_JOB_TIMEOUT", 15*time.Minute),
 		WorkspaceDir:    l.str("KIBITZ_WORKSPACE_DIR", "/var/tmp/kibitz"),
+		Engine:          l.enum("KIBITZ_AGENT_ENGINE", EngineOpenCode, EngineOpenCode, EnginePi),
+		Pi: Pi{
+			Bin:        l.str("KIBITZ_PI_BIN", "pi"),
+			AgentsDir:  l.str("KIBITZ_PI_AGENTS_DIR", "/etc/kibitz/opencode/agents"),
+			Extension:  l.str("KIBITZ_PI_EXTENSION", "/etc/kibitz/pi/kibitz-guard.ts"),
+			SessionDir: l.str("KIBITZ_PI_SESSION_DIR", ""),
+		},
 		OpenCode: OpenCode{
 			Bin:           l.str("KIBITZ_OPENCODE_BIN", "opencode"),
 			Mode:          l.enum("KIBITZ_OPENCODE_MODE", OpenCodeModeRun, OpenCodeModeRun, OpenCodeModeAttach),

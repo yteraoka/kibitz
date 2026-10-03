@@ -115,15 +115,37 @@ kibitz が必要とするものが既に揃っている。
 
 [ADR-0024](adr/0024-keep-opencode-after-pi-gained-mcp.md) の未検証の点。試作エンジンで確かめる。
 
-1. `--tools read,grep,find,ls` と MCP を併用したとき、codemode や `tool_search` から
-   許可していないツールに届かないか。`autoEnableCodemode: false` と `exposure: "direct"` で閉じられるか
-2. codemode 経由の入れ子の呼び出し (`parentToolCallId`) を、ADR-0018 の計測と
-   イベント解析がどう数えるべきか
-3. ADR-0021 のプロキシに、pi 本体 (Node) が `NODE_USE_ENV_PROXY=1` 無しで従うか。
-   pi 自身の通信が `PI_OFFLINE=1` で止まるか
-4. Vertex AI で、ADC による Gemini に加えて Claude と Model Garden の第三者モデル
-   (`vertex-maas/...`、ADR-0008) が使えるか
-5. `~/.pi/agent` (設定・認証・trust・セッション) をジョブごとの使い捨てディレクトリに隔離できるか
+| # | 確かめること | 状況 (pi 1.0.0) |
+| --- | --- | --- |
+| 1 | `--tools` で絞ったとき、codemode や `tool_search` から許可していないツールに届かないか | **確認済み。届かない。** 有効にしていない組み込みツールは codemode からも呼べない (`tools.bash does not exist`)。ただし `--tools` は MCP のツールまで落とすので、試作エンジンは `--tools` を使わず settings.json の `defaultTools` で絞る。`autoEnableCodemode: false` と `exposure: "direct"` で codemode と `tool_search` も宣言されない |
+| 2 | codemode 経由の入れ子の呼び出しを、ADR-0018 の計測でどう数えるか | codemode を切ったので、試作エンジンでは起きない。起きた場合も入れ子の呼び出しはそれぞれのツール名で数える |
+| 3 | ADR-0021 のプロキシに pi 本体が従うか。pi 自身の通信が止まるか | **未確認。** egress のセッションは `NODE_USE_ENV_PROXY=1` を渡している。`PI_OFFLINE=1` / `PI_TELEMETRY=0` / `PI_SKIP_VERSION_CHECK=1` は付けている |
+| 4 | Vertex AI で Gemini / Claude / Model Garden の第三者モデルが使えるか | **未確認。** プロバイダ名は OpenCode と同じ `google-vertex`。pi は場所を `GOOGLE_CLOUD_LOCATION` から読むので、worker が `VERTEX_LOCATION` から写す。`vertex-maas/...` は `models.json` の OpenAI 互換プロバイダとして宣言し、トークンは環境変数で渡す (ファイルには書かない) |
+| 5 | `~/.pi/agent` をジョブごとに隔離できるか | **確認済み。** `PI_CODING_AGENT_DIR` をジョブディレクトリに向け、settings / mcp / models をジョブごとに書く。セッションだけは `--session-dir` でジョブの外に置く |
+
+### 試作エンジン (`KIBITZ_AGENT_ENGINE=pi`) の作り
+
+`internal/reviewer/pi` に実装し、OpenCode のランナーと同じ契約で動かす。
+
+- **権限**: pi には権限機構が無い。そのため次の 2 段で OpenCode の `permission` に相当するものを作る。
+  - モードごとに有効にするツールを `defaultTools` で決める。どのモードにもシェルは無い。
+  - ガード拡張 `deploy/pi/kibitz-guard.ts` が `tool_call` ごとに検査する。検査するのは、ツール名が許可リストにあるか、パスがチェックアウトの中にあるか (シンボリックリンクと `~` も解決する)、書き込み先がそのモードで許されているかの 3 点。
+  - 書き込み先は、review / triage は `.kibitz/out/` だけ。implement はリポジトリが許したパスだけで、`repoconfig.PathFilter` の正規表現をそのまま渡す。拡張が無ければジョブは失敗する。
+- **リポジトリからの設定・指示を読まない**: `--no-approve`、`--no-context-files`、`--no-skills`、`--no-prompt-templates` を付ける。
+- **エージェント定義**: `deploy/opencode/agents/*.md` をそのまま使う。front matter を除いた本文を `--append-system-prompt` で渡す。
+- **セッション**: pi は ID によるセッション検索を起動ディレクトリ単位で行うので、毎回新しいチェックアウトでは見つからない。2 回目以降は `--session-dir` の中のファイルを `--session <file>` で開く。
+- **失敗**: プロバイダのエラーでも pi は終了コード 0 で終わる。そのため最後の assistant メッセージの `stopReason` を見る。
+- **イメージ**: pi の `find` ツールは `fd` を使い、無ければダウンロードしようとするので、`fd-find` を入れる。
+- **まだ無いもの**: OpenCode にある「応答が途中で打ち切られたら再開する」処理と、失敗の詳しい診断 (`diagnose.go` 相当)。
+
+実際の pi を使う結合テストがある。
+
+```sh
+KIBITZ_PI_IT_BIN=$(which pi) KIBITZ_PI_IT_MCP=/path/to/kibitz-mcp go test ./internal/reviewer/pi/
+```
+
+このテストは台本どおりに応答するモデルサーバーに対して、ガード拡張と kibitz-mcp を込みで動かす。
+確かめているのは、ワークスペース外の読み取り・シェル・許可外の書き込みが拒否されること、kibitz-mcp に届くこと、出力を読めること。
 
 ## pi のほうが適するケース
 
@@ -144,9 +166,9 @@ kibitz が必要とするものが既に揃っている。
 | 要求 | OpenCode | pi |
 | --- | --- | --- |
 | 作業ディレクトリの指定 | `--dir` | プロセスの cwd |
-| ツール / 権限の制限 | `permission` 設定 + `--auto` | `--tools` / `--exclude-tools` / `--no-builtin-tools` (+ `autoEnableCodemode: false`) |
+| ツール / 権限の制限 | `permission` 設定 + `--auto` | settings.json の `defaultTools` + ガード拡張 (`--tools` は MCP のツールも落とすので使わない) |
 | システムプロンプトの差し替え | エージェント定義 (`--agent`) | `--system-prompt` / `--append-system-prompt` |
-| セッションの継続 | `--session <id>` | `--session <path\|id>` / `--session-id` |
+| セッションの継続 | `--session <id>` | 新規は `--session-id`、継続は `--session <file>` |
 | 構造化出力 | ファイル出力 (`.kibitz/out/review.json`) | 同左 |
 | 実行イベントの取得 | `--format json` | `--mode json` / `--mode rpc` |
 

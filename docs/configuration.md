@@ -92,7 +92,11 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_JOB_TIMEOUT` | `15m` | ジョブ全体のタイムアウト |
 | `KIBITZ_WORKSPACE_DIR` | `/var/tmp/kibitz` | クローン先 |
 | `KIBITZ_CLONE_DEPTH` | `50` | shallow clone の深さ |
-| `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi` (将来) / `fake` (テスト用) |
+| `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi`。`pi` は試験中 (ADR-0024、[agent-engine.md](agent-engine.md)) |
+| `KIBITZ_PI_BIN` | `pi` | pi のバイナリパス (`KIBITZ_AGENT_ENGINE=pi` のとき) |
+| `KIBITZ_PI_AGENTS_DIR` | `/etc/kibitz/opencode/agents` | エージェント定義。OpenCode と同じファイルを使い、front matter を除いた本文を pi のシステムプロンプトに追記する |
+| `KIBITZ_PI_EXTENSION` | `/etc/kibitz/pi/kibitz-guard.ts` | ガード拡張。pi には権限機構が無いため必須で、無ければジョブは失敗する |
+| `KIBITZ_PI_SESSION_DIR` | (一時ディレクトリ配下) | ジョブをまたいでセッションを保存する場所 |
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
