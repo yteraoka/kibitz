@@ -24,9 +24,13 @@ FROM node:22-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        fd-find \
         git \
         ripgrep \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # pi's find tool runs "fd" and, when it is missing, tries to download it.
+    # Debian ships it as fdfind.
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
 # Pinned rather than "latest": the agent's behaviour is part of kibitz's
 # output, so it changes when kibitz is released, not when upstream publishes.
@@ -45,6 +49,13 @@ RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
     && npm rebuild -g opencode-ai \
     && opencode --version
 
+# pi, the engine on trial (ADR-0024). It runs only when KIBITZ_AGENT_ENGINE
+# is "pi"; the image carries it so that trying it is a variable, not a build.
+# Pinned for the same reason opencode is.
+ARG PI_VERSION=1.0.0
+RUN npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+    && pi --version
+
 COPY --from=build /out/kibitz-worker /usr/local/bin/kibitz-worker
 
 # kibitz's own MCP server. opencode starts it per job to answer questions about
@@ -55,6 +66,10 @@ COPY --from=build /out/kibitz-mcp /usr/local/bin/kibitz-mcp
 # the repository under review: a pull request must not be able to rewrite the
 # instructions its own reviewer follows.
 COPY deploy/opencode/agents/ /etc/kibitz/opencode/agents/
+
+# pi has no permissions of its own; this extension is what keeps its tools
+# inside the checkout. Like the agent definitions it is part of the image.
+COPY deploy/pi/kibitz-guard.ts /etc/kibitz/pi/kibitz-guard.ts
 
 # Workspaces are disposable; one clone per job, removed afterwards.
 RUN useradd --create-home --uid 10001 kibitz \

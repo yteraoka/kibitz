@@ -198,6 +198,26 @@ func TestLoadWorkerDefaults(t *testing.T) {
 	if cfg.ImplementEnabled {
 		t.Error("ImplementEnabled = true, want false by default")
 	}
+	if cfg.Engine != config.EngineOpenCode {
+		t.Errorf("Engine = %q, want opencode by default", cfg.Engine)
+	}
+}
+
+func TestLoadWorkerEngine(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_AGENT_ENGINE"] = "pi"
+	cfg, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if cfg.Engine != config.EnginePi || cfg.Pi.Extension != "/etc/kibitz/pi/kibitz-guard.ts" {
+		t.Errorf("Engine = %q, Pi = %+v", cfg.Engine, cfg.Pi)
+	}
+
+	env["KIBITZ_AGENT_ENGINE"] = "fake"
+	if _, err := config.LoadWorker(config.MapEnv(env)); err == nil || !strings.Contains(err.Error(), "KIBITZ_AGENT_ENGINE") {
+		t.Errorf("err = %v, want an unknown engine refused", err)
+	}
 }
 
 func TestLoadWorkerRequiresPubSubProject(t *testing.T) {

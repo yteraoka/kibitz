@@ -72,6 +72,16 @@ func (f *PathFilter) Match(path string) bool {
 	return f.re.MatchString(strings.TrimPrefix(path, "./"))
 }
 
+// Expr returns the compiled expression, for a matcher that runs outside this
+// process and has to agree with this one. Empty for a nil filter, which
+// matches nothing.
+func (f *PathFilter) Expr() string {
+	if f == nil || f.re == nil {
+		return ""
+	}
+	return f.re.String()
+}
+
 // Patterns returns the patterns as written, for logs and for the summary.
 func (f *PathFilter) Patterns() []string {
 	if f == nil {

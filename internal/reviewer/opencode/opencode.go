@@ -164,6 +164,10 @@ func (m MCPServer) envRefs() []string {
 	return names
 }
 
+// EnvRefs returns the environment variables the definition refers to. See
+// [MCPServer.envRefs].
+func (m MCPServer) EnvRefs() []string { return m.envRefs() }
+
 // Runner implements [reviewer.Engine] by invoking the CLI.
 type Runner struct {
 	cfg    Config
