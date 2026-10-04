@@ -44,7 +44,7 @@ RUN apt-get update \
 # Which binary is chosen is decided here, not at runtime: the postinstall reads
 # the build machine's CPU features, so a build under emulation picks the
 # baseline variant. That runs anywhere, which is the safe direction.
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=1.18.34
 RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
     && npm rebuild -g opencode-ai \
     && opencode --version
