@@ -1,6 +1,6 @@
 GO                     ?= go
 GOBIN                  ?= $(shell $(GO) env GOPATH)/bin
-GOLANGCI_LINT_VERSION  ?= v2.13.2
+GOLANGCI_LINT_VERSION  ?= v2.14.0
 GOVULNCHECK_VERSION    ?= v1.8.0
 VERSION                ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 TAG                    ?= $(VERSION)
