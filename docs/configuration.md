@@ -92,11 +92,13 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_JOB_TIMEOUT` | `15m` | ジョブ全体のタイムアウト |
 | `KIBITZ_WORKSPACE_DIR` | `/var/tmp/kibitz` | クローン先 |
 | `KIBITZ_CLONE_DEPTH` | `50` | shallow clone の深さ |
-| `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi`。`pi` は試験中 (ADR-0024、[agent-engine.md](agent-engine.md)) |
+| `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi` / `adk`。`pi` (ADR-0024) と `adk` (ADR-0025) は試験中 ([agent-engine.md](agent-engine.md)) |
 | `KIBITZ_PI_BIN` | `pi` | pi のバイナリパス (`KIBITZ_AGENT_ENGINE=pi` のとき) |
 | `KIBITZ_PI_AGENTS_DIR` | `/etc/kibitz/opencode/agents` | エージェント定義。OpenCode と同じファイルを使い、front matter を除いた本文を pi のシステムプロンプトに追記する |
 | `KIBITZ_PI_EXTENSION` | `/etc/kibitz/pi/kibitz-guard.ts` | ガード拡張。pi には権限機構が無いため必須で、無ければジョブは失敗する |
 | `KIBITZ_PI_SESSION_DIR` | (一時ディレクトリ配下) | ジョブをまたいでセッションを保存する場所 |
+| `KIBITZ_ADK_AGENTS_DIR` | `/etc/kibitz/opencode/agents` | エージェント定義 (`KIBITZ_AGENT_ENGINE=adk` のとき)。OpenCode と同じファイルを使い、front matter を除いた本文を instruction にする |
+| `KIBITZ_ADK_MAX_MODEL_CALLS` | `100` | 1 回の実行でモデルを呼べる回数の上限。超えたらジョブを失敗させる |
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
@@ -108,7 +110,7 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_REPO_BUDGETS` | - | リポジトリ 1 か月あたりの上限額。`パターン=金額` をカンマ区切り。パターンは `KIBITZ_ALLOWED_REPOS` と同じワイルドカードで `owner/name` に照合し、**最初に一致したものが効く**ので具体的なものを `*` より前に置く。金額の通貨は `KIBITZ_MODEL_PRICES` と同じ。未設定なら上限なし。**デプロイ側の設定で、リポジトリ側からは変更できない** |
 | `KIBITZ_MODEL_PRICE_CURRENCY` | `$` | 上記の単価の通貨記号 |
 | `KIBITZ_MODEL_FALLBACK` | - | 主モデル障害時の代替。**未実装**: 読み込まれるだけで、まだ使われない |
-| `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する) |
+| `GOOGLE_CLOUD_PROJECT` | - | Vertex AI のプロジェクト ID (OpenCode が参照する。`KIBITZ_AGENT_ENGINE=adk` では必須) |
 | `VERTEX_LOCATION` | `global` | Vertex AI のリージョン。データ所在地要件があれば `asia-northeast1` 等を指定 |
 | `KIBITZ_VERTEX_MAAS_PROVIDER_ID` | `vertex-maas` | Vertex Model Garden のパートナーモデル (GLM など) 用に宣言するプロバイダ ID |
 | `KIBITZ_VERTEX_MAAS_BASE_URL` | (プロジェクトとリージョンから生成) | 上記の OpenAI 互換エンドポイントを上書きする |

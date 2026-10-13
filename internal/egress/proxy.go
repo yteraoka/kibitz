@@ -39,6 +39,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // Config configures the proxy.
@@ -339,6 +341,23 @@ func (s *Session) Env() []string {
 	}
 	return env
 }
+
+// ProxyFunc is [Session.Env] for an HTTP client in this process: what
+// [http.Transport.Proxy] needs to send a request through the session, honoring
+// the same no-proxy list the variables carry.
+func (s *Session) ProxyFunc() func(*http.Request) (*url.URL, error) {
+	cfg := httpproxy.Config{
+		HTTPProxy:  s.URL(),
+		HTTPSProxy: s.URL(),
+		NoProxy:    strings.Join(s.proxy.noProxy, ","),
+	}
+	proxy := cfg.ProxyFunc()
+	return func(req *http.Request) (*url.URL, error) { return proxy(req.URL) }
+}
+
+// CACertPEM is the certificate a client of the session has to trust when the
+// session inspects TLS, nil when it does not.
+func (s *Session) CACertPEM() []byte { return s.proxy.CACertPEM() }
 
 // Close stops the session and cuts every connection still open through it.
 func (s *Session) Close() error {
