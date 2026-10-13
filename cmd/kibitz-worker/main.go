@@ -28,6 +28,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/queue/memory"
 	"github.com/yteraoka/kibitz/internal/queue/pubsub"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	"github.com/yteraoka/kibitz/internal/reviewer/adk"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
 	"github.com/yteraoka/kibitz/internal/reviewer/pi"
 	"github.com/yteraoka/kibitz/internal/run"
@@ -376,9 +377,27 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 	}, nil
 }
 
-// newEngine builds the agent engine the deployment chose. Both read the same
-// model, provider and MCP settings, so switching is one variable.
+// newEngine builds the agent engine the deployment chose. They read the same
+// model, provider and MCP settings, so switching is one variable — except that
+// adk runs Gemini only, which the configuration checks at startup.
 func newEngine(cfg *config.Worker, mcp opencode.Catalog, proxy *egress.Proxy, logger *slog.Logger) reviewer.Engine {
+	if cfg.Engine == config.EngineADK {
+		logger.LogAttrs(context.Background(), slog.LevelWarn,
+			"the agent engine is adk, which is on trial and runs Gemini only",
+			slog.String("model", cfg.OpenCode.Model),
+			slog.String("agents_dir", cfg.ADK.AgentsDir))
+		return adk.New(adk.Config{
+			Model:          cfg.OpenCode.Model,
+			Project:        cfg.OpenCode.Vertex.ProjectID,
+			Location:       cfg.OpenCode.Vertex.Location,
+			AgentsDir:      cfg.ADK.AgentsDir,
+			MCPServers:     mcp,
+			ContextBin:     contextBin(cfg.OpenCode.ContextBin),
+			EnvPassthrough: cfg.OpenCode.EnvPassthrough,
+			Egress:         proxy,
+			MaxModelCalls:  cfg.ADK.MaxModelCalls,
+		}, logger)
+	}
 	if cfg.Engine == config.EnginePi {
 		env := agentEnv(cfg, logger)
 		// pi's Vertex AI provider reads the location from here rather than

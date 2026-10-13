@@ -3,6 +3,7 @@ package config_test
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -731,5 +732,48 @@ func TestLoadServerAllowedCommenters(t *testing.T) {
 	}
 	if got := strings.Join(cfg.Policy.AllowedCommenters, ","); got != "alice,github:bob" {
 		t.Errorf("AllowedCommenters = %q", got)
+	}
+}
+
+func TestLoadWorkerADK(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_AGENT_ENGINE"] = "adk"
+	env["GOOGLE_CLOUD_PROJECT"] = "kibitz-dev"
+	cfg, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if cfg.Engine != config.EngineADK || cfg.ADK.MaxModelCalls != 100 || cfg.ADK.AgentsDir != "/etc/kibitz/opencode/agents" {
+		t.Errorf("Engine = %q, ADK = %+v", cfg.Engine, cfg.ADK)
+	}
+
+	for name, change := range map[string]struct {
+		key, value, want string
+	}{
+		"claude":         {"KIBITZ_MODEL", "google-vertex-anthropic/claude-opus-5", "KIBITZ_MODEL: must be a Gemini model"},
+		"maas":           {"KIBITZ_MODEL", "vertex-maas/zai-org/glm-5", "KIBITZ_MODEL: must be a Gemini model"},
+		"triage":         {"KIBITZ_TRIAGE_MODEL", "google-vertex/claude-haiku-5", "KIBITZ_TRIAGE_MODEL: must be a Gemini model"},
+		"implement":      {"KIBITZ_IMPLEMENT_ENABLED", "true", "KIBITZ_IMPLEMENT_ENABLED: is not supported"},
+		"no project":     {"GOOGLE_CLOUD_PROJECT", "", "GOOGLE_CLOUD_PROJECT: is required"},
+		"no model calls": {"KIBITZ_ADK_MAX_MODEL_CALLS", "0", "KIBITZ_ADK_MAX_MODEL_CALLS"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := maps.Clone(env)
+			env[change.key] = change.value
+			if change.value == "" {
+				delete(env, change.key)
+			}
+			_, err := config.LoadWorker(config.MapEnv(env))
+			if err == nil || !strings.Contains(err.Error(), change.want) {
+				t.Errorf("err = %v, want %q", err, change.want)
+			}
+		})
+	}
+
+	// The checks belong to adk: opencode still runs any model.
+	env["KIBITZ_AGENT_ENGINE"] = "opencode"
+	env["KIBITZ_MODEL"] = "google-vertex-anthropic/claude-opus-5"
+	if _, err := config.LoadWorker(config.MapEnv(env)); err != nil {
+		t.Errorf("opencode with Claude: %v", err)
 	}
 }

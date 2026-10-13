@@ -35,6 +35,7 @@ kibitz が**なぜそう作られているか**の記録。
 | [0022](0022-only-allowed-people-may-ask-in-a-comment.md) | コメントで依頼できる人を運用側で絞り、断ったことはリアクションで伝える | 採用 |
 | [0023](0023-run-the-scaler-as-a-request-billed-service.md) | scaler は Cloud Run ジョブではなく、リクエスト課金の Cloud Run サービスとして動かす | 採用 |
 | [0024](0024-keep-opencode-after-pi-gained-mcp.md) | pi 1.0 が MCP に対応した後も OpenCode を使い続け、pi は試作エンジンで検証してから判断する | 採用 |
+| [0025](0025-trial-adk-go-as-an-in-process-engine.md) | ADK for Go を、プロセス内で動く 3 つ目の試作エンジンとして足す | 採用 |
 
 **[ADR-0010](0010-data-and-instruction-positions.md) が中核**で、
 0011・0015・0016・0017 はいずれもその原則を各所に適用した結果になっている。

@@ -67,6 +67,9 @@ const (
 	EngineOpenCode = "opencode"
 	// EnginePi is the trial engine of ADR-0024.
 	EnginePi = "pi"
+	// EngineADK runs the agent in-process with Google's ADK for Go. It is on
+	// trial, and runs Gemini only.
+	EngineADK = "adk"
 )
 
 // OpenCode execution modes. See docs/worker.md.
@@ -302,6 +305,29 @@ func loadForges(l *loader) Forges {
 
 // requireForges refuses half a credential, which would otherwise fail at the
 // first API call instead of at startup.
+// requireADK refuses what the adk engine cannot do, at startup rather than on
+// the first job: a model other than Gemini on Vertex AI, which ADK has no
+// client for, and implementation mode, which it does not support yet.
+func requireADK(l *loader, cfg *Worker) {
+	for _, m := range []struct{ key, model string }{
+		{"KIBITZ_MODEL", cfg.OpenCode.Model},
+		{"KIBITZ_TRIAGE_MODEL", cfg.OpenCode.TriageModel},
+	} {
+		key, model := m.key, m.model
+		if model == "" {
+			continue
+		}
+		name := strings.TrimPrefix(model, "google-vertex/")
+		if !strings.HasPrefix(name, "gemini-") || strings.Contains(name, "/") {
+			l.fail(key, "must be a Gemini model when KIBITZ_AGENT_ENGINE is adk, got %q", model)
+		}
+	}
+	l.requireIf(true, "GOOGLE_CLOUD_PROJECT", cfg.OpenCode.Vertex.ProjectID, "when KIBITZ_AGENT_ENGINE is adk")
+	if cfg.ImplementEnabled {
+		l.fail("KIBITZ_IMPLEMENT_ENABLED", "is not supported when KIBITZ_AGENT_ENGINE is adk")
+	}
+}
+
 func requireForges(l *loader, f Forges) {
 	// A GitHub App is either fully configured or not configured at all.
 	if f.GitHub.AppID != 0 || f.GitHub.PrivateKey != "" {
@@ -421,6 +447,17 @@ type Pi struct {
 	SessionDir string
 }
 
+// ADK configures the adk engine, which runs when KIBITZ_AGENT_ENGINE is
+// "adk". As with pi, the model, the provider settings and the MCP catalog are
+// shared with OpenCode and read from there.
+type ADK struct {
+	// AgentsDir holds the agent definitions. They are OpenCode's; their
+	// bodies become the agent's instruction.
+	AgentsDir string
+	// MaxModelCalls stops a run that keeps calling the model.
+	MaxModelCalls int
+}
+
 // Limits bounds a single review job.
 type Limits struct {
 	MaxComments  int
@@ -466,10 +503,11 @@ type Worker struct {
 	Concurrency     int
 	JobTimeout      time.Duration
 	WorkspaceDir    string
-	// Engine selects the agent engine: "opencode" or "pi".
+	// Engine selects the agent engine: "opencode", "pi" or "adk".
 	Engine   string
 	OpenCode OpenCode
 	Pi       Pi
+	ADK      ADK
 	Limits   Limits
 	// MCPServers defines the external tool servers this deployment offers, as
 	// one JSON object of name to server. MCPAllowlist narrows which of them a
@@ -592,7 +630,11 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		Concurrency:     l.positiveInt("KIBITZ_CONCURRENCY", 2),
 		JobTimeout:      l.duration("KIBITZ_JOB_TIMEOUT", 15*time.Minute),
 		WorkspaceDir:    l.str("KIBITZ_WORKSPACE_DIR", "/var/tmp/kibitz"),
-		Engine:          l.enum("KIBITZ_AGENT_ENGINE", EngineOpenCode, EngineOpenCode, EnginePi),
+		Engine:          l.enum("KIBITZ_AGENT_ENGINE", EngineOpenCode, EngineOpenCode, EnginePi, EngineADK),
+		ADK: ADK{
+			AgentsDir:     l.str("KIBITZ_ADK_AGENTS_DIR", "/etc/kibitz/opencode/agents"),
+			MaxModelCalls: l.positiveInt("KIBITZ_ADK_MAX_MODEL_CALLS", 100),
+		},
 		Pi: Pi{
 			Bin:        l.str("KIBITZ_PI_BIN", "pi"),
 			AgentsDir:  l.str("KIBITZ_PI_AGENTS_DIR", "/etc/kibitz/opencode/agents"),
@@ -657,6 +699,9 @@ func LoadWorker(env Lookup) (*Worker, error) {
 	}
 
 	requireForges(l, cfg.Forges)
+	if cfg.Engine == EngineADK {
+		requireADK(l, cfg)
+	}
 
 	if err := errors.Join(l.errs...); err != nil {
 		return nil, err

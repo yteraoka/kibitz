@@ -1,6 +1,7 @@
 # エージェントエンジンの選定: OpenCode か pi か
 
 `reviewer.Engine` の実装として何を使うかの比較と決定。
+ADK for Go を使う 3 つ目の試作エンジンについては [下](#3-つ目の試作-adk-for-go-kibitz_agent_engineadk) と ADR-0025 にある。
 
 ## 結論
 
@@ -146,6 +147,31 @@ KIBITZ_PI_IT_BIN=$(which pi) KIBITZ_PI_IT_MCP=/path/to/kibitz-mcp go test ./inte
 
 このテストは台本どおりに応答するモデルサーバーに対して、ガード拡張と kibitz-mcp を込みで動かす。
 確かめているのは、ワークスペース外の読み取り・シェル・許可外の書き込みが拒否されること、kibitz-mcp に届くこと、出力を読めること。
+
+## 3 つ目の試作: ADK for Go (`KIBITZ_AGENT_ENGINE=adk`)
+
+経緯と理由は [ADR-0025](adr/0025-trial-adk-go-as-an-in-process-engine.md)。
+OpenCode や pi と違い、子プロセスを起動せず、**エージェントループを worker のプロセス内で動かす**。
+実装は `internal/reviewer/adk`。
+
+| 観点 | adk |
+| --- | --- |
+| 対応モード | review / answer / plan / triage。**implement は対象外** (起動時に拒否) |
+| モデル | **Gemini のみ** (Vertex AI、ADC)。`google-vertex/gemini-…` か `gemini-…`。それ以外は起動時に拒否 |
+| ツール | kibitz が書いた `read_file` / `list_dir` / `glob_files` / `grep_files`。review と triage にだけ `write_file` (書けるのは出力ファイル 1 つ)。シェルは無い |
+| ワークスペースの外 | `os.Root` が開く時点で拒否する (`..`、絶対パス、外を指すシンボリックリンク) |
+| リポジトリ側の設定・指示 | ADK は何も読まないので、止めるフラグも要らない |
+| MCP | ADK の `mcptoolset` (公式 Go SDK)。stdio / streamable HTTP。OAuth は未対応 (警告を出して外す)。ADK はツール名に接頭辞を付けないので、名前がぶつかったツールは後から来た方を外す |
+| システムプロンプト | OpenCode のエージェント定義の本文を `InstructionProvider` で渡す |
+| 実行イベント | ADK のイベントをそのまま集計する。トークン数は `UsageMetadata`、ツールは `FunctionResponse` (`error` キーがあれば失敗) |
+| セッション | コンテナのメモリ (上限 200 件、古いものから捨てる) |
+| egress | MCP サーバーの通信だけを通す。モデルの通信は worker 自身のものとして通さない |
+| 暴走の歯止め | `KIBITZ_ADK_MAX_MODEL_CALLS` (既定 100) を超えたら失敗させる |
+
+テストは、台本どおりに応答する偽モデル (`model.LLM`) を使ってネットワーク無しで ADK のループ全体を動かす。
+`TestRunWithKibitzMCP` は kibitz-mcp を実際にビルドして子プロセスとしてつなぐ (`-short` では飛ばす)。
+
+まだ確かめていないこと (実際の Gemini でのレビューの質、キャッシュの効き、remote MCP) は ADR-0025 の表にある。
 
 ## pi のほうが適するケース
 

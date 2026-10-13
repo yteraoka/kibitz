@@ -354,3 +354,27 @@ func TestCloseCutsOpenTunnels(t *testing.T) {
 	}
 	f.log.wait(t, map[string]any{"method": "CONNECT", "outcome": "allowed"})
 }
+
+func TestSessionProxyFunc(t *testing.T) {
+	f := newFixture(t, egress.Config{Inspect: true, NoProxy: []string{"metadata.google.internal"}}, true)
+
+	proxy := f.session.ProxyFunc()
+	for target, want := range map[string]string{
+		"https://mcp.example.com/mcp":           f.session.URL(),
+		"http://mcp.example.com/mcp":            f.session.URL(),
+		"http://metadata.google.internal/token": "",
+		"http://127.0.0.1:8080/":                "",
+	} {
+		req, _ := http.NewRequest(http.MethodGet, target, nil)
+		got, err := proxy(req)
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		if (got == nil && want != "") || (got != nil && got.String() != want) {
+			t.Errorf("%s goes through %v, want %q", target, got, want)
+		}
+	}
+	if !bytes.Equal(f.session.CACertPEM(), f.proxy.CACertPEM()) || len(f.session.CACertPEM()) == 0 {
+		t.Error("the session does not hand out the inspection CA")
+	}
+}
