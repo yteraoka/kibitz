@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -276,7 +277,11 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 			b.WriteString("(?:" + strings.Join(alts, "|") + ")")
 			i += end
 		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
+			// A whole character, not a byte: string(c) of one byte of a
+			// multi-byte character is a different character altogether.
+			r, size := utf8.DecodeRuneInString(pattern[i:])
+			b.WriteString(regexp.QuoteMeta(string(r)))
+			i += size - 1
 		}
 	}
 	b.WriteString("$")

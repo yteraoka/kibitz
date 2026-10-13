@@ -106,6 +106,10 @@ func (t *transcript) recordResponse(resp *genai.FunctionResponse) {
 // count excludes it (the two are billed apart), so the cached part is taken
 // out. Tool-use prompt tokens are input the model read too. Gemini reports no
 // cache writes: its implicit cache is not billed for them.
+//
+// Thoughts are not part of the candidate count, so nothing is taken out of
+// it: Gemini's total is prompt + candidates + tool-use prompt + thoughts.
+// This is the opposite of pi, whose output count includes the reasoning.
 func usageOf(u *genai.GenerateContentResponseUsageMetadata) reviewer.Usage {
 	cached := int(u.CachedContentTokenCount)
 	return reviewer.Usage{

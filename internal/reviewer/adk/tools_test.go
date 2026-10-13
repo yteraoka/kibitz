@@ -33,6 +33,8 @@ func TestGlobRegexp(t *testing.T) {
 		{"[!ab].txt", []string{"c.txt"}, []string{"a.txt"}},
 		{"*.{go,md}", []string{"a.go", "b.md"}, []string{"c.txt"}},
 		{"a+b(c).txt", []string{"a+b(c).txt"}, []string{"aab(c).txt"}},
+		{"docs/設計/*.md", []string{"docs/設計/概要.md"}, []string{"docs/設定/概要.md"}},
+		{"**/*テスト*", []string{"a/b/結合テスト.go"}, []string{"a/b/test.go"}},
 	}
 	for _, c := range cases {
 		re, err := globRegexp(c.pattern)
@@ -181,6 +183,26 @@ func TestUsageOf(t *testing.T) {
 	want := reviewer.Usage{InputTokens: 350, CacheReadTokens: 700, OutputTokens: 80, ReasoningTokens: 40}
 	if got != want {
 		t.Errorf("usage = %+v, want %+v", got, want)
+	}
+}
+
+// TestUsageOfThinkingModel uses the counts a real gemini-2.5-flash response
+// carried (ADK's own recording, model/gemini/testdata): 11 + 1 + 34 = 46, so
+// the one candidate token does not include the 34 thoughts, and subtracting
+// them from it would report no output at all.
+func TestUsageOfThinkingModel(t *testing.T) {
+	u := &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     11,
+		CandidatesTokenCount: 1,
+		ThoughtsTokenCount:   34,
+		TotalTokenCount:      46,
+	}
+	got := usageOf(u)
+	if got.Tokens() != int(u.TotalTokenCount) {
+		t.Errorf("tokens = %d, want the provider's total %d", got.Tokens(), u.TotalTokenCount)
+	}
+	if got.OutputTokens != 1 || got.ReasoningTokens != 34 || got.Output() != 35 {
+		t.Errorf("usage = %+v, want 1 visible and 34 reasoning", got)
 	}
 }
 
