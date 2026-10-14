@@ -165,10 +165,6 @@ type Waker struct {
 	timeout  time.Duration
 	logger   *slog.Logger
 
-	// A buffered channel of one: several deliveries arriving together are one
-	// wake-up, and a full channel means one is already pending.
-	signal chan struct{}
-
 	mu   sync.Mutex
 	last time.Time
 	now  func() time.Time
@@ -193,40 +189,26 @@ func NewWaker(target Target, floor int, cooldown time.Duration, logger *slog.Log
 		cooldown: cooldown,
 		timeout:  30 * time.Second,
 		logger:   logger,
-		signal:   make(chan struct{}, 1),
 		now:      time.Now,
 	}
 }
 
-// Wake asks for the worker to be running. It never blocks and never fails:
-// the webhook it is called from has a forge waiting on the other end, and a
-// scaling API is not something to make that wait.
-func (w *Waker) Wake() {
-	select {
-	case w.signal <- struct{}{}:
-	default:
-	}
-}
-
-// Run serves wake-ups until ctx is cancelled.
-func (w *Waker) Run(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-w.signal:
-			w.ensure(ctx)
-		}
-	}
-}
-
-func (w *Waker) ensure(ctx context.Context) {
+// Wake makes sure the worker is running. It never fails: the scaler
+// reconciles from the backlog as well, so a wake-up that did not happen
+// delays a review rather than losing it.
+//
+// It blocks for as long as the scaling API takes, at most the timeout, and
+// inside the cooldown not at all. The caller is the webhook, after the forge
+// has had its answer: the server is billed per request, so work left to a
+// goroutine of its own once the request has finished may get no CPU to run
+// on until the next one arrives.
+func (w *Waker) Wake(ctx context.Context) {
 	if !w.due() {
 		return
 	}
 
-	// The wake-up outlives the request that caused it: the webhook has been
-	// answered by now, and the worker still has to come up.
+	// The forge may hang up once it has its answer, which cancels the
+	// request's context. The worker still has to come up.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.timeout)
 	defer cancel()
 

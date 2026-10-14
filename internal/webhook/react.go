@@ -41,21 +41,24 @@ func WithReactor(reactor forge.Reactor, timeout time.Duration) ReceiverOption {
 // container CPU once its requests have finished, and a reaction started after
 // that may never run.
 func (rc *Receiver) answerAndReact(w http.ResponseWriter, r *http.Request, ev *event.ReviewEvent, status int, reaction forge.Reaction) {
-	ref, ok := forge.CommentOf(ev)
-	if rc.reactor == nil || !ok {
-		w.WriteHeader(status)
-		return
-	}
-
+	// Flushed even when there is no reaction to make, because the worker
+	// may be woken after this returns (see [Receiver.ServeHTTP]).
+	//
 	// A 204 carries no Content-Length at all; anything else declares its
 	// empty body.
 	if status != http.StatusNoContent {
 		w.Header().Set("Content-Length", "0")
 	}
 	w.WriteHeader(status)
-	// A writer that cannot flush still gets its answer when this returns, a
-	// few seconds later at worst, which is inside every forge's timeout.
+	// A writer that cannot flush still gets its answer when the handler
+	// returns, a few seconds later at worst, which is inside every forge's
+	// timeout.
 	_ = http.NewResponseController(w).Flush()
+
+	ref, ok := forge.CommentOf(ev)
+	if rc.reactor == nil || !ok {
+		return
+	}
 
 	// The forge is free to hang up once it has its answer, which cancels the
 	// request's context. The reaction must outlive that.

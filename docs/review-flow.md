@@ -33,11 +33,11 @@ sequenceDiagram
         Server-->>Forge: 204 No Content
     else 対象
         Server->>Queue: publish、ordering key は PR 単位
-        Server-)Scaler: Wake、インスタンス数 0 からの起動を促す
         Server-->>Forge: 202 Accepted
         opt コメントだった
             Server->>Forge: 👀 リアクション、受け取った合図
         end
+        Server-)Scaler: Wake、インスタンス数 0 からの起動を促す
     end
 
     Queue->>Worker: 配送、at-least-once
@@ -54,6 +54,11 @@ sequenceDiagram
 `Wake` を別に送っているのは、pull 購読にはオートスケールの根拠になる
 inbound リクエストが無いため。バックログのメトリクスは数分遅れるので、
 それを待つとレビューの開始が遅れる ([deployment.md](deployment.md#ワーカーのオートスケール))。
+
+リアクションと `Wake` はどちらも 202 を返した後に、同じリクエストの中で行う。
+フォージを待たせないために応答を先に返し、別の goroutine には回さない。
+サーバーはリクエスト課金 (`cpu_idle = true`) なので、リクエストが終わった後の処理には
+CPU が割り当てられる保証が無いため。
 
 ## 2. サーバー側 — 検証から publish まで
 

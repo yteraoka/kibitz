@@ -45,9 +45,11 @@ type Receiver struct {
 // metric the autoscaler otherwise runs on is minutes behind, and a review
 // should not wait for it.
 //
-// Wake is called on the webhook's own goroutine, so it must not block.
+// Wake is called on the webhook's own goroutine once the forge has had its
+// answer, so it may block, but only briefly: the request is what keeps the
+// server's CPU allocated, and it stays open until Wake returns.
 type Waker interface {
-	Wake()
+	Wake(ctx context.Context)
 }
 
 // ReceiverOption customizes a receiver.
@@ -208,9 +210,6 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.metrics.WebhooksReceived.WithLabelValues(platform, "published", "").Inc()
 		rc.metrics.EventsPublished.WithLabelValues(platform, string(ev.Kind)).Inc()
 	}
-	if rc.waker != nil {
-		rc.waker.Wake()
-	}
 	rc.logger.LogAttrs(r.Context(), slog.LevelInfo, "event published",
 		append(rc.deliveryAttrs(r, body, ev),
 			slog.Bool("published", true),
@@ -218,6 +217,13 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)...,
 	)
 	rc.answerAndReact(w, r, ev, http.StatusAccepted, forge.ReactionSeen)
+	// After the answer, for the reason the reaction is: a forge that waits
+	// for a scaling API risks its timeout. Still on this goroutine, for the
+	// same reason as well: once the request is over, the server may be
+	// given no CPU to finish anything with.
+	if rc.waker != nil {
+		rc.waker.Wake(context.WithoutCancel(r.Context()))
+	}
 }
 
 func (rc *Receiver) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {

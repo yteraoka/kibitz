@@ -410,10 +410,20 @@ func TestReceiverInjectsItsOwnTraceContext(t *testing.T) {
 	}
 }
 
-// countingWaker records that the receiver announced queued work.
-type countingWaker struct{ n atomic.Int64 }
+// countingWaker records that the receiver announced queued work, and
+// whether the forge had its answer by then.
+type countingWaker struct {
+	n        atomic.Int64
+	rec      *httptest.ResponseRecorder
+	answered atomic.Bool
+}
 
-func (w *countingWaker) Wake() { w.n.Add(1) }
+func (w *countingWaker) Wake(context.Context) {
+	w.n.Add(1)
+	if w.rec != nil {
+		w.answered.Store(w.rec.Flushed && w.rec.Code == http.StatusAccepted)
+	}
+}
 
 func TestReceiverWakesTheWorker(t *testing.T) {
 	waker := &countingWaker{}
@@ -428,6 +438,22 @@ func TestReceiverWakesTheWorker(t *testing.T) {
 	}
 	if got := waker.n.Load(); got != 1 {
 		t.Errorf("wake-ups = %d, want 1", got)
+	}
+}
+
+// The scaling API is called after the forge has its answer, not before: a
+// forge waiting on it risks its timeout.
+func TestReceiverWakesTheWorkerAfterAnswering(t *testing.T) {
+	rec := httptest.NewRecorder()
+	waker := &countingWaker{rec: rec}
+	q := memory.New()
+	rc := newReceiver(t, q, webhook.WithWaker(waker))
+
+	rc.ServeHTTP(rec, post(fixture(t, "pull_request.opened.json"), "pull_request"))
+
+	if waker.n.Load() != 1 || !waker.answered.Load() {
+		t.Errorf("wake-ups = %d, answered first = %v; want one, after the 202 was flushed",
+			waker.n.Load(), waker.answered.Load())
 	}
 }
 
