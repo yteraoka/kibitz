@@ -268,7 +268,7 @@ func TestWakerRaisesTheFloorOnce(t *testing.T) {
 	target := &fakeTarget{count: 0}
 	w := NewWaker(target, 1, time.Minute, quiet())
 
-	w.ensure(context.Background())
+	w.Wake(context.Background())
 	if target.count != 1 {
 		t.Fatalf("instances = %d, want the worker woken", target.count)
 	}
@@ -277,7 +277,7 @@ func TestWakerRaisesTheFloorOnce(t *testing.T) {
 	// deliveries arrive.
 	target.count = 0
 	for range 5 {
-		w.ensure(context.Background())
+		w.Wake(context.Background())
 	}
 	if got := target.calls(); got != 1 {
 		t.Errorf("SetInstances calls = %d, want 1 while cooling down", got)
@@ -289,7 +289,7 @@ func TestWakerLeavesARunningWorkerAlone(t *testing.T) {
 	target := &fakeTarget{count: 2}
 	w := NewWaker(target, 1, time.Minute, quiet())
 
-	w.ensure(context.Background())
+	w.Wake(context.Background())
 	if got := target.calls(); got != 0 {
 		t.Errorf("SetInstances calls = %d, want none", got)
 	}
@@ -301,34 +301,28 @@ func TestWakerForgetsTheCooldownAfterAFailure(t *testing.T) {
 	target := &fakeTarget{count: 0, setErr: errors.New("quota")}
 	w := NewWaker(target, 1, time.Hour, quiet())
 
-	w.ensure(context.Background())
+	w.Wake(context.Background())
 	target.mu.Lock()
 	target.setErr = nil
 	target.mu.Unlock()
 
-	w.ensure(context.Background())
+	w.Wake(context.Background())
 	if target.count != 1 {
 		t.Errorf("instances = %d, want the retry to have woken the worker", target.count)
 	}
 }
 
-func TestWakeDoesNotBlock(t *testing.T) {
-	w := NewWaker(&fakeTarget{}, 1, time.Minute, quiet())
+// The forge may hang up once it has its answer, which cancels the request's
+// context; the worker still has to come up.
+func TestWakeOutlivesTheRequest(t *testing.T) {
+	target := &fakeTarget{count: 0}
+	w := NewWaker(target, 1, time.Minute, quiet())
 
-	// More wake-ups than the channel can hold: the extra ones are the same
-	// request, and none of them may block the webhook that sent them.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for range 100 {
-			w.Wake()
-		}
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Wake blocked")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w.Wake(ctx)
+	if target.count != 1 {
+		t.Errorf("instances = %d, want the worker woken", target.count)
 	}
 }
 

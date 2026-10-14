@@ -55,11 +55,19 @@ resource "google_cloud_run_v2_service" "server" {
       #
       # 512Mi is likewise the floor: the second generation execution
       # environment refuses to start below it.
+      #
+      # cpu_idle is request-based billing. It has to be said: with limits
+      # set, leaving it out means instance-based billing, which pays for the
+      # CPU for as long as an instance lives, idle or not. The price is that
+      # nothing gets CPU once its request is over, so whatever follows the
+      # answer -- the reaction, waking the worker -- is done before the
+      # handler returns rather than on a goroutine of its own.
       resources {
         limits = {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle          = true
         startup_cpu_boost = true
       }
 

@@ -208,9 +208,6 @@ func realMain() error {
 	)
 
 	var g run.Group
-	if waker != nil {
-		g.Add(waker.Run)
-	}
 	g.Add(func(ctx context.Context) error {
 		srv := &http.Server{
 			Addr:              cfg.ListenAddr,
