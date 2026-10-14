@@ -753,6 +753,8 @@ func TestLoadWorkerADK(t *testing.T) {
 		"claude":         {"KIBITZ_MODEL", "google-vertex-anthropic/claude-opus-5", "KIBITZ_MODEL: must be a Gemini model"},
 		"maas":           {"KIBITZ_MODEL", "vertex-maas/zai-org/glm-5", "KIBITZ_MODEL: must be a Gemini model"},
 		"triage":         {"KIBITZ_TRIAGE_MODEL", "google-vertex/claude-haiku-5", "KIBITZ_TRIAGE_MODEL: must be a Gemini model"},
+		"command any":    {"KIBITZ_COMMAND_MODELS", "google-vertex/gemini-*,*", "KIBITZ_COMMAND_MODELS: must be a Gemini model"},
+		"command claude": {"KIBITZ_COMMAND_MODELS", "google-vertex/claude-*", "KIBITZ_COMMAND_MODELS: must be a Gemini model"},
 		"implement":      {"KIBITZ_IMPLEMENT_ENABLED", "true", "KIBITZ_IMPLEMENT_ENABLED: is not supported"},
 		"no project":     {"GOOGLE_CLOUD_PROJECT", "", "GOOGLE_CLOUD_PROJECT: is required"},
 		"no model calls": {"KIBITZ_ADK_MAX_MODEL_CALLS", "0", "KIBITZ_ADK_MAX_MODEL_CALLS"},
@@ -768,6 +770,17 @@ func TestLoadWorkerADK(t *testing.T) {
 				t.Errorf("err = %v, want %q", err, change.want)
 			}
 		})
+	}
+
+	// A pattern that stays within Gemini is fine.
+	gemini := maps.Clone(env)
+	gemini["KIBITZ_COMMAND_MODELS"] = "google-vertex/gemini-*, gemini-3.8-flash"
+	cfg, err = config.LoadWorker(config.MapEnv(gemini))
+	if err != nil {
+		t.Fatalf("Gemini patterns: %v", err)
+	}
+	if got := cfg.OpenCode.CommandModels; len(got) != 2 || got[1] != "gemini-3.8-flash" {
+		t.Errorf("CommandModels = %q", got)
 	}
 
 	// The checks belong to adk: opencode still runs any model.
