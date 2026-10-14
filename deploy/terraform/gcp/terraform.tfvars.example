@@ -94,6 +94,10 @@ alert_notification_channels = []
 #
 #   triage_model = "google-vertex/gemini-3.5-flash-lite"
 
+# "/kibitz review --model <model>" で指定できるモデル。空ならコメントでは変えられない。
+#
+#   command_models = ["google-vertex/gemini-*"]
+
 # --- コスト ------------------------------------------------------------
 #
 # 単価を設定するとサマリコメントに概算が出る。kibitz は単価を知らない

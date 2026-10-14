@@ -106,6 +106,7 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_PROVIDER_ENV` | - | API キーで認証するプロバイダ用に、エージェントへ渡す環境変数名 (カンマ区切り)。例: `ZHIPU_API_KEY`。**名前だけを設定し、値は環境から読む** |
 | `KIBITZ_AGENT_ENV_PASSTHROUGH` | - | エージェントのプロセスへ追加で渡す環境変数名。**エージェントの環境は固定リストから組み立てる**ので、それ以外が必要なときの逃げ道 (下記) |
 | `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
+| `KIBITZ_COMMAND_MODELS` | - | `/kibitz review --model <モデル>` で指定できるモデル。カンマ区切りで、`KIBITZ_ALLOWED_REPOS` と同じワイルドカードが使える (例: `google-vertex/gemini-*,google-vertex/claude-opus-5@default`)。**未設定ならコメントでのモデル指定は無効** (指定は無視して既定のモデルでレビューし、サマリにその旨を書く)。コメントできる人なら誰でもレビューを依頼できるので、費用とコードを送る先を決めるモデルの選択肢は運用側が決める。`KIBITZ_AGENT_ENGINE=adk` では Gemini に限る |
 | `KIBITZ_MODEL_PRICES` | - | サマリコメントに概算コストを出すための単価。`モデル=入力/出力[/キャッシュ読み[/キャッシュ書き]]` を**100 万トークンあたり**でカンマ区切り。`*` は既定値。未設定ならトークン数だけを出し、金額は出さない |
 | `KIBITZ_REPO_BUDGETS` | - | リポジトリ 1 か月あたりの上限額。`パターン=金額` をカンマ区切り。パターンは `KIBITZ_ALLOWED_REPOS` と同じワイルドカードで `owner/name` に照合し、**最初に一致したものが効く**ので具体的なものを `*` より前に置く。金額の通貨は `KIBITZ_MODEL_PRICES` と同じ。未設定なら上限なし。**デプロイ側の設定で、リポジトリ側からは変更できない** |
 | `KIBITZ_MODEL_PRICE_CURRENCY` | `$` | 上記の単価の通貨記号 |
@@ -768,4 +769,7 @@ guidelines: |
 `max_comments: 0` も「小さくする方向」なので通る — サマリだけを出したいときに使う。
 
 5 の例: `/kibitz review --focus security,performance` と書くと、その 1 回だけ
-`review.focus` を上書きする。
+`review.focus` を上書きする。`/kibitz review --model google-vertex/gemini-3.8-flash` は
+その 1 回だけ `review.model` (と運用側の `KIBITZ_MODEL`) を上書きする。ただし
+`KIBITZ_COMMAND_MODELS` に一致するモデルに限る。トリアージは `KIBITZ_TRIAGE_MODEL` が
+未設定ならこのモデルで動く。

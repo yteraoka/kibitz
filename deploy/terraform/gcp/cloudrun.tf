@@ -415,6 +415,13 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         value = var.model
       }
       dynamic "env" {
+        for_each = length(var.command_models) > 0 ? [1] : []
+        content {
+          name  = "KIBITZ_COMMAND_MODELS"
+          value = join(",", var.command_models)
+        }
+      }
+      dynamic "env" {
         for_each = var.triage_model != "" ? [var.triage_model] : []
         content {
           name  = "KIBITZ_TRIAGE_MODEL"

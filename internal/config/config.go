@@ -309,10 +309,17 @@ func loadForges(l *loader) Forges {
 // the first job: a model other than Gemini on Vertex AI, which ADK has no
 // client for, and implementation mode, which it does not support yet.
 func requireADK(l *loader, cfg *Worker) {
-	for _, m := range []struct{ key, model string }{
+	models := []struct{ key, model string }{
 		{"KIBITZ_MODEL", cfg.OpenCode.Model},
 		{"KIBITZ_TRIAGE_MODEL", cfg.OpenCode.TriageModel},
-	} {
+	}
+	// A pattern is held to the same rule: "google-vertex/gemini-*" passes,
+	// "*" does not, because it would let a comment ask for what ADK cannot
+	// run.
+	for _, model := range cfg.OpenCode.CommandModels {
+		models = append(models, struct{ key, model string }{"KIBITZ_COMMAND_MODELS", model})
+	}
+	for _, m := range models {
 		key, model := m.key, m.model
 		if model == "" {
 			continue
@@ -381,6 +388,14 @@ type OpenCode struct {
 	ServerURL   string // used when Mode is attach
 	Model       string
 	TriageModel string
+	// CommandModels are the models a review command may ask for, as
+	// "/kibitz review --model <model>", with the same wildcards the allow
+	// lists use. Empty means a comment cannot choose the model at all.
+	//
+	// It is deployment configuration on purpose: anybody who may comment
+	// may ask for a review, and the model decides what a review costs and
+	// which provider sees the code.
+	CommandModels []string
 	// ModelPrices is what each model costs, as "model=input/output" per
 	// million tokens, so the review summary can say what it spent. kibitz
 	// does not know prices: they differ by provider, region and contract,
@@ -647,6 +662,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			ServerURL:     l.str("KIBITZ_OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
 			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-3.1-pro-preview"),
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
+			CommandModels: l.list("KIBITZ_COMMAND_MODELS", nil),
 			ModelPrices:   l.list("KIBITZ_MODEL_PRICES", nil),
 			RepoBudgets:   l.list("KIBITZ_REPO_BUDGETS", nil),
 			PriceCurrency: l.str("KIBITZ_MODEL_PRICE_CURRENCY", "$"),

@@ -58,6 +58,9 @@ type ReviewJob struct {
 	// TriageModel runs the triage pass. It reads file names, not code, so a
 	// cheaper model is usually the right one. Empty means [ReviewJob.Model].
 	TriageModel string
+	// CommandModels are the models "/kibitz review --model" may ask for, as
+	// patterns. Empty means a comment cannot choose the model.
+	CommandModels []string
 	// GuidelineFiles are the repository's own convention files, read from its
 	// default branch and given to the agent as instructions. Nil means
 	// [DefaultGuidelineFiles]; an empty slice reads none.
@@ -179,7 +182,7 @@ func (j *ReviewJob) command(ctx context.Context, client forge.Client, ref forge.
 	case policy.CommandAnswer, policy.CommandExplain:
 		return j.answer(ctx, client, ref, ev)
 	case policy.CommandHelp:
-		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention()))
+		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention(), j.CommandModels))
 	case policy.CommandIgnore:
 		return j.acknowledgeIgnore(ctx, client, ref, ev)
 	case policy.CommandImplement, policy.CommandPlan:
@@ -208,6 +211,9 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	// The repository's own settings, read from its default branch. They can
 	// turn a review off, narrow it, or say nothing at all.
 	settings := j.settingsFor(ctx, client, ref)
+	// Before triage, so that a triage pass with no model of its own runs on
+	// the one that was asked for, as it would on the configured one.
+	settings.Model, settings.notes = j.commandModel(ev, settings.Model, settings.notes)
 
 	if !settings.Reviews(ev.Kind) {
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "the repository's settings do not ask for this review; skipping",
@@ -1026,11 +1032,16 @@ func (j *ReviewJob) mention() string {
 	return j.Mention
 }
 
-func helpText(mention string) string {
+func helpText(mention string, models []string) string {
+	review := fmt.Sprintf("- `%s review` — 差分をレビューします (`--focus security` などで観点を指定できます)", mention)
+	if len(models) > 0 {
+		review += fmt.Sprintf("\n  - `--model <モデル>` でその 1 回だけモデルを変えられます。使えるのは %s",
+			strings.Join(backquoted(models), "、"))
+	}
 	return strings.Join([]string{
 		"### kibitz の使い方",
 		"",
-		fmt.Sprintf("- `%s review` — 差分をレビューします (`--focus security` などで観点を指定できます)", mention),
+		review,
 		fmt.Sprintf("- `%s explain <対象>` — 実装の説明を返します", mention),
 		fmt.Sprintf("- `%s <質問>` — 質問に回答します", mention),
 		fmt.Sprintf("- `%s ignore` — この PR は以降レビューしません (質問には答えます)", mention),

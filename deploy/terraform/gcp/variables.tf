@@ -96,6 +96,18 @@ variable "model" {
   default     = "google-vertex/gemini-3.1-pro-preview"
 }
 
+variable "command_models" {
+  description = <<-EOT
+    Models a review command may ask for with "/kibitz review --model <model>",
+    as patterns with the same wildcards as the repository allow list
+    (google-vertex/gemini-*). Empty turns the option off: anybody who may
+    comment may ask for a review, so which models a comment can choose — and
+    with them what a review costs and where the code is sent — is decided here.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "triage_model" {
   description = <<-EOT
     Model for the auxiliary tasks — picking which files of a large PR are worth

@@ -9,6 +9,7 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
+	"github.com/yteraoka/kibitz/internal/policy"
 	"github.com/yteraoka/kibitz/internal/repoconfig"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 )
@@ -190,6 +191,55 @@ func focusOf(ev *event.ReviewEvent, settings repoconfig.Settings) []string {
 		return focus
 	}
 	return settings.Focus
+}
+
+// commandModel is the model a review runs on: the one the command asked for,
+// if this deployment lets a comment choose it, and settingsModel otherwise.
+//
+//	/kibitz review --model google-vertex/gemini-3.8-flash
+//	/kibitz review --model=google-vertex/gemini-3.8-flash
+//
+// A model that is not allowed does not stop the review. It runs on the usual
+// model, and the summary says why the request was not honoured -- the same
+// treatment a repository's settings get when they ask for too much.
+func (j *ReviewJob) commandModel(ev *event.ReviewEvent, settingsModel string, notes []string) (string, []string) {
+	if ev == nil || ev.Command == nil || ev.Command.Name != policy.CommandReview {
+		return settingsModel, notes
+	}
+	asked := parseModel(ev.Command.Args)
+	if asked == "" || asked == settingsModel {
+		return settingsModel, notes
+	}
+
+	if len(j.CommandModels) == 0 || !policy.MatchAny(j.CommandModels, asked) {
+		j.Logger.LogAttrs(context.Background(), slog.LevelWarn, "the review command asked for a model this deployment does not allow",
+			slog.String("event_id", ev.ID),
+			slog.String("asked", asked),
+			slog.Any("allowed", j.CommandModels),
+		)
+		note := fmt.Sprintf("指定されたモデル `%s` は使えないため、`%s` でレビューしました", asked, settingsModel)
+		if len(j.CommandModels) == 0 {
+			note += " (この kibitz ではコメントでモデルを指定できません)"
+		} else {
+			note += fmt.Sprintf(" (使えるのは %s)", strings.Join(backquoted(j.CommandModels), "、"))
+		}
+		return settingsModel, append(notes, note)
+	}
+	return asked, append(notes, fmt.Sprintf("コマンドの指定により `%s` でレビューしました", asked))
+}
+
+// parseModel returns the last --model in args, or "".
+func parseModel(args []string) string {
+	model := ""
+	for i := 0; i < len(args); i++ {
+		if rest, ok := strings.CutPrefix(args[i], "--model="); ok {
+			model = strings.TrimSpace(rest)
+		} else if args[i] == "--model" && i+1 < len(args) {
+			i++
+			model = strings.TrimSpace(args[i])
+		}
+	}
+	return model
 }
 
 func parseFocus(args []string) []string {
