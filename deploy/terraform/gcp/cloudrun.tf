@@ -317,7 +317,13 @@ resource "google_cloud_run_v2_service" "server" {
   }
 
   lifecycle {
-    ignore_changes = [template[0].containers[0].image]
+    # gcloud records itself as the client on every deploy, and Terraform
+    # would clear it again on every apply.
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].containers[0].image,
+    ]
   }
 
   depends_on = [
@@ -696,8 +702,11 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
   lifecycle {
     # The release workflow deploys the image; the autoscaler writes the
     # instance count. Terraform sets both once and then leaves them alone,
-    # because whoever applies last would otherwise undo the other.
+    # because whoever applies last would otherwise undo the other. gcloud
+    # also records itself as the client on every deploy.
     ignore_changes = [
+      client,
+      client_version,
       scaling,
       template[0].containers[0].image,
     ]

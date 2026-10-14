@@ -129,8 +129,14 @@ resource "google_cloud_run_v2_job" "runner" {
   }
 
   lifecycle {
-    # The release workflow deploys the image, as it does for the others.
-    ignore_changes = [template[0].template[0].containers[0].image]
+    # The release workflow deploys the image, as it does for the others. The
+    # client is ignored as it is on them: gcloud records itself there on
+    # every deploy, and Terraform would clear it on every apply.
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].template[0].containers[0].image,
+    ]
   }
 
   depends_on = [google_storage_bucket_iam_member.runner_sandbox]
