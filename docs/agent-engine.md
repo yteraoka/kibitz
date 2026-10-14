@@ -21,15 +21,15 @@ pi は `reviewer.Engine` の裏に試作エンジンとして足し、
 
 ## 比較
 
-pi は 1.0、OpenCode は 1.18.31 (worker のイメージに入っている版) 時点。
+pi は 1.0、OpenCode は 1.18.31 時点 (worker のイメージは 2.0.28 に上げた。違いは各行に書いた)。
 
 | 観点 | OpenCode | pi |
 | --- | --- | --- |
 | MCP | **ビルトイン。** `mcp` 設定で local (コマンド起動) / remote (URL) を宣言、`environment` で秘密情報を注入、`enabled` で個別に ON/OFF | **ビルトイン (1.0 から)。** `mcp.json` の `mcpServers` で stdio / streamable HTTP を宣言 (SSE は非対応)、`env`/`headers` の `${VAR}` で秘密情報を注入、`enabled` で個別に ON/OFF、`toolExposure` でツール単位に `hidden` |
-| MCP ツールの見せ方 | すべてのツールをモデルに直接宣言 | 既定は **codemode** (モデルが書く JavaScript から呼ぶ)。`direct` / `deferred` (`tool_search` で後から宣言) / `hidden` を選べる |
+| MCP ツールの見せ方 | 1.18 はすべてのツールをモデルに直接宣言。2.0 は既定で **Code Mode** (`execute` 経由) になったので、kibitz はサーバーごとに `codemode: false` を書いて直接宣言に戻している | 既定は **codemode** (モデルが書く JavaScript から呼ぶ)。`direct` / `deferred` (`tool_search` で後から宣言) / `hidden` を選べる |
 | 権限制御 | `permission` で `allow`/`ask`/`deny` を宣言。`bash` はコマンドパターン単位、`edit` はパス単位、作業ディレクトリ外は `external_directory` で制御 | 権限機構なし (既定で全許可)。粒度はツール単位の allowlist (`--tools` / `--exclude-tools` / `--no-builtin-tools`)。それより細かい制御はエクステンションの `tool_call` フック。隔離はコンテナや micro-VM で行う前提 |
 | リポジトリ側の設定 | kibitz がジョブごとに生成し、リポジトリからは読まない (ADR-0010) | `.pi/` 以下 (設定・MCP・エクステンション) は project trust を与えたときだけ読む。ヘッドレスでは `--no-approve` で拒否。`AGENTS.md` / `CLAUDE.md` は trust に関係なく読まれる |
-| ヘッドレス実行 | `opencode run --format json`、`opencode serve` (HTTP API + JS SDK)、`run --attach` でサーバー再利用 | `pi -p` (print)、`pi --mode json` (JSONL イベント)、`pi --mode rpc` (stdin/stdout の JSONL RPC)、TS SDK |
+| ヘッドレス実行 | `opencode run --format json`、`opencode serve` (HTTP API + JS SDK)、`run --attach` でサーバー再利用。2.0 の `run` は既定で共有のバックグラウンドサービスに繋ぐので、kibitz は `--standalone` を付ける | `pi -p` (print)、`pi --mode json` (JSONL イベント)、`pi --mode rpc` (stdin/stdout の JSONL RPC)、TS SDK |
 | Go からの駆動 | 子プロセス + JSON イベント、または HTTP API | 子プロセス + JSONL。**RPC モードは双方向で、外部プロセス統合を明示的に想定した設計** |
 | セッション継続 | `--session <id>` / `--continue` / `--fork`、HTTP なら同一セッションに POST | `--session <path\|id>` / `--session-id` / `-c` / `--fork` / `--session-dir` / `--no-session` |
 | サブエージェント | ビルトイン (`--agent`、エージェントごとの権限) | 非対応 (自作するか別インスタンスを起動) |

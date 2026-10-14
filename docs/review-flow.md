@@ -278,7 +278,7 @@ sequenceDiagram
     J->>R: Request、diff / PR / 既存コメント / guidelines / focus
     R->>R: ジョブ用の opencode.json を書く、権限は読み取りのみ
     R->>R: プロンプトを workspace の .kibitz/prompt.md に書く
-    R->>CLI: opencode run --format json --agent ... --auto "指示" --file .kibitz/prompt.md
+    R->>CLI: opencode run --standalone --format json --agent ... --auto "指示" --file .kibitz/prompt.md
     loop ステップごと
         CLI->>M: 推論
         M-->>CLI: ツール呼び出し / テキスト

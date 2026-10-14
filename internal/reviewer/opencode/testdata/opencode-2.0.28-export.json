@@ -1,0 +1,98 @@
+{
+  "info": {
+    "id": "ses_ec64d4d5fffeEKLENfube4ILO0",
+    "projectID": "global",
+    "agent": "kibitz-review",
+    "model": {
+      "id": "m1",
+      "providerID": "mock",
+      "variant": "default"
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 2,
+      "output": 2,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1791969375236,
+      "updated": 1791969375541,
+      "idle": 1791969375543
+    },
+    "title": "hi",
+    "location": {
+      "directory": "/workspace"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_139b2b421001XibvjDTOLruGKl",
+      "time": {
+        "created": 1791969375265
+      },
+      "type": "agent-switched",
+      "agent": "kibitz-review",
+      "previous": "kibitz-review"
+    },
+    {
+      "id": "msg_139b2b41f001BxbD6W1nYJ2aov",
+      "time": {
+        "created": 1791969375341
+      },
+      "text": "hello",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_139b2b476001URXGqZJ9VNvkjV",
+      "time": {
+        "created": 1791969375356,
+        "streamed": 1791969375518,
+        "completed": 1791969375541
+      },
+      "type": "assistant",
+      "agent": "kibitz-review",
+      "model": {
+        "id": "m1",
+        "providerID": "mock",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "hi"
+        }
+      ],
+      "snapshot": {
+        "start": "6ca2b082c4982a05d9978c0e48bfbae57de44389",
+        "end": "6ca2b082c4982a05d9978c0e48bfbae57de44389",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 1,
+        "output": 1,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_139b2b537002LSLgPM9bxoUJaY",
+      "time": {
+        "created": 1791969375543
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

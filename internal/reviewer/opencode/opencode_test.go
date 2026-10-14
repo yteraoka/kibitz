@@ -122,6 +122,18 @@ func (h harness) config(t *testing.T) map[string]any {
 	return cfg
 }
 
+// mcpServers reads the servers out of the config's mcp block, which is
+// written in opencode 2's form: {"mcp": {"servers": {name: server}}}.
+func mcpServers(t *testing.T, cfg map[string]any) (map[string]any, bool) {
+	t.Helper()
+	block, ok := cfg["mcp"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	servers, ok := block["servers"].(map[string]any)
+	return servers, ok
+}
+
 func request(workspace string, mode reviewer.Mode) reviewer.Request {
 	return reviewer.Request{
 		Mode:         mode,
@@ -152,8 +164,8 @@ cat > .kibitz/out/review.json <<'JSON'
 JSON
 echo '{"type":"step_start","timestamp":1,"sessionID":"ses_123","part":{"id":"prt_1","sessionID":"ses_123","messageID":"msg_1","type":"step-start"}}'
 echo '{"type":"tool_use","timestamp":2,"sessionID":"ses_123","part":{"id":"prt_2","type":"tool","tool":"read","state":{"status":"completed"}}}'
-echo '{"type":"step_finish","timestamp":3,"sessionID":"ses_123","part":{"id":"prt_3","type":"step-finish","reason":"tool-calls","cost":0.021,"tokens":{"input":1200,"output":340,"reasoning":20,"cache":{"read":9000,"write":500}}}}'
-echo '{"type":"step_finish","timestamp":4,"sessionID":"ses_123","part":{"id":"prt_4","type":"step-finish","reason":"stop","cost":0.004,"tokens":{"input":300,"output":60,"reasoning":0,"cache":{"read":1000,"write":0}}}}'
+echo '{"type":"step_finish","timestamp":3,"sessionID":"ses_123","part":{"id":"prt_3","messageID":"msg_1","type":"step-finish","reason":"tool-calls","cost":0.021,"tokens":{"input":1200,"output":340,"reasoning":20,"cache":{"read":9000,"write":500}}}}'
+echo '{"type":"step_finish","timestamp":4,"sessionID":"ses_123","part":{"id":"prt_4","messageID":"msg_2","type":"step-finish","reason":"stop","cost":0.004,"tokens":{"input":300,"output":60,"reasoning":0,"cache":{"read":1000,"write":0}}}}'
 echo '{"type":"text","timestamp":5,"sessionID":"ses_123","part":{"id":"prt_5","type":"text","text":"done"}}'
 `
 
@@ -213,6 +225,9 @@ func TestRunArguments(t *testing.T) {
 	args := strings.Join(h.args(t), " ")
 	for _, want := range []string{
 		"run",
+		// A server of the run's own, which reads this job's config and
+		// environment, rather than a background service shared by every job.
+		"--standalone",
 		"--format json",
 		"--agent kibitz-review",
 		"--model vertex/claude-opus-5",
@@ -225,6 +240,10 @@ func TestRunArguments(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Errorf("arguments do not contain %q:\n%s", want, args)
 		}
+	}
+	// opencode 2 refuses --dir; the workspace is the working directory.
+	if strings.Contains(args, "--dir") {
+		t.Errorf("arguments contain --dir:\n%s", args)
 	}
 }
 
@@ -346,7 +365,7 @@ func TestMCPServersAreWrittenIntoTheConfig(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	mcp, ok := mcpServers(t, h.config(t))
 	if !ok {
 		t.Fatalf("no mcp block")
 	}
@@ -361,8 +380,55 @@ func TestMCPServersAreWrittenIntoTheConfig(t *testing.T) {
 		t.Errorf("jira = %v", jira)
 	}
 	// Written as enabled: being in this file at all is the decision.
-	if jira["enabled"] != true {
-		t.Errorf("jira was written but not enabled: %v", jira)
+	if disabled, ok := jira["disabled"]; ok && disabled != false {
+		t.Errorf("jira was written but disabled: %v", jira)
+	}
+	// Offered to the model by name. With Code Mode, opencode 2's default,
+	// the tools are reachable only through "execute", which "*": "deny"
+	// turns off.
+	if jira["codemode"] != false {
+		t.Errorf("jira's tools go through Code Mode: %v", jira)
+	}
+}
+
+// The catalog keeps the form operators wrote for opencode 1; the config is
+// written in opencode 2's, which spells oauth in snake case and splits the
+// timeout in two.
+func TestMCPServersAreWrittenInOpenCode2sForm(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{
+		Bin: h.bin,
+		MCPServers: opencode.Catalog{
+			"jira": {Type: opencode.MCPRemote, URL: "https://jira.example.com/mcp", TimeoutMS: 9000,
+				OAuth: json.RawMessage(`{"clientId": "kibitz", "callbackPort": 19876, "scope": "read"}`)},
+			"wiki": {Type: opencode.MCPRemote, URL: "https://wiki.example.com/mcp", OAuth: json.RawMessage(`false`)},
+		},
+	}, discardLogger())
+
+	req := request(h.workspace, reviewer.ModeReview)
+	req.MCP = []string{"jira", "wiki"}
+	if _, err := runner.Run(context.Background(), req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mcp, ok := mcpServers(t, h.config(t))
+	if !ok {
+		t.Fatal("no mcp servers")
+	}
+	jira := mcp["jira"].(map[string]any)
+	oauth, _ := jira["oauth"].(map[string]any)
+	if oauth["client_id"] != "kibitz" || oauth["callback_port"] != float64(19876) || oauth["scope"] != "read" {
+		t.Errorf("oauth = %v", jira["oauth"])
+	}
+	if _, left := oauth["clientId"]; left {
+		t.Errorf("oauth kept opencode 1's spelling: %v", oauth)
+	}
+	timeout, _ := jira["timeout"].(map[string]any)
+	if timeout["catalog"] != float64(9000) || timeout["execution"] != float64(9000) {
+		t.Errorf("timeout = %v", jira["timeout"])
+	}
+	if mcp["wiki"].(map[string]any)["oauth"] != false {
+		t.Errorf("wiki = %v, want oauth turned off as configured", mcp["wiki"])
 	}
 }
 
@@ -707,7 +773,7 @@ func TestForkPullRequestsGetNoMCPServersByDefault(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	mcp, ok := mcpServers(t, h.config(t))
 	if !ok {
 		t.Fatalf("no mcp block, want the one marked safe for forks")
 	}
@@ -741,7 +807,7 @@ func TestContextServerIsAlwaysRegistered(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	mcp, ok := h.config(t)["mcp"].(map[string]any)
+	mcp, ok := mcpServers(t, h.config(t))
 	if !ok {
 		t.Fatalf("no mcp block")
 	}

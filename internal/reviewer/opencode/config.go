@@ -14,12 +14,107 @@ import (
 // opencodeConfig is the per-job configuration handed to the CLI through
 // OPENCODE_CONFIG. It is generated rather than taken from the repository: a
 // pull request must not be able to grant its own reviewer more permissions.
+//
+// Permission and Provider are written in the shape opencode 1 defined, which
+// opencode 2 still reads and converts with the order of the rules kept. MCP is
+// not: see [mcpBlock].
 type opencodeConfig struct {
-	Schema     string               `json:"$schema"`
-	Model      string               `json:"model,omitempty"`
-	Permission permissions          `json:"permission"`
-	MCP        map[string]MCPServer `json:"mcp,omitempty"`
-	Provider   map[string]any       `json:"provider,omitempty"`
+	Schema     string         `json:"$schema"`
+	Model      string         `json:"model,omitempty"`
+	Permission permissions    `json:"permission"`
+	MCP        *mcpBlock      `json:"mcp,omitempty"`
+	Provider   map[string]any `json:"provider,omitempty"`
+}
+
+// mcpBlock is opencode 2's own form of the mcp block.
+//
+// It is written in that form because the form opencode 1 defined has no way
+// to say codemode, and opencode 2 defaults it to true: a server's tools are
+// then not offered to the model by name but only through Code Mode's
+// "execute" tool, which "*": "deny" turns off. Every server would be
+// connected and offer nothing.
+type mcpBlock struct {
+	Servers map[string]mcpServer `json:"servers"`
+}
+
+// mcpServer is one server in opencode 2's form.
+type mcpServer struct {
+	Type        string            `json:"type"`
+	Command     []string          `json:"command,omitempty"`
+	CWD         string            `json:"cwd,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	OAuth       json.RawMessage   `json:"oauth,omitempty"`
+	Timeout     *mcpTimeout       `json:"timeout,omitempty"`
+	// Codemode is always false. The tools are offered by name, and allowed by
+	// name (see [allowServerTools]); Code Mode would run the agent's own code
+	// to call them, which is a capability nobody asked for.
+	Codemode bool `json:"codemode"`
+}
+
+// mcpTimeout is opencode 2's split of what opencode 1 called one timeout.
+type mcpTimeout struct {
+	Catalog   int `json:"catalog,omitempty"`
+	Execution int `json:"execution,omitempty"`
+}
+
+// mcpBlockFor renders the servers this run enabled. Being written at all is
+// what enables one, so nothing is marked disabled.
+func mcpBlockFor(servers map[string]MCPServer) *mcpBlock {
+	if len(servers) == 0 {
+		return nil
+	}
+	block := &mcpBlock{Servers: make(map[string]mcpServer, len(servers))}
+	for name, s := range servers {
+		server := mcpServer{
+			Type:        s.Type,
+			Command:     s.Command,
+			CWD:         s.CWD,
+			Environment: s.Environment,
+			URL:         s.URL,
+			Headers:     s.Headers,
+			OAuth:       oauthV2(s.OAuth),
+		}
+		// The same conversion opencode 2 makes of an opencode 1 config.
+		if s.TimeoutMS > 0 {
+			server.Timeout = &mcpTimeout{Catalog: s.TimeoutMS, Execution: s.TimeoutMS}
+		}
+		block.Servers[name] = server
+	}
+	return block
+}
+
+// oauthKeys maps the oauth fields opencode 1 spelled in camel case to the
+// names opencode 2 reads.
+var oauthKeys = map[string]string{
+	"clientId":     "client_id",
+	"clientSecret": "client_secret",
+	"callbackPort": "callback_port",
+	"redirectUri":  "redirect_uri",
+}
+
+// oauthV2 renames the fields of an oauth block written for opencode 1, so
+// that the catalog an operator already has keeps working. Anything else --
+// false, or a field kibitz does not know -- is passed through as it was,
+// for the same reason [MCPServer.OAuth] is not read in the first place.
+func oauthV2(raw json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
+		return raw
+	}
+	renamed := make(map[string]json.RawMessage, len(fields))
+	for key, value := range fields {
+		if v2, ok := oauthKeys[key]; ok {
+			key = v2
+		}
+		renamed[key] = value
+	}
+	encoded, err := json.Marshal(renamed)
+	if err != nil {
+		return raw
+	}
+	return encoded
 }
 
 // permissions mirrors OpenCode's permission block. Each value is either an
@@ -107,7 +202,7 @@ func (r *Runner) writeConfig(ctx context.Context, path string, req reviewer.Requ
 		Schema:     "https://opencode.ai/config.json",
 		Model:      model,
 		Permission: reviewPermissions(),
-		MCP:        servers,
+		MCP:        mcpBlockFor(servers),
 	}
 	// Answering a question and planning a change both read and write
 	// nothing, so both run under the narrower profile. A plan that could edit

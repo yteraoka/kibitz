@@ -77,9 +77,11 @@ const (
 	MCPRemote = "remote"
 )
 
-// MCPServer is one entry of OpenCode's mcp configuration. The fields are the
-// ones opencode 1.18 accepts: command, cwd and environment for a local server,
-// url and headers for a remote one.
+// MCPServer is one MCP server as the operator's catalog declares it. The
+// fields are the ones opencode 1.18 accepts: command, cwd and environment for a
+// local server, url and headers for a remote one. The config handed to
+// opencode 2 is written in its own form, converted from this one (see
+// [mcpBlockFor]), so that a catalog written for 1.18 keeps working.
 //
 // A value of the form "{env:NAME}" anywhere in here is substituted by opencode
 // itself from its own environment, which is how a credential reaches a server
@@ -254,7 +256,9 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		// The session lives in the agent's own storage, inside a container
 		// that is disposable. Losing it is ordinary, not a failure: the
 		// prompt carries the context it needs, so the run is simply repeated
-		// without it.
+		// without it. opencode 2 does that itself -- it creates a session
+		// under an id it does not know -- so this is for the rare refusal
+		// that still says the session is not found.
 		r.logger.LogAttrs(ctx, slog.LevelInfo, "the stored session is gone; starting a new one",
 			slog.String("session_id", req.SessionID),
 		)
@@ -281,11 +285,13 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		return nil, err
 	}
 
+	duration := time.Since(start)
 	result := &reviewer.Result{SessionID: req.SessionID}
 	transcript := parseEvents(stdout, r.logger)
+	r.recoverUsage(ctx, configPath, req, env, &transcript)
 	transcript.absorb(broken)
 	result.Usage = transcript.usage
-	result.Usage.Duration = time.Since(start)
+	result.Usage.Duration = duration
 	result.Tools = transcript.tools
 	if transcript.sessionID != "" {
 		result.SessionID = transcript.sessionID
@@ -391,23 +397,7 @@ func (r *Runner) execResume(ctx context.Context, configPath string, req reviewer
 
 // run starts the CLI with args in env and returns its stdout.
 func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Request, env []string, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
-	cmd.Dir = req.WorkspaceDir
-	cmd.Env = append(slices.Clip(env),
-		"OPENCODE_CONFIG="+configPath,
-		// The agent must not pick up the operator's own session history.
-		"OPENCODE_DISABLE_AUTOUPDATE=1",
-		// opencode otherwise looks for AGENTS.md, CLAUDE.md and CONTEXT.md in
-		// the directory it runs in and loads them as instructions. That
-		// directory is the pull request's own checkout, so a branch could
-		// write the reviewer's instructions — which is the thing every other
-		// decision here is arranged to prevent. The same conventions still
-		// reach the agent, read from the default branch instead
-		// (see the worker's repoGuidelines).
-		"OPENCODE_DISABLE_PROJECT_CONFIG=1",
-	)
-
-	setupProcessGroup(cmd)
+	cmd := r.command(ctx, configPath, req, env, args)
 
 	stderr := &tailBuffer{max: maxStderr}
 	cmd.Stderr = stderr
@@ -436,14 +426,37 @@ func (r *Runner) run(ctx context.Context, configPath string, req reviewer.Reques
 		return nil, &RunError{Diagnosis: diagnosis, stdout: stdout}
 	}
 
-	// A run that succeeded can still have gone wrong in a way that matters:
-	// opencode falls back to its default agent when the one named is missing,
-	// and says so only on stderr. That is a deployment missing a file, and
-	// nothing else would ever mention it.
+	// A run that succeeded can still have reported problems on stderr that
+	// nothing else would ever mention.
 	if len(diagnosis.Notices) > 0 || len(diagnosis.Problems) > 0 {
 		r.logger.LogAttrs(ctx, slog.LevelWarn, "the agent reported problems but finished", attrs...)
 	}
 	return stdout, nil
+}
+
+// command builds one invocation of the CLI for req, in its workspace and with
+// the job's config.
+func (r *Runner) command(ctx context.Context, configPath string, req reviewer.Request, env []string, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, r.cfg.Bin, args...) //nolint:gosec // the binary comes from configuration, not from the pull request
+	cmd.Dir = req.WorkspaceDir
+	cmd.Env = append(slices.Clip(env),
+		"OPENCODE_CONFIG="+configPath,
+		// The agent must not pick up the operator's own session history.
+		"OPENCODE_DISABLE_AUTOUPDATE=1",
+		// opencode otherwise looks for AGENTS.md in the directory it runs in
+		// and loads it as instructions, and reads agents, commands and config
+		// from the .opencode, .claude and .agents directories there. That
+		// directory is the pull request's own checkout, so a branch could
+		// write the reviewer's instructions — which is the thing every other
+		// decision here is arranged to prevent. The same conventions still
+		// reach the agent, read from the default branch instead
+		// (see the worker's repoGuidelines).
+		"OPENCODE_DISABLE_PROJECT_CONFIG=1",
+	)
+
+	setupProcessGroup(cmd)
+
+	return cmd
 }
 
 // egressAttrs are what the egress log's lines for one job carry: the same
@@ -518,9 +531,16 @@ func (r *Runner) args(req reviewer.Request, resume bool) []string {
 
 	args := []string{
 		"run",
+		// A server of this run's own. Without it opencode 2 hands the run to
+		// a background service shared by every run on the machine, which
+		// started with somebody else's environment: this job's config, its
+		// credentials and its egress proxy would never reach the agent.
+		"--standalone",
 		"--format", "json",
 		"--agent", agent,
-		"--dir", req.WorkspaceDir,
+		// There is no --dir: opencode 2 runs in its working directory, which
+		// is the workspace (see [Runner.command]).
+		//
 		// Permissions are decided in the config file. Without this, any rule
 		// that resolves to "ask" would block forever in a headless run.
 		"--auto",
@@ -555,12 +575,14 @@ func (r *Runner) args(req reviewer.Request, resume bool) []string {
 	return args
 }
 
+// logLevel is the configured level in the spelling opencode 2 accepts, which
+// is lower case. The configuration keeps taking either.
 func (r *Runner) logLevel() string {
-	switch level := strings.ToUpper(strings.TrimSpace(r.cfg.LogLevel)); level {
-	case "DEBUG", "INFO", "WARN", "ERROR":
+	switch level := strings.ToLower(strings.TrimSpace(r.cfg.LogLevel)); level {
+	case "debug", "info", "warn", "error":
 		return level
 	default:
-		return "WARN"
+		return "warn"
 	}
 }
 

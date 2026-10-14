@@ -235,9 +235,19 @@ make push IMAGE_REPO=asia-northeast1-docker.pkg.dev/YOUR_PROJECT/kibitz TAG=v0.1
 | `VERSION` | `make` が git から生成 | `/healthz` とログに出るバージョン |
 | `OPENCODE_VERSION` | `deploy/docker/Dockerfile.worker` に記載 | エージェントの挙動は kibitz の出力そのものなので固定している。上げるときは意図的に |
 
+上げる前に、実物の opencode で kibitz の使い方が通るかを確かめられる
+(モデルはスタブ。権限・MCP・トークン数・エージェント定義の読み込みを見る):
+
+```bash
+npm install --prefix /tmp/oc "@opencode/cli@<版>"
+go build -o /tmp/kibitz-mcp ./cmd/kibitz-mcp
+KIBITZ_OPENCODE_IT_BIN=/tmp/oc/node_modules/.bin/opencode KIBITZ_OPENCODE_IT_MCP=/tmp/kibitz-mcp \
+  go test -count=1 -run TestWithTheRealCLI ./internal/reviewer/opencode/
+```
+
 ```bash
 # opencode を上げて試す
-make push IMAGE_REPO=... TAG=v0.2.0-rc1 OPENCODE_VERSION=1.19.0
+make push IMAGE_REPO=... TAG=v0.2.0-rc1 OPENCODE_VERSION=2.0.29
 ```
 
 ### ビルドするアーキテクチャに注意
@@ -346,7 +356,7 @@ msg="job finished"                duration=1m58s
 | 確認項目 | 確認方法 | 失敗したときの症状 |
 | --- | --- | --- |
 | モデル ID とプロバイダ | 6-4 が通る | `no provider configured` や `model not found` で失敗 |
-| OpenCode の JSON イベント形式 | `input_tokens` が 0 でない | 動くがトークン数が 0 のまま (opencode 1.18.31 で確認済み) |
+| OpenCode の JSON イベント形式 | `input_tokens` が 0 でない | 動くがトークン数が 0 のまま (opencode 2.0.28 で確認済み。最後のステップの分は `session export` で補う) |
 | `--file` でのプロンプト添付 | 6-4 が通る | 指摘が的外れ、または空 |
 | `--agent` の解決 | 6-4 が通る | `unknown agent` で失敗 |
 | GitHub App のトークン発行 | 6-2 と 6-4 が通る | `401` / `404` が worker ログに出る |
@@ -795,4 +805,4 @@ printf '%s' "$(cat body.json)" | \
 | コメントしたのにレビューが走らない (回答だけ返る) | コマンドがコメントの先頭に無い | 引用や説明文の途中のメンションは質問として扱う。先頭に書く ([event-schema.md](event-schema.md#41-コマンドはコメントの先頭だけ)) |
 | レビュー中にワーカーが落ちる | `worker_idle_after` を短くしすぎている | メトリクスの遅延より長くする (既定 15 分)。ジョブは再配送されるのでレビューは失われない |
 | `git fetch` が失敗する | App のインストール先にリポジトリが含まれていない | GitHub App の Install 設定でリポジトリを追加 |
-| worker のビルドが `opencode-ai's postinstall script was not run` で失敗 | `--ignore-scripts` で opencode の postinstall が動いていない | `npm rebuild -g opencode-ai` を後続で実行する (修正済み。古い Dockerfile を使っている場合は更新する) |
+| worker のビルドが `postinstall script was not run` で失敗 | `--ignore-scripts` で opencode の postinstall が動いていない | `npm rebuild -g @opencode/cli` を後続で実行する (修正済み。古い Dockerfile を使っている場合は更新する。opencode 1 のパッケージ名は `opencode-ai`) |

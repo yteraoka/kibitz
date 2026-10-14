@@ -44,9 +44,11 @@ RUN apt-get update \
 # Which binary is chosen is decided here, not at runtime: the postinstall reads
 # the build machine's CPU features, so a build under emulation picks the
 # baseline variant. That runs anywhere, which is the safe direction.
-ARG OPENCODE_VERSION=1.18.35
-RUN npm install -g --ignore-scripts "opencode-ai@${OPENCODE_VERSION}" \
-    && npm rebuild -g opencode-ai \
+#
+# opencode 2 is published as @opencode/cli; opencode-ai stops at 1.x.
+ARG OPENCODE_VERSION=2.0.28
+RUN npm install -g --ignore-scripts "@opencode/cli@${OPENCODE_VERSION}" \
+    && npm rebuild -g @opencode/cli \
     && opencode --version
 
 # pi, the engine on trial (ADR-0024). It runs only when KIBITZ_AGENT_ENGINE

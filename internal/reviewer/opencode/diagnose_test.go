@@ -17,12 +17,17 @@ import (
 	"github.com/yteraoka/kibitz/internal/reviewer"
 )
 
-// The fixtures under testdata/failures are what opencode 1.18.31 -- the
-// version the worker image pins -- actually wrote to stdout and stderr when
-// made to fail in each of these ways, captured by running it. They are not
+// The fixtures under testdata/failures are what opencode actually wrote to
+// stdout and stderr when made to fail in each of these ways, captured by
+// running it: the ones prefixed v2- by 2.0.28, the version the worker image
+// pins, and the rest by 1.18.31, the one it pinned before. They are not
 // written by hand: the point of these tests is that kibitz reads what the
 // real binary says, and a hand-written fixture would only test what kibitz
 // expects it to say.
+//
+// The 1.18.31 ones stay because the shapes they carry are still read, and
+// because the broken model turn has no 2.0.28 counterpart: reproducing it
+// takes a server answering as Gemini does.
 
 func fixture(t *testing.T, name string) (stdout, stderr []byte) {
 	t.Helper()
@@ -112,6 +117,48 @@ func TestAMissingAgentDefinitionIsNoticed(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Notices = %q, want the fallback to be one of them", d.Notices)
+	}
+}
+
+// opencode 2 names the failure in the event itself and has no ref. The
+// event is the summary; its log's other errors must not displace it.
+func TestOpenCode2SaysTheCauseInTheEvent(t *testing.T) {
+	stdout, stderr := fixture(t, "v2-badmodel")
+	d := diagnose(stdout, stderr, exitError(t, "1"), false, time.Second)
+
+	if d.ErrorName != "provider.no-route" || d.ErrorMessage != "Model unavailable: nosuch/provider-model" {
+		t.Fatalf("event = %q / %q", d.ErrorName, d.ErrorMessage)
+	}
+	if d.SessionID == "" {
+		t.Error("the session was not read from the event")
+	}
+	want := "provider.no-route: Model unavailable: nosuch/provider-model (exit status 1)"
+	if got := d.Summary(); got != want {
+		t.Errorf("Summary() = %q, want %q", got, want)
+	}
+	// The log's account is kept for the log, as its first line only.
+	found := false
+	for _, problem := range d.Problems {
+		if strings.Contains(problem, "ModelUnavailableError: Model unavailable: nosuch/provider-model") {
+			found = true
+		}
+		if strings.Contains(problem, "\n") || strings.Contains(problem, "    at ") {
+			t.Errorf("a problem carries a stack trace: %q", problem)
+		}
+	}
+	if !found {
+		t.Errorf("Problems = %q, want the log's error among them", d.Problems)
+	}
+}
+
+// opencode 1 ran its default agent when the one named was missing; opencode
+// 2 refuses. Either way the deployment is missing a file, and now it says so
+// in the error.
+func TestOpenCode2RefusesAMissingAgent(t *testing.T) {
+	stdout, stderr := fixture(t, "v2-noagent")
+	d := diagnose(stdout, stderr, exitError(t, "1"), false, time.Second)
+	if !strings.Contains(d.Summary(), `Agent not found: "nosuch"`) {
+		t.Errorf("Summary() = %q", d.Summary())
 	}
 }
 
@@ -240,7 +287,7 @@ func TestTheRunnerReportsTheCauseAndLogsTheRest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(args), "--print-logs --log-level WARN") {
+	if !strings.Contains(string(args), "--print-logs --log-level warn") {
 		t.Errorf("args = %q; without --print-logs the cause never reaches stderr", args)
 	}
 }
