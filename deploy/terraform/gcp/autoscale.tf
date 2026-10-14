@@ -139,7 +139,13 @@ resource "google_cloud_run_v2_service" "scaler" {
   }
 
   lifecycle {
-    ignore_changes = [template[0].containers[0].image]
+    # gcloud records itself as the client on every deploy, and Terraform
+    # would clear it again on every apply.
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].containers[0].image,
+    ]
   }
 
   depends_on = [
