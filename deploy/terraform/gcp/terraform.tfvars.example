@@ -105,6 +105,13 @@ alert_notification_channels = []
 #
 #   model_prices         = "google-vertex/claude-opus-5@default=3/15/0.3/3.75,*=2/8"
 #   model_price_currency = "$"
+#
+# Vertex AI の Gemini (global エンドポイントの定価、2026-10 時点)。
+# 入力/出力/キャッシュ読み。Gemini のキャッシュ書き込みは入力と同じ単価なので省く。
+# 3.8 Flash は 2026-12-31 まで、4 Argon は 2026-11-30 まで 50% のクレジット
+# 還元があるが、これは請求後の還元なので定価で書いている。
+#
+#   model_prices = "google-vertex/gemini-3.8-flash=1.5/7.5/0.15,google-vertex/gemini-3.5-flash-lite=0.3/2.5/0.03,google-vertex/gemini-4-argon=4/20/0.2"
 
 # リポジトリ 1 か月あたりの上限。最初に一致したパターンが効くので、
 # 具体的なものを "*" より前に置く。空なら上限なし。
