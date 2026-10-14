@@ -99,7 +99,7 @@ alert_notification_channels = []
 # 単価を設定するとサマリコメントに概算が出る。kibitz は単価を知らない
 # (プロバイダ・リージョン・契約で違い、しかも変わる)。
 #
-#   model_prices         = "google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8"
+#   model_prices         = "google-vertex/claude-opus-5@default=3/15/0.3/3.75,*=2/8"
 #   model_price_currency = "$"
 
 # リポジトリ 1 か月あたりの上限。最初に一致したパターンが効くので、

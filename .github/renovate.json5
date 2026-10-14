@@ -103,7 +103,7 @@
       description: 'the opencode build the worker image ships',
       managerFilePatterns: ['deploy/docker/Dockerfile.worker'],
       matchStrings: ['ARG OPENCODE_VERSION=(?<currentValue>\\S+)'],
-      depNameTemplate: 'opencode-ai',
+      depNameTemplate: '@opencode/cli',
       datasourceTemplate: 'npm',
     },
   ],

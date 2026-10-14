@@ -156,10 +156,11 @@ Vertex AI の認証はサービスアカウント鍵ファイルを配置せず�
 ワーカーのサービスアカウントに必要なのは `roles/aiplatform.user` のみ。
 
 > **確認済み**: Vertex AI のプロバイダ ID は `google-vertex` で、Gemini と Claude の
-> 両方を提供する (`google-vertex-anthropic` も別に存在する)。Vertex 上の Claude は
-> `google-vertex/claude-opus-5@default` のように版の接尾辞が付き、**利用申請が必要**。
+> 両方を提供する。Vertex 上の Claude は `google-vertex/claude-opus-5@default` のように
+> 版の接尾辞が付き、**利用申請が必要**。opencode 1 にあった `google-vertex-anthropic` は
+> opencode 2 で廃止され、指定すると `Model unavailable` で失敗する。
 > GLM は `zai/glm-5.3` で、`ZHIPU_API_KEY` を見る。
-> 一覧はワーカーのイメージ内で `opencode models <provider>` で引ける
+> 一覧はワーカーのイメージ内で `opencode models --standalone | grep '^<provider>/'` で引ける
 > ([deployment.md](deployment.md#モデルの選び方))。
 
 ## 2.1 kibitz-scaler (環境変数)
@@ -197,7 +198,7 @@ kibitz は**単価を知らない**。プロバイダ・リージョン・契約
 コード側に持たせていない。設定した場合だけ金額を出す。
 
 ```
-KIBITZ_MODEL_PRICES=google-vertex-anthropic/claude-opus-5=3/15/0.3/3.75,*=2/8
+KIBITZ_MODEL_PRICES=google-vertex/claude-opus-5@default=3/15/0.3/3.75,*=2/8
 ```
 
 1 モデルあたり `入力/出力[/キャッシュ読み[/キャッシュ書き]]` の 2〜4 個。
@@ -565,14 +566,15 @@ KIBITZ_EGRESS_DENY=jira.example.com/rest/api/*/user*
   `*.googleapis.com` (`aiplatform.googleapis.com` など)。入れ忘れると
   すべてのレビューがモデルを呼べずに失敗する
 - パスは `..` を解決してから照合する (`/v1/../admin` は `/admin` として判定する)
-- **許可リストを書くと、opencode 自身の次の 2 つが毎回拒否される。** どちらも失敗しても
-  レビューは続くので、許可しなくてよい (opencode 1.18.31 で確認)。
-  ログには `denied` が、opencode の診断には `problems` が出る
+- **許可リストを書くと、opencode 自身の次の 1 つが毎回拒否される。** 失敗しても
+  レビューは続くので、許可しなくてよい (opencode 2.0.28 で確認)。ログには `denied` が出る
 
   | 宛先 | 何をしようとしているか | 拒否されたとき |
   | --- | --- | --- |
-  | `models.opencode.ai` | モデル一覧の更新 | 同梱の一覧で動く (`Failed to fetch models.dev`) |
-  | `registry.npmjs.org` | `@opencode-ai/plugin` の裏での install | 使わないまま動く (`background dependency install failed`) |
+  | `models.opencode.ai` | モデル一覧の更新 | 同梱の一覧で動く |
+
+  opencode 1 が行っていた `registry.npmjs.org` からの `@opencode-ai/plugin` の install は、
+  opencode 2 では行われない
 - `KIBITZ_MCP_SERVERS` にある remote MCP サーバーの URL がルールで拒否される場合、
   **起動時に警告を出す** (起動は止めない)
 

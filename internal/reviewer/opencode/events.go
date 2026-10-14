@@ -25,6 +25,9 @@ type transcript struct {
 	// steps counts the model's turns, which says whether a run that produced
 	// nothing did any work at all.
 	steps int
+	// unfinished are the steps the stream started and never finished, by
+	// the assistant message each one is. See [Runner.recoverUsage].
+	unfinished []string
 }
 
 // parseEvents reads `opencode run --format json` output.
@@ -37,6 +40,8 @@ type transcript struct {
 func parseEvents(stdout []byte, logger *slog.Logger) transcript {
 	var t transcript
 	var text strings.Builder
+	var started []string
+	finished := map[string]bool{}
 
 	scanner := bufio.NewScanner(bytes.NewReader(stdout))
 	// Model output easily exceeds the default 64 KiB line limit.
@@ -64,8 +69,16 @@ func parseEvents(stdout []byte, logger *slog.Logger) transcript {
 			t.sessionID = id
 		}
 		t.usage = t.usage.Add(usageFrom(ev))
-		if part, ok := ev["part"].(map[string]any); ok && stringField(part, "type") == "step-finish" {
-			t.steps++
+		if part, ok := ev["part"].(map[string]any); ok {
+			switch stringField(part, "type") {
+			case "step-start":
+				if id := stringField(part, "messageID"); id != "" && !slices.Contains(started, id) {
+					started = append(started, id)
+				}
+			case "step-finish":
+				t.steps++
+				finished[stringField(part, "messageID")] = true
+			}
 		}
 		t.recordTool(ev)
 		if s := textFrom(ev); s != "" {
@@ -76,6 +89,11 @@ func parseEvents(stdout []byte, logger *slog.Logger) transcript {
 		logger.Warn("truncated agent output", slog.String("error", err.Error()))
 	}
 
+	for _, id := range started {
+		if !finished[id] {
+			t.unfinished = append(t.unfinished, id)
+		}
+	}
 	t.text = text.String()
 	return t
 }

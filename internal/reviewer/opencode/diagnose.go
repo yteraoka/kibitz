@@ -26,8 +26,16 @@ import (
 //	          error="ProviderModelNotFoundError: Model not found: nosuch/x."
 //	stderr  Error: Session not found            (printed for a person)
 //
-// The event on stdout names the failure and points at the log; the log says
-// what the failure was. Without --print-logs the log goes to a file inside
+// opencode 2 says it in the event itself, and its log carries the same error
+// as the first line of a stack trace:
+//
+//	stdout  {"type":"error","error":{"type":"provider.no-route",
+//	          "message":"Model unavailable: nosuch/provider-model"}}
+//	log     level=ERROR message="Failed to drain Session"
+//	          cause="SessionRunnerModel.ModelUnavailableError: Model unavailable: …\n    at …"
+//
+// The event on stdout names the failure and, in opencode 1, points at the
+// log; the log says what the failure was. Without --print-logs the log goes to a file inside
 // the container and stderr is empty, which is how a production failure came
 // to be reported as "opencode: exit status 1:" with nothing after the colon.
 // Everything in this file exists to put the three back together.
@@ -223,9 +231,13 @@ func (d *Diagnosis) readEvents(stdout []byte) {
 				Type   string `json:"type"`
 				Reason string `json:"reason"`
 			} `json:"part"`
+			// opencode 1 wrote {"name", "data": {"message", "ref"}};
+			// opencode 2 writes {"type", "message"} and has no ref.
 			Error *struct {
-				Name string `json:"name"`
-				Data struct {
+				Name    string `json:"name"`
+				Type    string `json:"type"`
+				Message string `json:"message"`
+				Data    struct {
 					Message string `json:"message"`
 					Ref     string `json:"ref"`
 				} `json:"data"`
@@ -246,8 +258,8 @@ func (d *Diagnosis) readEvents(stdout []byte) {
 		}
 		if ev.Type == "error" && ev.Error != nil {
 			// The last one wins: it is the one that ended the run.
-			d.ErrorName = ev.Error.Name
-			d.ErrorMessage = ev.Error.Data.Message
+			d.ErrorName = firstNonEmpty(ev.Error.Name, ev.Error.Type)
+			d.ErrorMessage = firstNonEmpty(ev.Error.Data.Message, ev.Error.Message)
 			d.ErrorRef = ev.Error.Data.Ref
 		}
 	}
@@ -293,7 +305,8 @@ func (d *Diagnosis) readStderr(stderr []byte) {
 		if level != "ERROR" {
 			continue
 		}
-		if msg := fields["error"]; msg != "" {
+		// opencode 2 logs the error only as the first line of its cause.
+		if msg := firstNonEmpty(fields["error"], firstLine(fields["cause"])); msg != "" {
 			lastError = msg
 			if d.ErrorRef != "" && fields["ref"] == d.ErrorRef {
 				d.Cause = msg
@@ -301,9 +314,11 @@ func (d *Diagnosis) readStderr(stderr []byte) {
 		}
 	}
 	// Without a ref to match, the last error the log recorded is the best
-	// guess at what ended the run. With one that did not match, it is a
-	// guess about something else, so it is left alone.
-	if d.Cause == "" && d.ErrorRef == "" {
+	// guess at what ended the run -- unless the event already said what it
+	// was, as opencode 2's do, and the guess could only be about something
+	// else. With a ref that did not match, it is a guess about something
+	// else too, so it is left alone.
+	if d.Cause == "" && d.ErrorRef == "" && (d.ErrorMessage == "" || d.ErrorMessage == genericMessage) {
 		d.Cause = lastError
 	}
 	if len(d.Problems) > 20 {

@@ -59,8 +59,12 @@ pi でも実装できる粒度に保つ。
 
 [4] 実行
     プロンプトは <workspace>/.kibitz/prompt.md に書き出してから渡す
-    opencode run --format json --agent kibitz-review --dir <workspace> \
+    cd <workspace> && opencode run --standalone --format json --agent kibitz-review \
       --session <既存セッションID|なし> --auto "<指示>" --file .kibitz/prompt.md
+    - --standalone でそのジョブ専用のサーバーを起動する。付けないと opencode 2 は
+      マシンで共有のバックグラウンドサービスに実行を渡し、ジョブの設定・
+      資格情報・egress プロキシがエージェントに届かない
+    - opencode 2 に --dir は無い。作業ディレクトリ (= ワークスペース) で動く
     - --file は配列オプションなので必ず最後に置く (後続の引数まで
       添付ファイル名として食われ、"File not found: <指示>" になる)
     - タイムアウト付き context、超過時は SIGTERM → SIGKILL
@@ -84,7 +88,7 @@ pi でも実装できる粒度に保つ。
 ### stdout の JSON イベント
 
 `--format json` のとき、`opencode run` は 1 行 1 オブジェクトで次の形を出す
-(opencode 1.18.31 で確認)。
+(opencode 1.18.31 と 2.0.28 で確認。2 でも同じ形を保っている)。
 
 ```json
 {"type":"step_finish","timestamp":1758500000000,"sessionID":"ses_…","part":{
@@ -98,6 +102,13 @@ pi でも実装できる粒度に保つ。
   トークン数はメッセージ単位では取れない
 - **トークン数は `step_finish` の `part.tokens` にしか無い。** しかもステップごとの値で、
   ツールを呼ぶレビューは複数ステップになるため**合算**する
+- **opencode 2 は最後のステップの `step_finish` をほぼ出さない**
+  ([anomalyco/opencode#53207](https://github.com/anomalyco/opencode/issues/53207))。
+  セッションが idle になった時点でイベントの中継をやめるため。そのままでは
+  1 ステップで答える回答のトークン数が 0 になり、予算の判定がずれる。
+  kibitz は `step_start` にある `part.messageID` のうち `step_finish` が来なかったものを、
+  実行後に `opencode session export` で引いて足す。引けなかったときはログに残して
+  レビューはそのまま返す
 - `tokens.input` は**キャッシュから読んだ分を含まない**。`tokens.output` も
   `reasoning` を含まない。単価が違うので kibitz 側も分けて持つ
   (`reviewer.Usage`)
@@ -120,7 +131,7 @@ pi でも実装できる粒度に保つ。
 
 - **`part.tool` はエンジンが付けた名前。** opencode は MCP サーバーのツールに
   **サーバー名と `_` を前置する**ので、kibitz 自身の `get_doc` は
-  `kibitz_get_doc` として届く (実機の 1.18.31 で確認。
+  `kibitz_get_doc` として届く (実機の 1.18.31 と 2.0.28 で確認。
   取り込み済みの実出力が `internal/reviewer/opencode/testdata/` にある)
 - kibitz はこの名前を**そのまま記録し**、自分のツールかどうかは
   `reviewer.ToolMatches` が**末尾一致**で判定する。
@@ -236,6 +247,16 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
   外部の MCP も一度も使われていなかった)。サーバー名の `[A-Za-z0-9_-]` 以外の文字は
   opencode と同じく `_` に置き換える (`my.jira` → `my_jira_*`)。
   有効にしていないサーバーの名前には許可を書かない
+- **MCP サーバーには `codemode: false` を付ける。** opencode 2 は既定で MCP のツールを
+  名前で見せず、Code Mode の `execute` ツール (モデルが書いたコードから呼ぶ) 経由でだけ
+  見せる。`"*": "deny"` は `execute` も止めるので、付けないとサーバーが繋がっていても
+  ツールが一つも渡らない。この設定は opencode 1 の `mcp` の書き方では書けないため、
+  `mcp` ブロックだけは opencode 2 の形 (`{"mcp": {"servers": {…}}}`) で書く。
+  `KIBITZ_MCP_SERVERS` は opencode 1 の形のまま受け付け、書き出すときに変換する
+  (`oauth` のキーを snake_case に、`timeout` を `catalog` / `execution` に)
+- **opencode 2 は MCP サーバーの接続を待たずに最初のリクエストを出す。** そのため
+  MCP のツールが宣言されるのは 2 回目のリクエストからになる (2.0.28 で確認)。
+  最初のターンは組み込みのツールだけで動く
 - **MCP はコンテキストを食う。** OpenCode のドキュメントも警告している通り、
   ツール定義だけでトークンを大量に消費するため、ジョブの種類ごとに必要な MCP だけを有効化する。
 
