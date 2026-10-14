@@ -313,3 +313,13 @@ type Result struct {
 type Engine interface {
 	Run(ctx context.Context, req Request) (*Result, error)
 }
+
+// ModelChecker is an [Engine] that runs only some models. An engine that is
+// not one runs whatever it is given.
+//
+// A review command may switch to another engine than the deployment's, and
+// the model it then runs was chosen for the usual one. Asked first, the engine
+// can refuse before the review starts rather than fail at the model call.
+type ModelChecker interface {
+	CanRun(model string) error
+}

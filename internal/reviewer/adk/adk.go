@@ -124,6 +124,12 @@ const (
 	userID  = "kibitz"
 )
 
+// CanRun implements [reviewer.ModelChecker].
+func (r *Runner) CanRun(model string) error {
+	_, err := ModelName(model)
+	return err
+}
+
 // ModelName returns the name Vertex AI knows a model by, or an error for a
 // model this engine cannot run.
 func ModelName(m string) (string, error) {

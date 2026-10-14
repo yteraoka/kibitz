@@ -98,6 +98,11 @@ alert_notification_channels = []
 #
 #   command_models = ["google-vertex/gemini-*"]
 
+# "/kibitz review --engine <engine>" で指定できるエンジン (opencode / pi / adk)。
+# 空ならコメントでは変えられない。adk はモデルが Gemini のときだけ使われる。
+#
+#   command_engines = ["pi", "adk"]
+
 # --- コスト ------------------------------------------------------------
 #
 # 単価を設定するとサマリコメントに概算が出る。kibitz は単価を知らない

@@ -108,6 +108,21 @@ variable "command_models" {
   default     = []
 }
 
+variable "command_engines" {
+  description = <<-EOT
+    Engines a review command may ask for with "/kibitz review --engine <engine>":
+    "opencode", "pi" or "adk". Empty turns the option off. The model is kept,
+    so adk is used only when that model is Gemini.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for e in var.command_engines : contains(["opencode", "pi", "adk"], e)])
+    error_message = "command_engines may list \"opencode\", \"pi\" and \"adk\" only."
+  }
+}
+
 variable "triage_model" {
   description = <<-EOT
     Model for the auxiliary tasks — picking which files of a large PR are worth

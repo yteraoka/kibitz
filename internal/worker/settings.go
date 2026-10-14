@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/yteraoka/kibitz/internal/event"
@@ -30,6 +32,10 @@ type resolved struct {
 	// mcp are the external tool servers this run may use, already resolved
 	// against what the deployment offers.
 	mcp []string
+	// engine is the engine a review command asked for, named engineName.
+	// Nil means the deployment's own, [ReviewJob.Engine].
+	engine     reviewer.Engine
+	engineName string
 }
 
 // defaults are the settings this deployment was started with. They are what a
@@ -206,7 +212,7 @@ func (j *ReviewJob) commandModel(ev *event.ReviewEvent, settingsModel string, no
 	if ev == nil || ev.Command == nil || ev.Command.Name != policy.CommandReview {
 		return settingsModel, notes
 	}
-	asked := parseModel(ev.Command.Args)
+	asked := parseFlag(ev.Command.Args, "--model")
 	if asked == "" || asked == settingsModel {
 		return settingsModel, notes
 	}
@@ -228,18 +234,81 @@ func (j *ReviewJob) commandModel(ev *event.ReviewEvent, settingsModel string, no
 	return asked, append(notes, fmt.Sprintf("コマンドの指定により `%s` でレビューしました", asked))
 }
 
-// parseModel returns the last --model in args, or "".
-func parseModel(args []string) string {
-	model := ""
-	for i := 0; i < len(args); i++ {
-		if rest, ok := strings.CutPrefix(args[i], "--model="); ok {
-			model = strings.TrimSpace(rest)
-		} else if args[i] == "--model" && i+1 < len(args) {
-			i++
-			model = strings.TrimSpace(args[i])
+// commandEngine is the engine a review runs on: the one the command asked
+// for, if this deployment lets a comment choose it and it can run model, and
+// nil -- the deployment's own -- otherwise.
+//
+//	/kibitz review --engine pi
+//	/kibitz review --engine=adk --model google-vertex/gemini-3.8-flash
+//
+// As with the model, a request that cannot be honoured does not stop the
+// review: it runs on the usual engine, and the summary says why.
+func (j *ReviewJob) commandEngine(ev *event.ReviewEvent, model string, notes []string) (reviewer.Engine, string, []string) {
+	if ev == nil || ev.Command == nil || ev.Command.Name != policy.CommandReview {
+		return nil, "", notes
+	}
+	asked := parseFlag(ev.Command.Args, "--engine")
+	if asked == "" || asked == j.EngineName {
+		return nil, "", notes
+	}
+
+	refuse := func(reason, logMsg string, attrs ...slog.Attr) (reviewer.Engine, string, []string) {
+		attrs = append(attrs, slog.String("event_id", ev.ID), slog.String("asked", asked))
+		j.Logger.LogAttrs(context.Background(), slog.LevelWarn, logMsg, attrs...)
+		note := fmt.Sprintf("指定されたエンジン `%s` は使えないため、%s でレビューしました (%s)", asked, j.engineLabel(), reason)
+		return nil, "", append(notes, note)
+	}
+
+	engine, ok := j.CommandEngines[asked]
+	if !ok {
+		allowed := j.commandEngineNames()
+		reason := "この kibitz ではコメントでエンジンを指定できません"
+		if len(allowed) > 0 {
+			reason = fmt.Sprintf("使えるのは %s", strings.Join(backquoted(allowed), "、"))
+		}
+		return refuse(reason, "the review command asked for an engine this deployment does not allow",
+			slog.Any("allowed", allowed))
+	}
+	// The model was chosen for the usual engine, so the one asked for may
+	// not run it: adk runs Gemini only. Triage is not checked: it falls back
+	// to the usual engine on its own (see [ReviewJob.triageEngine]).
+	if checker, ok := engine.(reviewer.ModelChecker); ok {
+		if err := checker.CanRun(model); err != nil {
+			return refuse(fmt.Sprintf("モデル `%s` を実行できません", model),
+				"the engine the review command asked for cannot run the model",
+				slog.String("model", model), slog.String("error", err.Error()))
 		}
 	}
-	return model
+	return engine, asked, append(notes, fmt.Sprintf("コマンドの指定によりエンジン `%s` でレビューしました", asked))
+}
+
+// engineLabel names the deployment's own engine for the summary.
+func (j *ReviewJob) engineLabel() string {
+	if j.EngineName == "" {
+		return "既定のエンジン"
+	}
+	return "`" + j.EngineName + "`"
+}
+
+// commandEngineNames lists the engines a review command may ask for, sorted
+// so that the help and the summary read the same every time.
+func (j *ReviewJob) commandEngineNames() []string {
+	return slices.Sorted(maps.Keys(j.CommandEngines))
+}
+
+// parseFlag returns the value of the last flag (as "--flag value" or
+// "--flag=value") in args, or "".
+func parseFlag(args []string, flag string) string {
+	value := ""
+	for i := 0; i < len(args); i++ {
+		if rest, ok := strings.CutPrefix(args[i], flag+"="); ok {
+			value = strings.TrimSpace(rest)
+		} else if args[i] == flag && i+1 < len(args) {
+			i++
+			value = strings.TrimSpace(args[i])
+		}
+	}
+	return value
 }
 
 func parseFocus(args []string) []string {

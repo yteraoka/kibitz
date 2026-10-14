@@ -332,7 +332,21 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		warnUnreachableMCP(mcp, proxy, logger)
 	}
 
-	engine := newEngine(cfg, mcp, proxy, logger)
+	engine := newEngine(cfg, cfg.Engine, mcp, proxy, logger)
+	// The engines a review command may ask for are built up front, as the
+	// deployment's is: building one is cheap, and a job is no place to find
+	// out that one cannot be.
+	var commandEngines map[string]reviewer.Engine
+	for _, name := range cfg.CommandEngines {
+		if commandEngines == nil {
+			commandEngines = make(map[string]reviewer.Engine)
+		}
+		if name == cfg.Engine {
+			commandEngines[name] = engine
+		} else if commandEngines[name] == nil {
+			commandEngines[name] = newEngine(cfg, name, mcp, proxy, logger)
+		}
+	}
 
 	verifier, err := newVerifier(ctx, cfg, logger)
 	if err != nil {
@@ -350,9 +364,11 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 			Depth:   cfg.Limits.CloneDepth,
 			Timeout: 5 * time.Minute,
 		},
-		MaxDiffLines:  cfg.Limits.MaxDiffLines,
-		TriageModel:   cfg.OpenCode.TriageModel,
-		CommandModels: cfg.OpenCode.CommandModels,
+		MaxDiffLines:   cfg.Limits.MaxDiffLines,
+		TriageModel:    cfg.OpenCode.TriageModel,
+		CommandModels:  cfg.OpenCode.CommandModels,
+		EngineName:     cfg.Engine,
+		CommandEngines: commandEngines,
 		Limits: reviewer.Limits{
 			MaxComments: cfg.Limits.MaxComments,
 			MinSeverity: reviewer.Severity(cfg.Limits.MinSeverity),
@@ -378,11 +394,13 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 	}, nil
 }
 
-// newEngine builds the agent engine the deployment chose. They read the same
-// model, provider and MCP settings, so switching is one variable — except that
-// adk runs Gemini only, which the configuration checks at startup.
-func newEngine(cfg *config.Worker, mcp opencode.Catalog, proxy *egress.Proxy, logger *slog.Logger) reviewer.Engine {
-	if cfg.Engine == config.EngineADK {
+// newEngine builds the agent engine called name: the one the deployment
+// chose, or one a review command may ask for. They read the same model,
+// provider and MCP settings, so switching is one variable — except that adk
+// runs Gemini only, which the configuration checks at startup for the
+// deployment's engine and the job checks for a command's.
+func newEngine(cfg *config.Worker, name string, mcp opencode.Catalog, proxy *egress.Proxy, logger *slog.Logger) reviewer.Engine {
+	if name == config.EngineADK {
 		logger.LogAttrs(context.Background(), slog.LevelWarn,
 			"the agent engine is adk, which is on trial and runs Gemini only",
 			slog.String("model", cfg.OpenCode.Model),
@@ -399,7 +417,7 @@ func newEngine(cfg *config.Worker, mcp opencode.Catalog, proxy *egress.Proxy, lo
 			MaxModelCalls:  cfg.ADK.MaxModelCalls,
 		}, logger)
 	}
-	if cfg.Engine == config.EnginePi {
+	if name == config.EnginePi {
 		env := agentEnv(cfg, logger)
 		// pi's Vertex AI provider reads the location from here rather than
 		// from VERTEX_LOCATION.

@@ -93,6 +93,7 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_WORKSPACE_DIR` | `/var/tmp/kibitz` | クローン先 |
 | `KIBITZ_CLONE_DEPTH` | `50` | shallow clone の深さ |
 | `KIBITZ_AGENT_ENGINE` | `opencode` | `opencode` / `pi` / `adk`。`pi` (ADR-0024) と `adk` (ADR-0025) は試験中 ([agent-engine.md](agent-engine.md)) |
+| `KIBITZ_COMMAND_ENGINES` | - | `/kibitz review --engine <エンジン>` で指定できるエンジン (`opencode` / `pi` / `adk` をカンマ区切り)。**未設定ならコメントでのエンジン指定は無効** (指定は無視して既定のエンジンでレビューし、サマリにその旨を書く)。モデルはそのまま引き継ぐので、`adk` はモデルが Gemini のときだけ使える (それ以外は既定のエンジンでレビューする)。`adk` を含めるなら `GOOGLE_CLOUD_PROJECT` が必須。指定したエンジンでのレビューはセッションを残さないので、続く質問は既定のエンジンの会話を続ける |
 | `KIBITZ_PI_BIN` | `pi` | pi のバイナリパス (`KIBITZ_AGENT_ENGINE=pi` のとき) |
 | `KIBITZ_PI_AGENTS_DIR` | `/etc/kibitz/opencode/agents` | エージェント定義。OpenCode と同じファイルを使い、front matter を除いた本文を pi のシステムプロンプトに追記する |
 | `KIBITZ_PI_EXTENSION` | `/etc/kibitz/pi/kibitz-guard.ts` | ガード拡張。pi には権限機構が無いため必須で、無ければジョブは失敗する |
@@ -772,4 +773,7 @@ guidelines: |
 `review.focus` を上書きする。`/kibitz review --model google-vertex/gemini-3.8-flash` は
 その 1 回だけ `review.model` (と運用側の `KIBITZ_MODEL`) を上書きする。ただし
 `KIBITZ_COMMAND_MODELS` に一致するモデルに限る。トリアージは `KIBITZ_TRIAGE_MODEL` が
-未設定ならこのモデルで動く。
+未設定ならこのモデルで動く。`/kibitz review --engine pi` はその 1 回だけ
+`KIBITZ_AGENT_ENGINE` を上書きする (`KIBITZ_COMMAND_ENGINES` にあるものだけ)。
+`--model` と併用でき、エンジンが実行できるかはその指定後のモデルで判断する。
+トリアージは指定したエンジンがトリアージ用のモデルを実行できなければ既定のエンジンで動く。

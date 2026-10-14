@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -61,6 +62,12 @@ type ReviewJob struct {
 	// CommandModels are the models "/kibitz review --model" may ask for, as
 	// patterns. Empty means a comment cannot choose the model.
 	CommandModels []string
+	// EngineName names [ReviewJob.Engine], so that the summary can say which
+	// engine a review ran on when the command asked for another.
+	EngineName string
+	// CommandEngines are the engines "/kibitz review --engine" may ask for,
+	// by name. Empty means a comment cannot choose the engine.
+	CommandEngines map[string]reviewer.Engine
 	// GuidelineFiles are the repository's own convention files, read from its
 	// default branch and given to the agent as instructions. Nil means
 	// [DefaultGuidelineFiles]; an empty slice reads none.
@@ -182,7 +189,7 @@ func (j *ReviewJob) command(ctx context.Context, client forge.Client, ref forge.
 	case policy.CommandAnswer, policy.CommandExplain:
 		return j.answer(ctx, client, ref, ev)
 	case policy.CommandHelp:
-		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention(), j.CommandModels))
+		return client.UpsertSummary(ctx, ref, HelpMarker, helpText(j.mention(), j.CommandModels, j.commandEngineNames()))
 	case policy.CommandIgnore:
 		return j.acknowledgeIgnore(ctx, client, ref, ev)
 	case policy.CommandImplement, policy.CommandPlan:
@@ -214,6 +221,9 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	// Before triage, so that a triage pass with no model of its own runs on
 	// the one that was asked for, as it would on the configured one.
 	settings.Model, settings.notes = j.commandModel(ev, settings.Model, settings.notes)
+	// After the model, because whether the engine can be used depends on
+	// which model it would run.
+	settings.engine, settings.engineName, settings.notes = j.commandEngine(ev, settings.Model, settings.notes)
 
 	if !settings.Reviews(ev.Kind) {
 		j.Logger.LogAttrs(ctx, slog.LevelInfo, "the repository's settings do not ask for this review; skipping",
@@ -333,7 +343,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	references := j.referenceDocs(ctx, ws)
 
 	// Too large to review in one pass: a first pass decides what to read.
-	selection := j.triage(ctx, ws, ev, pr, changed, settings.Settings)
+	selection := j.triage(ctx, ws, ev, pr, changed, settings)
 
 	req := reviewer.Request{
 		Mode:             reviewer.ModeReview,
@@ -355,11 +365,13 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 
 	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
 		trace.WithAttributes(attribute.String("kibitz.model", settings.Model)))
-	result, err := j.runWithRetry(agentCtx, req)
-	if result != nil {
+	result, err := j.runWithRetry(agentCtx, j.engineFor(settings), req)
+	if result != nil && settings.engine == nil {
 		// A review starts fresh — its job is to look at the code, not to be
 		// anchored by what it said last time — but the conversation it opens
-		// is what a later "why?" continues.
+		// is what a later "why?" continues. Not one on an engine a command
+		// asked for: the question runs on the usual engine, which cannot
+		// open another engine's conversation.
 		j.rememberSession(ctx, ev, result.SessionID)
 	}
 	if err != nil {
@@ -387,6 +399,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 	j.Logger.LogAttrs(ctx, slog.LevelInfo, "review produced findings",
 		slog.String("repository", ev.Repository.FullName),
 		slog.String("model", settings.Model),
+		slog.String("engine", cmp.Or(settings.engineName, j.EngineName)),
 		slog.String("ref", ref.String()),
 		slog.String("head", ws.HeadSHA),
 		slog.String("since", since),
@@ -540,8 +553,8 @@ func (j *ReviewJob) recordTools(tools reviewer.ToolUse) {
 // runWithRetry gives the agent one more attempt when its output did not meet
 // the contract, telling it what was wrong. Anything else fails the job so the
 // queue redelivers it.
-func (j *ReviewJob) runWithRetry(ctx context.Context, req reviewer.Request) (*reviewer.Result, error) {
-	result, err := j.Engine.Run(ctx, req)
+func (j *ReviewJob) runWithRetry(ctx context.Context, engine reviewer.Engine, req reviewer.Request) (*reviewer.Result, error) {
+	result, err := engine.Run(ctx, req)
 	if err == nil {
 		return result, nil
 	}
@@ -557,7 +570,7 @@ func (j *ReviewJob) runWithRetry(ctx context.Context, req reviewer.Request) (*re
 	req.Feedback = err.Error()
 	req.SessionID = "" // a fresh session, so the bad output is not context
 
-	result, err = j.Engine.Run(ctx, req)
+	result, err = engine.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("the agent did not produce usable output: %w", err)
 	}
@@ -1025,6 +1038,15 @@ func shortSHA(sha string) string {
 
 // mention falls back to the same default the server uses, so a worker that
 // was not told still prints something true for a default deployment.
+// engineFor is the engine a review runs on: the one its command asked for,
+// or the deployment's own.
+func (j *ReviewJob) engineFor(settings resolved) reviewer.Engine {
+	if settings.engine != nil {
+		return settings.engine
+	}
+	return j.Engine
+}
+
 func (j *ReviewJob) mention() string {
 	if j.Mention == "" {
 		return policy.DefaultMention
@@ -1032,11 +1054,15 @@ func (j *ReviewJob) mention() string {
 	return j.Mention
 }
 
-func helpText(mention string, models []string) string {
+func helpText(mention string, models, engines []string) string {
 	review := fmt.Sprintf("- `%s review` — 差分をレビューします (`--focus security` などで観点を指定できます)", mention)
 	if len(models) > 0 {
 		review += fmt.Sprintf("\n  - `--model <モデル>` でその 1 回だけモデルを変えられます。使えるのは %s",
 			strings.Join(backquoted(models), "、"))
+	}
+	if len(engines) > 0 {
+		review += fmt.Sprintf("\n  - `--engine <エンジン>` でその 1 回だけエンジンを変えられます。使えるのは %s",
+			strings.Join(backquoted(engines), "、"))
 	}
 	return strings.Join([]string{
 		"### kibitz の使い方",
