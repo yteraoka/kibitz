@@ -6,7 +6,6 @@ import (
 
 	"github.com/yteraoka/kibitz/internal/event"
 	"github.com/yteraoka/kibitz/internal/forge"
-	"github.com/yteraoka/kibitz/internal/repoconfig"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/telemetry"
 	"github.com/yteraoka/kibitz/internal/workspace"
@@ -35,7 +34,7 @@ type triaged struct {
 // Returning the diff unchanged is always a valid outcome. Reviewing too much
 // wastes tokens; reviewing too little loses findings, so every failure here
 // falls back to the whole thing.
-func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *event.ReviewEvent, pr *event.PullRequest, diff *forge.Diff, settings repoconfig.Settings) triaged {
+func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *event.ReviewEvent, pr *event.PullRequest, diff *forge.Diff, settings resolved) triaged {
 	if j.MaxDiffLines <= 0 || diff == nil {
 		return triaged{Diff: diff}
 	}
@@ -54,7 +53,7 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 
 	model := j.triageModel(settings.Model)
 
-	result, err := j.Engine.Run(ctx, reviewer.Request{
+	result, err := j.triageEngine(settings, model).Run(ctx, reviewer.Request{
 		Mode:         reviewer.ModeTriage,
 		WorkspaceDir: ws.Dir,
 		Event:        ev,
@@ -86,6 +85,18 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 		slog.Int("output_tokens", result.Usage.Output()),
 	)
 	return triaged{Diff: selected, Skipped: skipped, Notes: result.Triage.Notes, Usage: result.Usage}
+}
+
+// triageEngine is the engine the triage pass runs on: the review's, unless
+// that is one a command asked for and it cannot run the triage model -- adk
+// with a triage model that is not Gemini. The pass then runs on the
+// deployment's own engine, which can, rather than fail and review everything.
+func (j *ReviewJob) triageEngine(settings resolved, model string) reviewer.Engine {
+	engine := j.engineFor(settings)
+	if checker, ok := engine.(reviewer.ModelChecker); ok && settings.engine != nil && checker.CanRun(model) != nil {
+		return j.Engine
+	}
+	return engine
 }
 
 // selectFiles keeps the files the triage pass asked for, in the order the

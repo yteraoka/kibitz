@@ -254,6 +254,7 @@ Azure DevOps は他の 2 つより 1 階層深い。**組織 / プロジェク�
 /kibitz review                     # 全体を再レビュー
 /kibitz review --focus security    # 観点を指定
 /kibitz review --model google-vertex/gemini-3.8-flash  # その 1 回だけモデルを変える (KIBITZ_COMMAND_MODELS にあるものだけ)
+/kibitz review --engine pi         # その 1 回だけエンジンを変える (KIBITZ_COMMAND_ENGINES にあるものだけ)
 /kibitz review --full              # 増分ではなく全体
 /kibitz explain internal/queue/sqs/subscriber.go:88
 /kibitz answer <質問>              # 明示的に質問 (メンションだけでも同義)

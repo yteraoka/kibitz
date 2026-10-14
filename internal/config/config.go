@@ -335,6 +335,24 @@ func requireADK(l *loader, cfg *Worker) {
 	}
 }
 
+// requireCommandEngines refuses an engine that does not exist, and what an
+// engine a command may ask for needs and the deployment's own does not.
+//
+// Which models adk can run is not checked here: the model a command switches
+// to adk with may be the repository's choice, so it is checked per review.
+func requireCommandEngines(l *loader, cfg *Worker) {
+	for _, engine := range cfg.CommandEngines {
+		switch engine {
+		case EngineOpenCode, EnginePi:
+		case EngineADK:
+			// requireADK has already asked for it when adk is the default.
+			l.requireIf(cfg.Engine != EngineADK, "GOOGLE_CLOUD_PROJECT", cfg.OpenCode.Vertex.ProjectID, "when KIBITZ_COMMAND_ENGINES includes adk")
+		default:
+			l.fail("KIBITZ_COMMAND_ENGINES", "must list %q, %q or %q, got %q", EngineOpenCode, EnginePi, EngineADK, engine)
+		}
+	}
+}
+
 func requireForges(l *loader, f Forges) {
 	// A GitHub App is either fully configured or not configured at all.
 	if f.GitHub.AppID != 0 || f.GitHub.PrivateKey != "" {
@@ -519,7 +537,14 @@ type Worker struct {
 	JobTimeout      time.Duration
 	WorkspaceDir    string
 	// Engine selects the agent engine: "opencode", "pi" or "adk".
-	Engine   string
+	Engine string
+
+	// CommandEngines are the engines a review command may ask for, as
+	// "/kibitz review --engine <engine>". Empty means a comment cannot
+	// choose the engine at all. Like the models, the choice is the
+	// deployment's: the engine decides what the agent may do and how.
+	CommandEngines []string
+
 	OpenCode OpenCode
 	Pi       Pi
 	ADK      ADK
@@ -646,6 +671,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		JobTimeout:      l.duration("KIBITZ_JOB_TIMEOUT", 15*time.Minute),
 		WorkspaceDir:    l.str("KIBITZ_WORKSPACE_DIR", "/var/tmp/kibitz"),
 		Engine:          l.enum("KIBITZ_AGENT_ENGINE", EngineOpenCode, EngineOpenCode, EnginePi, EngineADK),
+		CommandEngines:  l.list("KIBITZ_COMMAND_ENGINES", nil),
 		ADK: ADK{
 			AgentsDir:     l.str("KIBITZ_ADK_AGENTS_DIR", "/etc/kibitz/opencode/agents"),
 			MaxModelCalls: l.positiveInt("KIBITZ_ADK_MAX_MODEL_CALLS", 100),
@@ -718,6 +744,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 	if cfg.Engine == EngineADK {
 		requireADK(l, cfg)
 	}
+	requireCommandEngines(l, cfg)
 
 	if err := errors.Join(l.errs...); err != nil {
 		return nil, err

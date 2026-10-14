@@ -422,6 +422,13 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         }
       }
       dynamic "env" {
+        for_each = length(var.command_engines) > 0 ? [1] : []
+        content {
+          name  = "KIBITZ_COMMAND_ENGINES"
+          value = join(",", var.command_engines)
+        }
+      }
+      dynamic "env" {
         for_each = var.triage_model != "" ? [var.triage_model] : []
         content {
           name  = "KIBITZ_TRIAGE_MODEL"

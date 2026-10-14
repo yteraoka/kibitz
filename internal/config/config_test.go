@@ -790,3 +790,50 @@ func TestLoadWorkerADK(t *testing.T) {
 		t.Errorf("opencode with Claude: %v", err)
 	}
 }
+
+func TestLoadWorkerCommandEngines(t *testing.T) {
+	env := minimalWorkerEnv()
+	cfg, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if cfg.CommandEngines != nil {
+		t.Errorf("CommandEngines = %q, want none by default", cfg.CommandEngines)
+	}
+
+	env["KIBITZ_COMMAND_ENGINES"] = "pi, adk"
+	env["GOOGLE_CLOUD_PROJECT"] = "kibitz-dev"
+	cfg, err = config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if got := strings.Join(cfg.CommandEngines, ","); got != "pi,adk" {
+		t.Errorf("CommandEngines = %q", got)
+	}
+
+	// adk does not restrict the deployment's own model when it is only one
+	// a command may ask for: that is checked per review.
+	env["KIBITZ_MODEL"] = "google-vertex-anthropic/claude-opus-5"
+	if _, err := config.LoadWorker(config.MapEnv(env)); err != nil {
+		t.Errorf("Claude with adk on command: %v", err)
+	}
+
+	for name, change := range map[string]struct {
+		key, value, want string
+	}{
+		"unknown":    {"KIBITZ_COMMAND_ENGINES", "pi,codex", `KIBITZ_COMMAND_ENGINES: must list "opencode", "pi" or "adk", got "codex"`},
+		"no project": {"GOOGLE_CLOUD_PROJECT", "", "GOOGLE_CLOUD_PROJECT: is required when KIBITZ_COMMAND_ENGINES includes adk"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := maps.Clone(env)
+			env[change.key] = change.value
+			if change.value == "" {
+				delete(env, change.key)
+			}
+			_, err := config.LoadWorker(config.MapEnv(env))
+			if err == nil || !strings.Contains(err.Error(), change.want) {
+				t.Errorf("err = %v, want %q", err, change.want)
+			}
+		})
+	}
+}
