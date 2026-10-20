@@ -63,6 +63,7 @@ GCP / AWS のどちらでも、また GitHub / GitLab / Azure DevOps のどれ�
 | [docs/worker.md](docs/worker.md) | OpenCode のヘッドレス実行、MCP 統合、プロンプト設計、構造化出力 |
 | [docs/triage.md](docs/triage.md) | 大きすぎる変更を絞るトリアージ。3 つの diff の使い分け、全体に戻る経路 |
 | [docs/agent-engine.md](docs/agent-engine.md) | エージェントエンジンの選定 (OpenCode / pi の比較と決定) |
+| [docs/review-engines.md](docs/review-engines.md) | エンジン (OpenCode / pi / ADK) ごとのレビュー時の処理 (図)。権限の作り方、セッション、失敗からの回復 |
 | [docs/security.md](docs/security.md) | 署名検証、シークレット管理、プロンプトインジェクション、fork PR の扱い |
 | [docs/configuration.md](docs/configuration.md) | サーバー / ワーカーの環境変数、リポジトリ設定 `.kibitz.yaml` |
 | [docs/deployment.md](docs/deployment.md) | GCP へのデプロイ手順、初回の動作確認、運用とトラブルシュート |

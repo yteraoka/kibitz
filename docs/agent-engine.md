@@ -2,6 +2,7 @@
 
 `reviewer.Engine` の実装として何を使うかの比較と決定。
 ADK for Go を使う 3 つ目の試作エンジンについては [下](#3-つ目の試作-adk-for-go-kibitz_agent_engineadk) と ADR-0025 にある。
+各エンジンがレビュー時に中で何をしているかは [review-engines.md](review-engines.md) に図でまとめてある。
 
 ## 結論
 
