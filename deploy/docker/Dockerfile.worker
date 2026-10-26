@@ -46,7 +46,7 @@ RUN apt-get update \
 # baseline variant. That runs anywhere, which is the safe direction.
 #
 # opencode 2 is published as @opencode/cli; opencode-ai stops at 1.x.
-ARG OPENCODE_VERSION=2.0.32
+ARG OPENCODE_VERSION=2.1.4
 RUN npm install -g --ignore-scripts "@opencode/cli@${OPENCODE_VERSION}" \
     && npm rebuild -g @opencode/cli \
     && opencode --version
