@@ -18,8 +18,8 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.46.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
-	golang.org/x/net v0.61.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/net v0.62.0
+	golang.org/x/oauth2 v0.38.0
 	google.golang.org/adk/v2 v2.5.0
 	google.golang.org/api v0.304.0
 	google.golang.org/genai v1.71.0
