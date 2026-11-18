@@ -267,7 +267,11 @@ func TestGuardStopsTheJobWhenTheLeaseIsLost(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the job kept running after the lease was lost")
 	}
-	<-done
+	// The job was cut short rather than finished, so the delivery is handed
+	// back for a retry instead of being recorded as done.
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("Handle returned %v, want a cancelled context so the job is retried", err)
+	}
 }
 
 func TestGuardReportsStoreFailures(t *testing.T) {
