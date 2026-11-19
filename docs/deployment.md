@@ -31,7 +31,7 @@ docker run --rm --entrypoint opencode \
 
 | 使いたいもの | `model` の値 | 認証 | 備考 |
 | --- | --- | --- | --- |
-| Gemini (Vertex) | `google-vertex/gemini-3.1-pro-preview` | サービスアカウント (ADC) | **既定。申請不要、シークレット不要** |
+| Gemini (Vertex) | `google-vertex/gemini-4-hydrogen` | サービスアカウント (ADC) | **既定。申請不要、シークレット不要** |
 | Gemini (Vertex, 安価) | `google-vertex/gemini-3.8-flash` | 同上 | 速くて安い。レビュー品質は落ちる |
 | Claude (Vertex) | `google-vertex/claude-opus-5@default` | 同上 | **Vertex での Anthropic モデル利用申請が必要**。ID に `@default` が付く点に注意 |
 | **GLM (Vertex Model Garden)** | `vertex-maas/zai-org/glm-5.2-maas` | サービスアカウント (ADC) | **シークレット不要**。opencode のカタログには無いので kibitz が自動でプロバイダを宣言する (下記) |

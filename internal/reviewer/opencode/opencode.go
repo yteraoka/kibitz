@@ -31,7 +31,7 @@ import (
 type Config struct {
 	// Bin is the opencode executable.
 	Bin string
-	// Model is the provider/model to run, e.g. google-vertex/gemini-3.1-pro-preview.
+	// Model is the provider/model to run, e.g. google-vertex/gemini-4-hydrogen.
 	Model string
 	// ReviewAgent, AnswerAgent and TriageAgent name the agent definitions to
 	// use.
