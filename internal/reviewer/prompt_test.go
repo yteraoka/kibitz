@@ -228,3 +228,39 @@ func TestImplementPromptWithoutSettingsStillAsksForAChange(t *testing.T) {
 		t.Error("the prompt describes a verification although no commands were given")
 	}
 }
+
+// A review prompt that only says what to return gets a review of the hunk and
+// nothing else. The prompt has to send the agent past the diff, make it check
+// what it found, and say so again after a diff long enough to bury the first
+// telling.
+func TestBuildPromptReviewAsksForInvestigation(t *testing.T) {
+	got := reviewer.BuildPrompt(request())
+
+	for _, want := range []string{
+		"差分だけを読んで結論を出さないでください", // read beyond the diff
+		"利用箇所",        // trace the callers
+		"テストを読む",      // read the tests
+		"候補を検証する",     // refute before writing
+		"`path:line`", // cite the evidence
+		"## 観点",       // the checklist
+		"## 最後に",      // the reminder after the diff
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt does not contain %q", want)
+		}
+	}
+	if strings.Index(got, "## 最後に") < strings.Index(got, "```diff") {
+		t.Error("the reminder comes before the diff")
+	}
+}
+
+// The other modes have their own instructions; the review procedure is not
+// carried into them.
+func TestBuildPromptAnswerOmitsTheReviewProcedure(t *testing.T) {
+	req := request()
+	req.Mode = reviewer.ModeAnswer
+	req.Question = "なぜ?"
+	if strings.Contains(reviewer.BuildPrompt(req), "## 進め方") {
+		t.Error("the answer prompt carries the review procedure")
+	}
+}
