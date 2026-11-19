@@ -93,7 +93,7 @@ variable "model" {
     credentials can reach.
   EOT
   type        = string
-  default     = "google-vertex/gemini-3.1-pro-preview"
+  default     = "google-vertex/gemini-4-hydrogen"
 }
 
 variable "command_models" {

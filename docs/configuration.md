@@ -103,7 +103,7 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_OPENCODE_BIN` | `opencode` | バイナリパス |
 | `KIBITZ_OPENCODE_MODE` | `run` | `run` / `attach` |
 | `KIBITZ_OPENCODE_SERVER_URL` | `http://127.0.0.1:4096` | `attach` 時の接続先 |
-| `KIBITZ_MODEL` | `google-vertex/gemini-3.1-pro-preview` | `provider/model` 形式。既定は Vertex AI の Gemini (申請不要) |
+| `KIBITZ_MODEL` | `google-vertex/gemini-4-hydrogen` | `provider/model` 形式。既定は Vertex AI の Gemini (申請不要) |
 | `KIBITZ_PROVIDER_ENV` | - | API キーで認証するプロバイダ用に、エージェントへ渡す環境変数名 (カンマ区切り)。例: `ZHIPU_API_KEY`。**名前だけを設定し、値は環境から読む** |
 | `KIBITZ_AGENT_ENV_PASSTHROUGH` | - | エージェントのプロセスへ追加で渡す環境変数名。**エージェントの環境は固定リストから組み立てる**ので、それ以外が必要なときの逃げ道 (下記) |
 | `KIBITZ_TRIAGE_MODEL` | (未設定なら `KIBITZ_MODEL`) | 巨大 PR の選抜など補助タスク用。安くしたい場合に `claude-sonnet-5` 等を指定 |
@@ -610,7 +610,7 @@ HTTPS をその CA が署名した証明書で終端してから上流に繋ぎ�
 {"level":"INFO","msg":"egress","event_id":"…","mode":"review",
  "outcome":"allowed","method":"POST","scheme":"https",
  "host":"aiplatform.googleapis.com","port":"443",
- "path":"/v1/projects/…/models/gemini-3.1-pro-preview:streamGenerateContent",
+ "path":"/v1/projects/…/models/gemini-4-hydrogen:streamGenerateContent",
  "query_keys":["alt"],"inspected":true,"reason":"allowed by *.googleapis.com",
  "status":200,"bytes_sent":48213,"bytes_received":9120,"duration_ms":8342}
 ```
@@ -689,7 +689,7 @@ review:
   min_severity: medium
   # 運用側の設定より小さくするときだけ効く
   max_comments: 15
-  model: google-vertex/gemini-3.1-pro-preview
+  model: google-vertex/gemini-4-hydrogen
 
 answer:
   enabled: true

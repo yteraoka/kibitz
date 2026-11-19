@@ -491,7 +491,7 @@ func TestDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWorker: %v", err)
 	}
-	if got, want := cfg.OpenCode.Model, "google-vertex/gemini-3.1-pro-preview"; got != want {
+	if got, want := cfg.OpenCode.Model, "google-vertex/gemini-4-hydrogen"; got != want {
 		t.Errorf("Model = %q, want %q", got, want)
 	}
 }

@@ -686,7 +686,7 @@ func LoadWorker(env Lookup) (*Worker, error) {
 			Bin:           l.str("KIBITZ_OPENCODE_BIN", "opencode"),
 			Mode:          l.enum("KIBITZ_OPENCODE_MODE", OpenCodeModeRun, OpenCodeModeRun, OpenCodeModeAttach),
 			ServerURL:     l.str("KIBITZ_OPENCODE_SERVER_URL", "http://127.0.0.1:4096"),
-			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-3.1-pro-preview"),
+			Model:         l.str("KIBITZ_MODEL", "google-vertex/gemini-4-hydrogen"),
 			TriageModel:   l.str("KIBITZ_TRIAGE_MODEL", ""),
 			CommandModels: l.list("KIBITZ_COMMAND_MODELS", nil),
 			ModelPrices:   l.list("KIBITZ_MODEL_PRICES", nil),

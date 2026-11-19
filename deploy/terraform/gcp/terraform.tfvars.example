@@ -75,7 +75,7 @@ alert_notification_channels = []
 # Model. Gemini on Vertex AI needs no access request and authenticates with the
 # worker's own service account, so it needs no secret.
 #
-#   model = "google-vertex/gemini-3.1-pro-preview"   # 既定
+#   model = "google-vertex/gemini-4-hydrogen"   # 既定
 #   model = "google-vertex/gemini-3.8-flash"         # 安価・高速
 #   model = "google-vertex/claude-opus-5@default"    # Anthropic の利用申請が必要
 #

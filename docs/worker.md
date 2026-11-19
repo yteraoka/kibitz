@@ -188,7 +188,7 @@ opencode は作業ディレクトリから `AGENTS.md` / `CLAUDE.md` / `CONTEXT.
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "google-vertex/gemini-3.1-pro-preview",
+  "model": "google-vertex/gemini-4-hydrogen",
   "permission": {
     "*": "deny",
     "read": "allow",
@@ -273,7 +273,7 @@ GLM のように API キーで認証するプロバイダも、`KIBITZ_PROVIDER_
 
 | 項目 | 決定 |
 | --- | --- |
-| 既定モデル | `google-vertex/gemini-3.1-pro-preview` (申請不要ですぐ動く)。選択肢は [deployment.md](deployment.md#モデルの選び方) の表 |
+| 既定モデル | `google-vertex/gemini-4-hydrogen` (申請不要ですぐ動く)。選択肢は [deployment.md](deployment.md#モデルの選び方) の表 |
 | 補助タスク | triage やサマリ生成など、安くしたい用途は `KIBITZ_TRIAGE_MODEL` で別指定できるようにする |
 | リージョン | 既定は `global` (可用性が高くエラーが減る)。データ所在地の要件があれば `asia-northeast1` などに固定する。**リージョンによって使えるモデルが違う**ため、固定する場合は Model Garden で事前に確認する |
 | 認証 | Workload Identity による ADC。鍵ファイルは配置しない |
