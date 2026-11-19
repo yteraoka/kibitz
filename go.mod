@@ -9,7 +9,7 @@ go 1.27
 
 require (
 	cloud.google.com/go/firestore v1.29.2
-	cloud.google.com/go/pubsub/v2 v2.7.0
+	cloud.google.com/go/pubsub/v2 v2.9.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/prometheus/client_golang v1.24.1
