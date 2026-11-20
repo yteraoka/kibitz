@@ -127,6 +127,17 @@ alert_notification_channels = []
 #
 #   repo_budgets = "acme/payments=200,acme/*=50,*=10"
 
+# --- 処理記録 (transcript) -------------------------------------------
+#
+# 既定で有効。コメントのリンクから kibitz-server の /transcripts/{id} で
+# エージェントの処理記録が読める。id を知っている人は誰でも読めるので、
+# それでは足りない場合はパスワード (Basic 認証) を掛ける。シークレットが
+# 1 つ作られ、値は gcloud で投入する (`terraform output
+# transcript_tokens_secret_name` が名前を出す。手順は README)。
+#
+#   transcript_password_enabled = true
+#   transcript_retention_days   = 30
+
 # --- GitLab ------------------------------------------------------------
 #
 # 有効にするとシークレットが 3 つ作られる。値は gcloud で投入する

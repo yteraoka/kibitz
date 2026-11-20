@@ -226,6 +226,9 @@ Cloud Run サービスとして動き、Cloud Scheduler から毎分 `POST /reco
 id は 128 bit の乱数で、**コメントを読める人は記録も読める**という前提で守っている。
 公開リポジトリで MCP 経由の社内情報を扱う場合などは `KIBITZ_TRANSCRIPT_TOKENS` で
 パスワードを足すか、サーバーの前に IAP を置く ([security.md](security.md#5-データの取り扱い))。
+Terraform では `transcript_password_enabled = true` にすると Secret Manager のシークレットが作られ、
+サーバーはそれを `KIBITZ_TRANSCRIPT_TOKENS` として読む
+([deploy/terraform/gcp/README.md](../deploy/terraform/gcp/README.md#transcripts))。
 
 ### コストの概算について
 

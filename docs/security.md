@@ -229,7 +229,9 @@ public リポジトリでは誰でも PR を開き、コメントを書ける。
   - 閲覧 URL の id は 128 bit の乱数で、リンクはその PR / Issue のコメントにしか書かない。
     つまり**コメントを読める人は記録も読める**。非公開リポジトリならリポジトリの権限と同じ範囲になる
   - それでは足りない場合 (公開リポジトリで MCP から社内ツールの内容を読むなど) は
-    `KIBITZ_TRANSCRIPT_TOKENS` で Basic 認証を足すか、記録を無効にする
+    `KIBITZ_TRANSCRIPT_TOKENS` で Basic 認証を足すか、記録を無効にする。
+    Terraform では `transcript_password_enabled = true` で Secret Manager のシークレットから渡す
+    (値は他のシークレットと同じく gcloud で入れ、state には載せない)
   - 表示ページは `Content-Security-Policy: default-src 'none'` で、スクリプトも外部リソースも読まない。
     エージェントが書いた HTML はすべてエスケープして表示する。`Referrer-Policy: no-referrer` と
     `X-Robots-Tag: noindex` で URL が外に漏れにくくする

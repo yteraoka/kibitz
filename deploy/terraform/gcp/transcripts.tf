@@ -9,6 +9,9 @@
 locals {
   transcripts_enabled = var.transcripts_enabled
 
+  # A password only means something in front of records that exist.
+  transcript_password_enabled = local.transcripts_enabled && var.transcript_password_enabled
+
   # The server's address, written out rather than read from the service: the
   # server already depends on the worker pool, and the worker reading the
   # server's uri would make a cycle. Cloud Run's deterministic URL is stable
@@ -61,4 +64,31 @@ resource "google_storage_bucket_iam_member" "server_transcripts" {
   bucket = google_storage_bucket.transcripts[0].name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.server.email}"
+}
+
+# The passwords the server asks for before it shows a record, comma
+# separated so that a rotation can hold the old and the new one at once. The
+# value goes in with gcloud, never through Terraform, so it stays out of the
+# state; the server reads it as KIBITZ_TRANSCRIPT_TOKENS.
+resource "google_secret_manager_secret" "transcript_tokens" {
+  count = local.transcript_password_enabled ? 1 : 0
+
+  secret_id = "${var.name_prefix}-transcript-tokens"
+  labels    = var.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+# Only the server checks the password. The worker writes records and links
+# to them, and never needs to know it.
+resource "google_secret_manager_secret_iam_member" "server_transcript_tokens" {
+  count = local.transcript_password_enabled ? 1 : 0
+
+  secret_id = google_secret_manager_secret.transcript_tokens[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.server.email}"
 }

@@ -34,6 +34,7 @@ curl -s "$(terraform output -raw server_url)/metrics" | grep kibitz_publish_fail
 | `KIBITZ_GITLAB_SIGNING_TOKENS` | GitLab の署名トークン |
 | `KIBITZ_AZDO_BASIC_PASSWORDS` | Azure DevOps の Basic 認証 |
 | `KIBITZ_AZDO_HEADER_VALUES` | Azure DevOps の固定ヘッダ |
+| `KIBITZ_TRANSCRIPT_TOKENS` | 処理記録 (transcript) の閲覧パスワード。手順 4 は「閲覧する人に新しいパスワードを伝える」になる |
 
 **新旧を並べて、送信側を切り替えてから、古いほうを消す。**
 
