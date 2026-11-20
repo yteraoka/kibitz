@@ -295,6 +295,18 @@ resource "google_cloud_run_v2_service" "server" {
           value = "gs://${google_storage_bucket.transcripts[0].name}/jobs"
         }
       }
+      dynamic "env" {
+        for_each = local.transcript_password_enabled ? [1] : []
+        content {
+          name = "KIBITZ_TRANSCRIPT_TOKENS"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.transcript_tokens[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
 
       # The long tail of settings that have a default and only sometimes
       # need changing. Names this configuration sets itself are rejected by
@@ -337,6 +349,7 @@ resource "google_cloud_run_v2_service" "server" {
   depends_on = [
     google_secret_manager_secret_iam_member.server_webhook,
     google_secret_manager_secret_iam_member.server_gitlab_webhook_tokens,
+    google_secret_manager_secret_iam_member.server_transcript_tokens,
     google_secret_manager_secret_iam_member.server_gitlab_signing_tokens,
     google_secret_manager_secret_iam_member.server_azure_devops_passwords,
     google_secret_manager_secret_iam_member.server_azure_devops_header_values,

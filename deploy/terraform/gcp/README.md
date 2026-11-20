@@ -105,8 +105,30 @@ rule deletes records after `transcript_retention_days` (30).
 The id is 128 random bits and appears only in the comment, so anybody who can
 read the comment can read the record. For a private repository that is the
 repository's own audience. Where it is not enough, set
-`KIBITZ_TRANSCRIPT_TOKENS` on the server to require a password, or turn
+`transcript_password_enabled = true` to require a password, or turn
 transcripts off (docs/security.md).
+
+The password lives in Secret Manager, like the webhook secrets, and reaches
+the server as `KIBITZ_TRANSCRIPT_TOKENS`; it never passes through Terraform.
+Cloud Run will not deploy a revision whose secret has no version, so create
+the secret first, fill it in, then apply the rest:
+
+```bash
+terraform apply \
+  -target=google_secret_manager_secret.transcript_tokens \
+  -target=google_secret_manager_secret_iam_member.server_transcript_tokens
+
+printf '%s' "$(openssl rand -base64 24)" | \
+  gcloud secrets versions add "$(terraform output -raw transcript_tokens_secret_name)" --data-file=-
+
+terraform apply
+```
+
+Basic authentication asks for a user name as well; any will do. The secret
+takes more than one password, comma separated, so it rotates without a gap
+the way the webhook secrets do: `old,new`, hand out the new one, then `new`
+alone. Cloud Run reads a secret only when an instance starts, so each change
+needs a new server revision to take effect (docs/runbook.md, section 1-1).
 
 ## Settings without a variable of their own
 

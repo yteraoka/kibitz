@@ -104,3 +104,8 @@ output "transcripts_bucket" {
   description = "Where the record of each job's agent runs is kept, or empty when transcripts are off. Comments link to them through the server at /transcripts/{id}."
   value       = local.transcripts_enabled ? google_storage_bucket.transcripts[0].name : ""
 }
+
+output "transcript_tokens_secret_name" {
+  description = "Secret to add the transcript viewer's passwords to (comma separated), or empty when no password is asked for."
+  value       = local.transcript_password_enabled ? google_secret_manager_secret.transcript_tokens[0].secret_id : ""
+}

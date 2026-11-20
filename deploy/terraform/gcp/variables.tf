@@ -493,6 +493,7 @@ variable "server_env" {
       "KIBITZ_AZDO_TOKEN_IS_BEARER",
       "KIBITZ_ALLOWED_COMMENTERS",
       "KIBITZ_TRANSCRIPT_LOCATION",
+      "KIBITZ_TRANSCRIPT_TOKENS",
     ])) == 0
     error_message = "server_env may not set a variable this configuration already sets; use the variable for it instead."
   }
@@ -612,10 +613,24 @@ variable "transcripts_enabled" {
     trailer on the comment kibitz posts. The server renders the record at
     /transcripts/{id}. The id is 128 random bits and the only thing guarding
     a record, so anybody who can read the comment can read the record: see
-    docs/security.md before turning this on for public repositories.
+    docs/security.md before turning this on for public repositories, and
+    transcript_password_enabled for a password in front of it.
   EOT
   type        = bool
   default     = true
+}
+
+variable "transcript_password_enabled" {
+  description = <<-EOT
+    Ask for a password (HTTP basic authentication; the user name is ignored)
+    before the server shows a record. Creates a Secret Manager secret that
+    the server reads as KIBITZ_TRANSCRIPT_TOKENS; its value is added with
+    gcloud, comma separated to hold more than one during a rotation. The
+    secret needs a version before the server can deploy: see the README.
+    Ignored while transcripts_enabled is false.
+  EOT
+  type        = bool
+  default     = false
 }
 
 variable "transcript_retention_days" {
