@@ -492,6 +492,7 @@ variable "server_env" {
       "KIBITZ_AZDO_TOKEN",
       "KIBITZ_AZDO_TOKEN_IS_BEARER",
       "KIBITZ_ALLOWED_COMMENTERS",
+      "KIBITZ_TRANSCRIPT_LOCATION",
     ])) == 0
     error_message = "server_env may not set a variable this configuration already sets; use the variable for it instead."
   }
@@ -518,6 +519,8 @@ variable "worker_env" {
       "KIBITZ_MODEL_PRICES",
       "KIBITZ_MODEL_PRICE_CURRENCY",
       "KIBITZ_REPO_BUDGETS",
+      "KIBITZ_TRANSCRIPT_LOCATION",
+      "KIBITZ_TRANSCRIPT_BASE_URL",
       "KIBITZ_IMPLEMENT_ENABLED",
       "KIBITZ_SANDBOX_LOCATION",
       "KIBITZ_SANDBOX_JOB",
@@ -600,4 +603,28 @@ variable "implement_commit_email" {
   EOT
   type        = string
   default     = "kibitz@users.noreply.github.com"
+}
+
+variable "transcripts_enabled" {
+  description = <<-EOT
+    Keep a record of what the agent did for each job — its prompt and every
+    event its engine reported — in a bucket, and put a link to it in a
+    trailer on the comment kibitz posts. The server renders the record at
+    /transcripts/{id}. The id is 128 random bits and the only thing guarding
+    a record, so anybody who can read the comment can read the record: see
+    docs/security.md before turning this on for public repositories.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "transcript_retention_days" {
+  description = "How long a transcript is kept before the bucket's lifecycle rule deletes it."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.transcript_retention_days >= 1
+    error_message = "transcript_retention_days has to be at least 1."
+  }
 }

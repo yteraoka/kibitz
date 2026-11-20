@@ -128,7 +128,7 @@ func (j *ReviewJob) implement(ctx context.Context, client forge.Client, ref forg
 				"不要であれば削除してから、もう一度指示してください。", branch))
 	}
 
-	result, err := j.Engine.Run(ctx, reviewer.Request{
+	result, err := j.runEngine(ctx, j.Engine, j.EngineName, reviewer.Request{
 		Mode:           reviewer.ModeImplement,
 		WorkspaceDir:   ws.Dir,
 		Event:          ev,
@@ -238,7 +238,7 @@ func (j *ReviewJob) implement(ctx context.Context, client forge.Client, ref forg
 		Head:  branch,
 		Base:  ev.Repository.DefaultBranch,
 		Title: j.pullRequestTitle(ev, ref),
-		Body:  j.pullRequestBody(result, ref, verified, changed, settings, p),
+		Body:  j.pullRequestBody(result, ref, verified, changed, settings, p) + j.transcriptTrailer(ctx),
 		Draft: true,
 	})
 	if err != nil {

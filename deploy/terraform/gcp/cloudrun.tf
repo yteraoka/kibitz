@@ -288,6 +288,14 @@ resource "google_cloud_run_v2_service" "server" {
         }
       }
 
+      dynamic "env" {
+        for_each = local.transcripts_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_TRANSCRIPT_LOCATION"
+          value = "gs://${google_storage_bucket.transcripts[0].name}/jobs"
+        }
+      }
+
       # The long tail of settings that have a default and only sometimes
       # need changing. Names this configuration sets itself are rejected by
       # the variable's own validation.
@@ -660,6 +668,21 @@ resource "google_cloud_run_v2_worker_pool" "worker" {
         content {
           name  = "KIBITZ_EGRESS_DENY"
           value = join(",", var.egress_deny)
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.transcripts_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_TRANSCRIPT_LOCATION"
+          value = "gs://${google_storage_bucket.transcripts[0].name}/jobs"
+        }
+      }
+      dynamic "env" {
+        for_each = local.transcripts_enabled ? [1] : []
+        content {
+          name  = "KIBITZ_TRANSCRIPT_BASE_URL"
+          value = local.server_url
         }
       }
 

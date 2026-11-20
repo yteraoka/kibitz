@@ -837,3 +837,49 @@ func TestLoadWorkerCommandEngines(t *testing.T) {
 		})
 	}
 }
+
+func TestTranscriptsAreOffByDefault(t *testing.T) {
+	server, err := config.LoadServer(config.MapEnv(minimalServerEnv()))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	worker, err := config.LoadWorker(config.MapEnv(minimalWorkerEnv()))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if server.Transcripts.Enabled() || worker.Transcripts.Enabled() {
+		t.Error("transcripts are kept without a location")
+	}
+}
+
+func TestTranscriptsConfiguration(t *testing.T) {
+	env := minimalWorkerEnv()
+	env["KIBITZ_TRANSCRIPT_LOCATION"] = "gs://bucket/transcripts"
+	env["KIBITZ_TRANSCRIPT_BASE_URL"] = "https://kibitz.example"
+	worker, err := config.LoadWorker(config.MapEnv(env))
+	if err != nil {
+		t.Fatalf("LoadWorker: %v", err)
+	}
+	if !worker.Transcripts.Enabled() || worker.Transcripts.BaseURL != "https://kibitz.example" {
+		t.Errorf("Transcripts = %+v", worker.Transcripts)
+	}
+
+	env["KIBITZ_TRANSCRIPT_BASE_URL"] = "kibitz.example"
+	if _, err := config.LoadWorker(config.MapEnv(env)); err == nil || !strings.Contains(err.Error(), "KIBITZ_TRANSCRIPT_BASE_URL") {
+		t.Errorf("a base URL without a scheme was accepted: %v", err)
+	}
+
+	server := minimalServerEnv()
+	server["KIBITZ_TRANSCRIPT_TOKENS"] = "pw"
+	if _, err := config.LoadServer(config.MapEnv(server)); err == nil || !strings.Contains(err.Error(), "KIBITZ_TRANSCRIPT_TOKENS") {
+		t.Errorf("a password for transcripts that are not served was accepted: %v", err)
+	}
+	server["KIBITZ_TRANSCRIPT_LOCATION"] = "/var/tmp/transcripts"
+	cfg, err := config.LoadServer(config.MapEnv(server))
+	if err != nil {
+		t.Fatalf("LoadServer: %v", err)
+	}
+	if !cfg.Transcripts.Enabled() || len(cfg.Transcripts.Tokens) == 0 {
+		t.Errorf("Transcripts = %+v", cfg.Transcripts)
+	}
+}

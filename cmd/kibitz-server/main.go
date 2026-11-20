@@ -25,6 +25,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/run"
 	"github.com/yteraoka/kibitz/internal/scale"
 	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/transcript"
 	"github.com/yteraoka/kibitz/internal/webhook"
 	azdohook "github.com/yteraoka/kibitz/internal/webhook/azuredevops"
 	githubhook "github.com/yteraoka/kibitz/internal/webhook/github"
@@ -200,6 +201,24 @@ func realMain() error {
 		logger,
 		optsFor(event.PlatformAzureDevOps)...,
 	))
+
+	// What the agent did for a job, behind the link its comment carries. The
+	// server only reads: the worker is the one that writes.
+	if cfg.Transcripts.Enabled() {
+		store, err := transcript.OpenStore(ctx, cfg.Transcripts.Location)
+		if err != nil {
+			return err
+		}
+		mux.Handle(transcript.RoutePattern, &transcript.Handler{
+			Store:  store,
+			Logger: logger,
+			Tokens: reveal(cfg.Transcripts.Tokens),
+		})
+		logger.LogAttrs(ctx, slog.LevelInfo, "serving transcripts",
+			slog.String("location", cfg.Transcripts.Location),
+			slog.Bool("password_protected", len(cfg.Transcripts.Tokens) > 0),
+		)
+	}
 
 	handler := httpx.Chain(mux,
 		httpx.RequestID,

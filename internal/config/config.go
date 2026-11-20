@@ -522,7 +522,30 @@ type Server struct {
 	Scale Scale
 	// Reactions acknowledges a comment at receipt.
 	Reactions Reactions
+	// Transcripts serves the records the worker keeps of each job, at
+	// /transcripts/{id}. Off unless a location is set.
+	Transcripts Transcripts
 }
+
+// Transcripts configures the records of what the agent did.
+//
+// The worker writes them and names each one in a trailer on the comment it
+// posts; the server reads them and renders the page the trailer links to.
+// Each side is configured on its own, with the same location.
+type Transcripts struct {
+	// Location is "gs://bucket/prefix" or a directory. Empty keeps none.
+	Location string
+	// BaseURL is the server's public address, which the worker needs to
+	// write the trailer as a link. Empty writes the id alone.
+	BaseURL string
+	// Tokens, on the server, are passwords a viewer has to give as HTTP
+	// basic authentication. Empty means the unguessable id is the only
+	// thing between a record and anybody who has the link.
+	Tokens []Secret
+}
+
+// Enabled reports whether records are kept or served.
+func (t Transcripts) Enabled() bool { return t.Location != "" }
 
 // Worker is the kibitz-worker configuration.
 type Worker struct {
@@ -591,6 +614,8 @@ type Worker struct {
 	// is optional: the worker asks GitHub what the app posts as, and anything
 	// configured is added to what it learns.
 	BotLogins []string
+	// Transcripts keeps a record of each job's engine runs.
+	Transcripts Transcripts
 }
 
 // LoadServer reads the kibitz-server configuration.
@@ -626,6 +651,10 @@ func LoadServer(env Lookup) (*Server, error) {
 			AllowedCommenters: l.list("KIBITZ_ALLOWED_COMMENTERS", nil),
 		},
 		Scale: loadScale(l),
+		Transcripts: Transcripts{
+			Location: l.str("KIBITZ_TRANSCRIPT_LOCATION", ""),
+			Tokens:   l.secrets("KIBITZ_TRANSCRIPT_TOKENS"),
+		},
 		Reactions: Reactions{
 			Enabled: l.bool("KIBITZ_REACTIONS", true),
 			Timeout: l.duration("KIBITZ_REACTION_TIMEOUT", 3*time.Second),
@@ -644,6 +673,9 @@ func LoadServer(env Lookup) (*Server, error) {
 	}
 	if len(cfg.Webhook.AzureDevOpsPasswords) > 0 && cfg.Webhook.AzureDevOpsUser == "" {
 		l.fail("KIBITZ_AZDO_BASIC_USER", "is required when KIBITZ_AZDO_BASIC_PASSWORDS is set")
+	}
+	if len(cfg.Transcripts.Tokens) > 0 && !cfg.Transcripts.Enabled() {
+		l.fail("KIBITZ_TRANSCRIPT_TOKENS", "is set, but KIBITZ_TRANSCRIPT_LOCATION is not, so there is nothing to protect")
 	}
 	if len(cfg.Webhook.AzureDevOpsHeaderValues) > 0 && cfg.Webhook.AzureDevOpsHeader == "" {
 		l.fail("KIBITZ_AZDO_HEADER_NAME", "is required when KIBITZ_AZDO_HEADER_VALUES is set")
@@ -738,9 +770,16 @@ func LoadWorker(env Lookup) (*Worker, error) {
 		MaxDeliveries:   l.positiveInt("KIBITZ_MAX_DELIVERIES", 5),
 		MaxPostsPerHour: l.positiveInt("KIBITZ_MAX_POSTS_PER_HOUR", 10),
 		BotLogins:       l.list("KIBITZ_BOT_LOGINS", nil),
+		Transcripts: Transcripts{
+			Location: l.str("KIBITZ_TRANSCRIPT_LOCATION", ""),
+			BaseURL:  l.str("KIBITZ_TRANSCRIPT_BASE_URL", ""),
+		},
 	}
 
 	requireForges(l, cfg.Forges)
+	if u := cfg.Transcripts.BaseURL; u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		l.fail("KIBITZ_TRANSCRIPT_BASE_URL", "must start with https:// or http://, got %q", u)
+	}
 	if cfg.Engine == EngineADK {
 		requireADK(l, cfg)
 	}

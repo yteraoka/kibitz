@@ -212,6 +212,35 @@ func TestRunReview(t *testing.T) {
 	}
 }
 
+// What the CLI printed goes to the transcript, whether the run worked or not.
+func TestRunKeepsTheEventsForTheTranscript(t *testing.T) {
+	h := newHarness(t, writeOutput)
+	runner := opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+
+	result, err := runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Events) == 0 {
+		t.Fatal("the run's events were not kept")
+	}
+	for _, ev := range result.Events {
+		if !json.Valid(ev) {
+			t.Errorf("event %q is not JSON", ev)
+		}
+	}
+
+	h = newHarness(t, `echo '{"type":"text","part":{"type":"text","text":"starting"}}'; echo "boom" >&2; exit 3`)
+	runner = opencode.New(opencode.Config{Bin: h.bin}, discardLogger())
+	_, err = runner.Run(context.Background(), request(h.workspace, reviewer.ModeReview))
+	if err == nil {
+		t.Fatal("Run succeeded although the CLI failed")
+	}
+	if events := reviewer.EventsOf(err); len(events) != 1 {
+		t.Errorf("the failed run carried %d events, want the one it printed", len(events))
+	}
+}
+
 func TestRunArguments(t *testing.T) {
 	h := newHarness(t, writeOutput)
 	runner := opencode.New(opencode.Config{Bin: h.bin, Model: "vertex/claude-opus-5"}, discardLogger())

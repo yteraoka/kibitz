@@ -358,7 +358,9 @@ func (j *ReviewJob) sayOnIssue(ctx context.Context, ev *event.ReviewEvent, ref f
 		return nil
 	}
 
-	return client.UpsertIssueComment(ctx, ref, ImplementMarker, body)
+	// Whatever ran the engine on the way here is named under the comment;
+	// a refusal ran nothing, and gets no trailer.
+	return client.UpsertIssueComment(ctx, ref, ImplementMarker, body+j.transcriptTrailer(ctx))
 }
 
 // issueHelpText is the help for what kibitz does on an issue, which is a
@@ -409,7 +411,7 @@ func (j *ReviewJob) plan(ctx context.Context, client forge.Client, ref forge.Iss
 		}
 	}()
 
-	result, err := j.Engine.Run(ctx, reviewer.Request{
+	result, err := j.runEngine(ctx, j.Engine, j.EngineName, reviewer.Request{
 		Mode:         reviewer.ModePlan,
 		WorkspaceDir: ws.Dir,
 		Event:        ev,
