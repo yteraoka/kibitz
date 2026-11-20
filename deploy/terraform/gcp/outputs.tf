@@ -99,3 +99,8 @@ output "pubsub" {
     dead_letter  = google_pubsub_topic.dead_letter.name
   }
 }
+
+output "transcripts_bucket" {
+  description = "Where the record of each job's agent runs is kept, or empty when transcripts are off. Comments link to them through the server at /transcripts/{id}."
+  value       = local.transcripts_enabled ? google_storage_bucket.transcripts[0].name : ""
+}

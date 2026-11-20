@@ -18,6 +18,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/sandbox"
 	"github.com/yteraoka/kibitz/internal/store"
 	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/transcript"
 	"github.com/yteraoka/kibitz/internal/workspace"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -131,6 +132,12 @@ type ReviewJob struct {
 	SessionTTL time.Duration
 	// Metrics records what was posted and what was discarded. May be nil.
 	Metrics *telemetry.Metrics
+	// Transcripts keeps a record of every engine run a job makes, and the
+	// comment it posts names the record in a trailer. Nil keeps none.
+	Transcripts transcript.Store
+	// TranscriptBaseURL is kibitz-server's address, which turns the trailer's
+	// id into a link to the page that shows the record. Empty leaves it an id.
+	TranscriptBaseURL string
 }
 
 // Handle implements [Handler].
@@ -147,7 +154,11 @@ func (j *ReviewJob) Handle(ctx context.Context, job *Job) error {
 		return nil
 	}
 	ref := forge.RefOf(ev)
+	ctx = j.startTranscript(ctx, ev)
+	return j.withTranscript(ctx, j.dispatch(ctx, client, ref, ev))
+}
 
+func (j *ReviewJob) dispatch(ctx context.Context, client forge.Client, ref forge.PRRef, ev *event.ReviewEvent) error {
 	switch ev.Kind {
 	case event.KindPROpened, event.KindPRUpdated, event.KindPRReadyForReview, event.KindPRReviewRequested:
 		return j.review(ctx, client, ref, ev)
@@ -365,7 +376,7 @@ func (j *ReviewJob) review(ctx context.Context, client forge.Client, ref forge.P
 
 	agentCtx, agentSpan := telemetry.Tracer().Start(ctx, "review.agent",
 		trace.WithAttributes(attribute.String("kibitz.model", settings.Model)))
-	result, err := j.runWithRetry(agentCtx, j.engineFor(settings), req)
+	result, err := j.runWithRetry(agentCtx, j.engineFor(settings), cmp.Or(settings.engineName, j.EngineName), req)
 	if result != nil && settings.engine == nil {
 		// A review starts fresh — its job is to look at the code, not to be
 		// anchored by what it said last time — but the conversation it opens
@@ -553,8 +564,8 @@ func (j *ReviewJob) recordTools(tools reviewer.ToolUse) {
 // runWithRetry gives the agent one more attempt when its output did not meet
 // the contract, telling it what was wrong. Anything else fails the job so the
 // queue redelivers it.
-func (j *ReviewJob) runWithRetry(ctx context.Context, engine reviewer.Engine, req reviewer.Request) (*reviewer.Result, error) {
-	result, err := engine.Run(ctx, req)
+func (j *ReviewJob) runWithRetry(ctx context.Context, engine reviewer.Engine, engineName string, req reviewer.Request) (*reviewer.Result, error) {
+	result, err := j.runEngine(ctx, engine, engineName, req)
 	if err == nil {
 		return result, nil
 	}
@@ -570,7 +581,7 @@ func (j *ReviewJob) runWithRetry(ctx context.Context, engine reviewer.Engine, re
 	req.Feedback = err.Error()
 	req.SessionID = "" // a fresh session, so the bad output is not context
 
-	result, err = engine.Run(ctx, req)
+	result, err = j.runEngine(ctx, engine, engineName, req)
 	if err != nil {
 		return nil, fmt.Errorf("the agent did not produce usable output: %w", err)
 	}
@@ -627,7 +638,8 @@ func (j *ReviewJob) alreadyReviewed(ctx context.Context, ev *event.ReviewEvent, 
 // was checked when the review started (see review), so that a review over it
 // never ran.
 func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRRef, result *reviewer.Result, sanitized reviewer.Sanitized, headSHA, sinceSHA string, selection triaged, settings resolved) error {
-	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings)); err != nil {
+	trailer := j.transcriptTrailer(ctx)
+	if err := client.UpsertSummary(ctx, ref, SummaryMarker, j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings)+trailer); err != nil {
 		return fmt.Errorf("posting the summary to %s: %w", ref, err)
 	}
 	if len(sanitized.Findings) == 0 {
@@ -658,7 +670,7 @@ func (j *ReviewJob) post(ctx context.Context, client forge.Client, ref forge.PRR
 			slog.String("ref", ref.String()),
 			slog.String("error", err.Error()),
 		)
-		body := j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings) + "\n\n" + renderFindingsAsText(sanitized.Findings)
+		body := j.summaryBody(result, sanitized, headSHA, sinceSHA, selection, settings) + "\n\n" + renderFindingsAsText(sanitized.Findings) + trailer
 		if fallbackErr := client.UpsertSummary(ctx, ref, SummaryMarker, body); fallbackErr != nil {
 			return fmt.Errorf("posting the fallback summary to %s: %w", ref, fallbackErr)
 		}
@@ -704,7 +716,7 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	// has to stop saying so. Anything else keeps its own notice, because it
 	// never touched the summary and must not replace it.
 	if isReview(ev) {
-		return client.UpsertSummary(ctx, forge.RefOf(ev), SummaryMarker, j.failedBody(ev, cause))
+		return client.UpsertSummary(ctx, forge.RefOf(ev), SummaryMarker, j.failedBody(ev, cause)+j.trailerFor(transcriptOf(cause)))
 	}
 
 	var b strings.Builder
@@ -717,6 +729,7 @@ func (j *ReviewJob) NotifyFailure(ctx context.Context, ev *event.ReviewEvent, ca
 	// than belongs on a pull request. This is the key that finds it -- every
 	// line the job wrote carries it.
 	fmt.Fprintf(&b, "\n<sub>運用者向け: ワーカーのログを `event_id=%s` で検索すると詳細が見られます。</sub>\n", ev.ID)
+	b.WriteString(j.trailerFor(transcriptOf(cause)))
 
 	return client.UpsertSummary(ctx, forge.RefOf(ev), FailureMarker, b.String())
 }
@@ -782,7 +795,7 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	}
 	defer func() { _ = ws.Close() }()
 
-	result, err := j.Engine.Run(ctx, reviewer.Request{
+	result, err := j.runEngine(ctx, j.Engine, j.EngineName, reviewer.Request{
 		Mode:         reviewer.ModeAnswer,
 		WorkspaceDir: ws.Dir,
 		Event:        ev,
@@ -820,7 +833,11 @@ func (j *ReviewJob) answer(ctx context.Context, client forge.Client, ref forge.P
 	j.recordTools(result.Tools)
 	j.charge(ctx, ev, answerPass)
 
-	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, result.Reply); err != nil {
+	reply := result.Reply
+	if trailer := j.transcriptTrailer(ctx); trailer != "" {
+		reply = strings.TrimRight(reply, "\n") + "\n\n<sub>" + strings.TrimSpace(trailer) + "</sub>\n"
+	}
+	if err := client.ReplyToThread(ctx, ref, ev.Comment.ThreadID, reply); err != nil {
 		return fmt.Errorf("replying on %s: %w", ref, err)
 	}
 	return nil

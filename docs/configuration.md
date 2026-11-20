@@ -42,6 +42,8 @@
 | `KIBITZ_GITHUB_APP_ID` / `_INSTALLATION_ID` / `_PRIVATE_KEY` / `_BASE_URL` | - | リアクション用。ワーカーと同じ変数。**サーバーが発行するトークンは `issues` / `pull_requests` の書き込みだけに絞る**。リアクションが有効なら `_APP_ID` は数字として読む (App の設定 URL の数字) |
 | `KIBITZ_GITLAB_BASE_URL` / `_TOKEN` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
 | `KIBITZ_AZDO_ORG_URL` / `_TOKEN` / `_TOKEN_IS_BEARER` | - | リアクション用。ワーカーと同じ変数 (絞れない) |
+| `KIBITZ_TRANSCRIPT_LOCATION` | - | 設定すると `/transcripts/{id}` でエージェントの処理記録を表示する。`gs://bucket/prefix` かディレクトリ。**ワーカーと同じ値**にする ([下記](#エージェントの処理記録-transcript)) |
+| `KIBITZ_TRANSCRIPT_TOKENS` | - | 任意。処理記録の閲覧に Basic 認証のパスワードを求める (ユーザー名は見ない)。カンマ区切り (ローテーション用)。未設定なら**推測できない id だけ**が守りになる |
 
 ### コメントで依頼できる人
 
@@ -145,6 +147,8 @@ KIBITZ_ALLOWED_COMMENTERS=github:alice,github:bob,gitlab:carol,*@example.com
 | `KIBITZ_AZDO_ORG_URL` | - | Azure DevOps の組織。Services なら `https://dev.azure.com/{org}`、Server なら `https://{server}/{collection}`。**イベントから導出できないので設定が要る** (Server はどのアドレスにも置ける)。`_TOKEN` と**両方**揃っていないと起動時に落ちる |
 | `KIBITZ_AZDO_TOKEN` | - | PAT (Code の読み取り + Pull Request Threads の読み書き) か Entra ID のアクセストークン |
 | `KIBITZ_AZDO_TOKEN_IS_BEARER` | `false` | トークンが Entra ID のアクセストークンであることを示す。**PAT は空ユーザーの Basic 認証のパスワード、Entra ID は Bearer** と送る場所が違い、入れ替えるとどちらも拒否される |
+| `KIBITZ_TRANSCRIPT_LOCATION` | - | 設定するとジョブごとにエージェントの処理記録 (プロンプトとエンジンが出したイベントすべて) を保存し、投稿するコメントの末尾に `Kibitz-Transcript:` トレーラーで id を入れる。`gs://bucket/prefix` かディレクトリ ([下記](#エージェントの処理記録-transcript)) |
+| `KIBITZ_TRANSCRIPT_BASE_URL` | - | kibitz-server の公開 URL (例 `https://kibitz-server-123.asia-northeast1.run.app`)。設定するとトレーラーの id がサーバーの表示ページへのリンクになる。未設定なら id だけを書く |
 
 シークレットは環境変数に直接ではなく、Secret Manager / Secrets Manager から
 起動時 + 定期リフレッシュで取得する (`KIBITZ_*_SECRET_REF` に参照名を置く形も用意する)。
@@ -193,6 +197,35 @@ Cloud Run サービスとして動き、Cloud Scheduler から毎分 `POST /reco
 
 必要な権限は `roles/monitoring.viewer` と、**ワーカーの worker pool に対する**
 `roles/run.developer`。プロジェクト全体の権限は要らない。
+
+### エージェントの処理記録 (transcript)
+
+レビュー・回答・計画・実装のコメントが**どうやって出てきたのか**を後から確かめるため、
+ワーカーはジョブごとにエンジンの実行をすべて記録して保存する
+([ADR-0026](adr/0026-keep-what-the-agent-did-behind-the-comment.md))。
+
+- **記録するもの**: 実行ごとのモード・エンジン・モデル・所要時間・トークン数、
+  kibitz が組み立てたプロンプト、エンジンが出したイベント (opencode / pi は JSONL の各行、
+  ADK はセッションのイベント) をそのまま、出力 (要約や回答)、失敗した場合はエラー。
+  トリアージとリトライも 1 件の記録に入る
+- **コメント側**: 末尾に次のトレーラーが付く。失敗の通知にも付く (失敗した実行こそ読みたい)
+
+  ```
+  Kibitz-Transcript: [3f9c0e...](https://kibitz-server-.../transcripts/3f9c0e...)
+  ```
+
+- **表示**: kibitz-server の `GET /transcripts/{id}` が HTML で表示する。
+  `?format=json` で記録をそのまま取得できる。中身はエージェントが読んだコードなので、
+  スクリプトを一切動かさない CSP を付け、リファラも送らない
+- **大きさ**: 1 件あたりイベントは 16 MiB まで。超えた分は件数だけ数えて捨てる。
+  pi のストリーミング差分 (`message_update` など) は最終形と重複するので保存しない
+- **保存期間**: バケットのライフサイクルで消す (Terraform の既定は 30 日)
+- **権限**: ワーカーは書き込み (`roles/storage.objectUser`)、サーバーは読み取り
+  (`roles/storage.objectViewer`) だけを持つ
+
+id は 128 bit の乱数で、**コメントを読める人は記録も読める**という前提で守っている。
+公開リポジトリで MCP 経由の社内情報を扱う場合などは `KIBITZ_TRANSCRIPT_TOKENS` で
+パスワードを足すか、サーバーの前に IAP を置く ([security.md](security.md#5-データの取り扱い))。
 
 ### コストの概算について
 

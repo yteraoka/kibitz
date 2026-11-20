@@ -37,6 +37,7 @@ import (
 	storefirestore "github.com/yteraoka/kibitz/internal/store/firestore"
 	storememory "github.com/yteraoka/kibitz/internal/store/memory"
 	"github.com/yteraoka/kibitz/internal/telemetry"
+	"github.com/yteraoka/kibitz/internal/transcript"
 	"github.com/yteraoka/kibitz/internal/worker"
 	"github.com/yteraoka/kibitz/internal/workspace"
 
@@ -353,6 +354,20 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		return nil, err
 	}
 
+	// A record of each job's engine runs, named under the comment it posts.
+	// Off unless a location is configured.
+	var transcripts transcript.Store
+	if cfg.Transcripts.Enabled() {
+		transcripts, err = transcript.OpenStore(ctx, cfg.Transcripts.Location)
+		if err != nil {
+			return nil, err
+		}
+		logger.LogAttrs(ctx, slog.LevelInfo, "keeping transcripts",
+			slog.String("location", cfg.Transcripts.Location),
+			slog.String("base_url", cfg.Transcripts.BaseURL),
+		)
+	}
+
 	return &worker.ReviewJob{
 		Forges:         forges,
 		Engine:         engine,
@@ -391,6 +406,9 @@ func newReviewJob(ctx context.Context, cfg *config.Worker, logger *slog.Logger, 
 		Store:            state,
 		MaxPostsPerHour:  cfg.MaxPostsPerHour,
 		Metrics:          metrics,
+
+		Transcripts:       transcripts,
+		TranscriptBaseURL: cfg.Transcripts.BaseURL,
 	}, nil
 }
 

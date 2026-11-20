@@ -93,6 +93,21 @@ send, which is what a leaked basic-auth password on its own does not get past.
 Azure DevOps does not sign anything, so that password is otherwise the whole
 of it.
 
+## Transcripts
+
+With `transcripts_enabled` (the default) the worker keeps a record of every
+engine run a job makes — the prompt and every event the engine reported — in
+a bucket of its own, and each comment it posts ends with a
+`Kibitz-Transcript:` trailer linking to the server's `/transcripts/{id}` page.
+The worker can write the bucket and the server can only read it; a lifecycle
+rule deletes records after `transcript_retention_days` (30).
+
+The id is 128 random bits and appears only in the comment, so anybody who can
+read the comment can read the record. For a private repository that is the
+repository's own audience. Where it is not enough, set
+`KIBITZ_TRANSCRIPT_TOKENS` on the server to require a password, or turn
+transcripts off (docs/security.md).
+
 ## Settings without a variable of their own
 
 Most of what [docs/configuration.md](../../../docs/configuration.md) lists has

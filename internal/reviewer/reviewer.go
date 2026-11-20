@@ -5,6 +5,8 @@ package reviewer
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -307,6 +309,39 @@ type Result struct {
 	// RawOutput is the agent's document as written, kept for the fields the
 	// posted review does not carry: skipped files, notes and its own verdict.
 	RawOutput *Output
+	// Events are what the engine reported while it ran, one JSON value each
+	// and in the engine's own shape. They are kept for the transcript a
+	// person can open from the comment, and read by nothing else.
+	Events []json.RawMessage
+}
+
+// EventsError is a failed run that still reported what it did. A run that
+// failed is the one whose transcript is most worth reading, so an engine
+// returns its events with the error rather than dropping them.
+type EventsError struct {
+	Err    error
+	Events []json.RawMessage
+}
+
+func (e *EventsError) Error() string { return e.Err.Error() }
+func (e *EventsError) Unwrap() error { return e.Err }
+
+// WithEvents attaches events to err. It returns err unchanged when there is
+// nothing to attach, and nil for a nil err.
+func WithEvents(err error, events []json.RawMessage) error {
+	if err == nil || len(events) == 0 {
+		return err
+	}
+	return &EventsError{Err: err, Events: events}
+}
+
+// EventsOf returns the events attached to err, if any.
+func EventsOf(err error) []json.RawMessage {
+	var e *EventsError
+	if errors.As(err, &e) {
+		return e.Events
+	}
+	return nil
 }
 
 // Engine runs the agent.

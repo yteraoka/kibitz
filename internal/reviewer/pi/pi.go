@@ -35,6 +35,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/jobcontext"
 	"github.com/yteraoka/kibitz/internal/reviewer"
 	"github.com/yteraoka/kibitz/internal/reviewer/opencode"
+	record "github.com/yteraoka/kibitz/internal/transcript"
 )
 
 // Config configures the runner. The fields shared with the opencode runner
@@ -87,6 +88,18 @@ const promptMessage = "指示は添付された .kibitz/prompt.md に書かれ�
 
 // Run implements [reviewer.Engine].
 func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Result, error) {
+	var events []json.RawMessage
+	result, err := r.execute(ctx, req, &events)
+	if err != nil {
+		return nil, reviewer.WithEvents(err, events)
+	}
+	result.Events = events
+	return result, nil
+}
+
+// execute is [Runner.Run]. It leaves in events what the CLI printed, whether
+// or not the run succeeds.
+func (r *Runner) execute(ctx context.Context, req reviewer.Request, events *[]json.RawMessage) (*reviewer.Result, error) {
 	if req.WorkspaceDir == "" {
 		return nil, errors.New("pi: workspace directory is empty")
 	}
@@ -180,6 +193,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 	session := r.session(ctx, req)
 	start := time.Now()
 	stdout, err := r.run(ctx, workspace, req, env, r.args(req, session, systemPath))
+	*events = keptEvents(stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +360,8 @@ func (r *Runner) run(ctx context.Context, workspace string, req reviewer.Request
 	if err == nil {
 		return stdout, nil
 	}
+	// What it printed before failing is returned with the error, for the
+	// transcript.
 
 	attrs := []slog.Attr{
 		slog.String("mode", string(req.Mode)),
@@ -361,7 +377,7 @@ func (r *Runner) run(ctx context.Context, workspace string, req reviewer.Request
 		attrs = append([]slog.Attr{slog.String("event_id", req.Event.ID)}, attrs...)
 	}
 	r.logger.LogAttrs(ctx, slog.LevelError, "the agent failed", attrs...)
-	return nil, fmt.Errorf("pi: %w: %s", err, tail(strings.TrimSpace(stderr.String()), 500))
+	return stdout, fmt.Errorf("pi: %w: %s", err, tail(strings.TrimSpace(stderr.String()), 500))
 }
 
 // serversFor picks the MCP servers this run may use. The rules are the
@@ -498,3 +514,22 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *tailBuffer) String() string { return string(b.buf) }
+
+// keptEvents is the transcript's share of the stream: every record but the
+// streaming updates, which repeat piecemeal what the record that ends them
+// carries whole. Keeping them would multiply the transcript's size by the
+// number of tokens in each reply.
+func keptEvents(stdout []byte) []json.RawMessage {
+	all := record.SplitLines(stdout)
+	out := all[:0]
+	for _, ev := range all {
+		var head struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(ev, &head) == nil && (head.Type == "message_update" || head.Type == "tool_execution_update") {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}

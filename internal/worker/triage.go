@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 
@@ -53,7 +54,8 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 
 	model := j.triageModel(settings.Model)
 
-	result, err := j.triageEngine(settings, model).Run(ctx, reviewer.Request{
+	engine, engineName := j.triageEngine(settings, model)
+	result, err := j.runEngine(ctx, engine, engineName, reviewer.Request{
 		Mode:         reviewer.ModeTriage,
 		WorkspaceDir: ws.Dir,
 		Event:        ev,
@@ -91,12 +93,12 @@ func (j *ReviewJob) triage(ctx context.Context, ws *workspace.Workspace, ev *eve
 // that is one a command asked for and it cannot run the triage model -- adk
 // with a triage model that is not Gemini. The pass then runs on the
 // deployment's own engine, which can, rather than fail and review everything.
-func (j *ReviewJob) triageEngine(settings resolved, model string) reviewer.Engine {
+func (j *ReviewJob) triageEngine(settings resolved, model string) (reviewer.Engine, string) {
 	engine := j.engineFor(settings)
 	if checker, ok := engine.(reviewer.ModelChecker); ok && settings.engine != nil && checker.CanRun(model) != nil {
-		return j.Engine
+		return j.Engine, j.EngineName
 	}
-	return engine
+	return engine, cmp.Or(settings.engineName, j.EngineName)
 }
 
 // selectFiles keeps the files the triage pass asked for, in the order the

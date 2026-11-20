@@ -25,6 +25,7 @@ import (
 	"github.com/yteraoka/kibitz/internal/forge"
 	"github.com/yteraoka/kibitz/internal/jobcontext"
 	"github.com/yteraoka/kibitz/internal/reviewer"
+	record "github.com/yteraoka/kibitz/internal/transcript"
 )
 
 // Config configures the runner.
@@ -201,6 +202,28 @@ func New(cfg Config, logger *slog.Logger) *Runner {
 
 // Run implements [reviewer.Engine].
 func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Result, error) {
+	var events []json.RawMessage
+	result, err := r.execute(ctx, req, &events)
+	if err != nil {
+		return nil, reviewer.WithEvents(err, events)
+	}
+	result.Events = events
+	return result, nil
+}
+
+// execute is [Runner.Run]. It leaves in events every line the CLI printed,
+// across resumes, whether or not the run succeeds.
+func (r *Runner) execute(ctx context.Context, req reviewer.Request, events *[]json.RawMessage) (*reviewer.Result, error) {
+	// keep records what a run printed. A run that failed printed it too: the
+	// error carries it, and it is the part of the transcript worth reading.
+	keep := func(stdout []byte, err error) {
+		var runErr *RunError
+		if err != nil && errors.As(err, &runErr) {
+			stdout = runErr.stdout
+		}
+		*events = append(*events, record.SplitLines(stdout)...)
+	}
+
 	if req.WorkspaceDir == "" {
 		return nil, errors.New("opencode: workspace directory is empty")
 	}
@@ -252,6 +275,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 
 	start := time.Now()
 	stdout, err := r.exec(ctx, configPath, req, env)
+	keep(stdout, err)
 	if err != nil && req.SessionID != "" && isMissingSession(err) {
 		// The session lives in the agent's own storage, inside a container
 		// that is disposable. Losing it is ordinary, not a failure: the
@@ -264,6 +288,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		)
 		req.SessionID = ""
 		stdout, err = r.exec(ctx, configPath, req, env)
+		keep(stdout, err)
 	}
 	// What the runs that broke off spent. They are billed like any other.
 	var broken transcript
@@ -280,6 +305,7 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 		)
 		req.SessionID = runErr.Diagnosis.SessionID
 		stdout, err = r.execResume(ctx, configPath, req, env)
+		keep(stdout, err)
 	}
 	if err != nil {
 		return nil, err

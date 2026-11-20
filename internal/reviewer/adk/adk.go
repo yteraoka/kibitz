@@ -27,6 +27,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -158,6 +159,18 @@ func (r *Runner) vertexModel(ctx context.Context, name string) (model.LLM, error
 
 // Run implements [reviewer.Engine].
 func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Result, error) {
+	var events []json.RawMessage
+	result, err := r.execute(ctx, req, &events)
+	if err != nil {
+		return nil, reviewer.WithEvents(err, events)
+	}
+	result.Events = events
+	return result, nil
+}
+
+// execute is [Runner.Run]. It leaves in events every event the run produced,
+// whether or not it succeeds.
+func (r *Runner) execute(ctx context.Context, req reviewer.Request, events *[]json.RawMessage) (*reviewer.Result, error) {
 	if req.WorkspaceDir == "" {
 		return nil, errors.New("adk: workspace directory is empty")
 	}
@@ -272,6 +285,13 @@ func (r *Runner) Run(ctx context.Context, req reviewer.Request) (*reviewer.Resul
 			break
 		}
 		t.record(ev)
+		if ev != nil && !ev.Partial {
+			// ADK's own types marshal as the provider's request and response
+			// shapes, which is what a person reading the transcript wants.
+			if data, err := json.Marshal(ev); err == nil {
+				*events = append(*events, data)
+			}
+		}
 	}
 	r.remember(ctx, sessionID)
 
