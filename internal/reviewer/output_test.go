@@ -302,3 +302,28 @@ func TestSeverityOrdering(t *testing.T) {
 		t.Error("an empty threshold should accept everything")
 	}
 }
+
+func TestParseOutputSaysWhereTheJSONBroke(t *testing.T) {
+	// The shape that broke in production: a quote left unescaped in a body.
+	data := []byte("{\n  \"schema_version\": 1,\n  \"summary\": \"要約\",\n  \"comments\": [{\"path\": \"a.go\", \"line\": 1, \"severity\": \"low\", \"body\": \"use \"x\" here\"}]\n}\n")
+	_, err := reviewer.ParseOutput(data)
+	if err == nil {
+		t.Fatal("ParseOutput accepted broken JSON")
+	}
+	msg := err.Error()
+	for _, want := range []string{"line 4", `"body": "use "x" here"`, "^", "escaped"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not mention %q", msg, want)
+		}
+	}
+	// The marker sits under the character the decoder rejected.
+	lines := strings.Split(msg, "\n")
+	for i, l := range lines {
+		if strings.HasSuffix(l, "^") && i > 0 {
+			col := len([]rune(l)) - 1
+			if got := []rune(lines[i-1])[col]; got != 'x' {
+				t.Errorf("marker points at %q, want 'x'", got)
+			}
+		}
+	}
+}
