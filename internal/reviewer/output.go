@@ -52,7 +52,7 @@ type OutputComment struct {
 func ParseOutput(data []byte) (*Output, error) {
 	var out Output
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("the output is not valid JSON: %w", err)
+		return nil, fmt.Errorf("the output is not valid JSON: %s", describeJSONError(data, err))
 	}
 	if out.SchemaVersion != OutputSchemaVersion {
 		return nil, fmt.Errorf("schema_version is %d, want %d", out.SchemaVersion, OutputSchemaVersion)

@@ -71,6 +71,7 @@ func buildReviewPrompt(b *strings.Builder, req Request) {
 }
 `, OutputSchemaVersion)
 	b.WriteString("```\n\n")
+	b.WriteString("文字列の中の `\"` `\\` 改行は `\\\"` `\\\\` `\\n` とエスケープしてください。コードを引用する `body` や `suggestion` で特に崩れやすい箇所です。\n\n")
 
 	writeReviewProcedure(b)
 	writeReviewChecklist(b)

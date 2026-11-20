@@ -26,7 +26,7 @@ type TriageOutput struct {
 func ParseTriage(data []byte) (*TriageOutput, error) {
 	var out TriageOutput
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("triage output is not valid JSON: %w", err)
+		return nil, fmt.Errorf("triage output is not valid JSON: %s", describeJSONError(data, err))
 	}
 	if out.SchemaVersion != OutputSchemaVersion {
 		return nil, fmt.Errorf("triage schema_version is %d, want %d", out.SchemaVersion, OutputSchemaVersion)
